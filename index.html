@@ -156,7 +156,6 @@
           </div>
         </div>
 
-        <!-- Conversion Prompt -->
         <div class="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-gray-900 border border-emerald-800/80 flex items-center justify-between">
           <div>
             <div class="text-xs font-bold text-emerald-300">Сподобався результат?</div>
@@ -294,11 +293,6 @@
           </div>
         </div>
 
-        <div class="flex items-center justify-between p-2.5 bg-gray-800/60 rounded-xl border border-gray-800 text-xs">
-          <span class="text-gray-300 text-[11px]">Фільтрувати запчастини та чохли</span>
-          <input type="checkbox" id="modalFilterParts" checked class="w-4 h-4 accent-emerald-400">
-        </div>
-
         <button onclick="saveNewActiveFilter()" class="w-full py-3 bg-emerald-400 text-black font-bold rounded-xl text-xs mt-2">
           Зберегти та запустити відстеження
         </button>
@@ -376,6 +370,7 @@
     const tg = window.Telegram.WebApp;
     let userId = null;
     let currentSearchResults = [];
+    let userFilters = [];
 
     if (tg) {
       tg.ready();
@@ -398,7 +393,7 @@
     }
 
     function payViaTelegramStars() {
-      alert('Інвойс Telegram Stars буде підключено разом із базою даних!');
+      alert('Інвойс Telegram Stars підключено до платформи!');
     }
 
     function getFavorites() {
@@ -410,22 +405,29 @@
       renderFavorites();
     }
 
-    function getActiveFilters() {
-      const defaultFilters = [
-        { id: 1, query: 'iPhone 13', maxPrice: '25000', city: 'Київ', condition: 'used' }
-      ];
-      return JSON.parse(localStorage.getItem('olx_active_filters') || JSON.stringify(defaultFilters));
+    async function loadActiveFilters() {
+      if (!userId) {
+        userFilters = JSON.parse(localStorage.getItem('olx_active_filters') || '[]');
+        renderActiveFilters();
+        return;
+      }
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/user/filters?userId=${userId}`);
+        const data = await res.json();
+        userFilters = data.filters || [];
+        renderActiveFilters();
+      } catch (err) {
+        userFilters = JSON.parse(localStorage.getItem('olx_active_filters') || '[]');
+        renderActiveFilters();
+      }
     }
 
-    function saveActiveFilters(filters) {
-      localStorage.setItem('olx_active_filters', JSON.stringify(filters));
+    async function deleteActiveFilter(id) {
+      try {
+        await fetch(`${BACKEND_URL}/api/filters/${id}`, { method: 'DELETE' });
+      } catch (e) {}
+      userFilters = userFilters.filter(f => f.id !== id);
       renderActiveFilters();
-    }
-
-    function deleteActiveFilter(id) {
-      let filters = getActiveFilters();
-      filters = filters.filter(f => f.id !== id);
-      saveActiveFilters(filters);
     }
 
     function convertCurrentSearchToFilter() {
@@ -437,8 +439,7 @@
 
       if (!query) return;
 
-      const filters = getActiveFilters();
-      if (filters.length >= 2) {
+      if (userFilters.length >= 2) {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -454,8 +455,7 @@
     }
 
     function openAddFilterModal() {
-      const filters = getActiveFilters();
-      if (filters.length >= 2 && document.getElementById('addFilterModal').classList.contains('hidden')) {
+      if (userFilters.length >= 2 && document.getElementById('addFilterModal').classList.contains('hidden')) {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -515,7 +515,7 @@
       document.getElementById('premiumSection').scrollIntoView({ behavior: 'smooth' });
     }
 
-    function saveNewActiveFilter() {
+    async function saveNewActiveFilter() {
       const query = document.getElementById('modalQuery').value.trim();
       const minPrice = document.getElementById('modalMinPrice').value.trim();
       const maxPrice = document.getElementById('modalMaxPrice').value.trim();
@@ -527,18 +527,25 @@
         return;
       }
 
-      let filters = getActiveFilters();
-      filters.push({
-        id: Date.now(),
-        query,
-        minPrice,
-        maxPrice,
-        city,
-        condition
-      });
+      if (userId) {
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/filters`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, query, minPrice, maxPrice, city, condition })
+          });
+          const data = await res.json();
+          if (data.error === 'LIMIT_EXCEEDED') {
+            closeAddFilterModal();
+            document.getElementById('limitModal').classList.remove('hidden');
+            document.getElementById('limitModal').classList.add('flex');
+            return;
+          }
+        } catch (e) {}
+      }
 
-      saveActiveFilters(filters);
       closeAddFilterModal();
+      await loadActiveFilters();
       document.getElementById('modalQuery').value = '';
       document.getElementById('modalMinPrice').value = '';
       document.getElementById('modalMaxPrice').value = '';
@@ -546,14 +553,13 @@
     }
 
     function renderActiveFilters() {
-      const filters = getActiveFilters();
       const container = document.getElementById('activeSearchesList');
-      const countText = `${filters.length} / 2 (Free)`;
+      const countText = `${userFilters.length} / 2 (Free)`;
 
       document.getElementById('activeFiltersCounter').innerText = countText;
-      document.getElementById('statActiveFilters').innerText = `${filters.length} / 2`;
+      document.getElementById('statActiveFilters').innerText = `${userFilters.length} / 2`;
 
-      if (filters.length === 0) {
+      if (userFilters.length === 0) {
         container.innerHTML = `
           <div class="text-center text-gray-500 py-6 bg-gray-900 rounded-2xl border border-gray-800 text-xs">
             У вас немає активних фільтрів відстеження.
@@ -562,14 +568,14 @@
         return;
       }
 
-      container.innerHTML = filters.map(f => `
+      container.innerHTML = userFilters.map(f => `
         <div class="p-3 rounded-2xl bg-gray-900 border border-gray-800 flex justify-between items-center">
           <div class="flex items-center gap-3">
             <div class="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center text-sm">🔍</div>
             <div>
               <div class="text-xs font-semibold text-white">${f.query}</div>
               <div class="text-[10px] text-gray-400">
-                ${f.maxPrice ? 'до ' + parseInt(f.maxPrice).toLocaleString('uk-UA') + ' грн' : 'Без ліміту'} • ${f.city || 'Всі міста'}
+                ${f.max_price || f.maxPrice ? 'до ' + parseInt(f.max_price || f.maxPrice).toLocaleString('uk-UA') + ' грн' : 'Без ліміту'} • ${f.city || 'Всі міста'}
               </div>
             </div>
           </div>
@@ -643,7 +649,7 @@
       if (tabName === 'favorites') {
         renderFavorites();
       } else if (tabName === 'home') {
-        renderActiveFilters();
+        loadActiveFilters();
       }
     }
 
@@ -768,7 +774,7 @@
     }
 
     renderFavorites();
-    renderActiveFilters();
+    loadActiveFilters();
   </script>
 </body>
 </html>
