@@ -8,7 +8,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Віддаємо статичні файли (index.html)
 app.use(express.static(__dirname));
 
 const HEADERS = {
@@ -37,28 +36,23 @@ app.get('/api/search', async (req, res) => {
 
     const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
     const $ = cheerio.load(response.data);
-    const items = [];
-    let totalPrices = 0;
+    const rawItems = [];
 
     $('[data-cy="l-card"], [data-testid="l-card"]').each((index, element) => {
-      if (items.length >= 20) return;
+      if (rawItems.length >= 25) return;
 
-      // Очищаємо елемент від вкладених стилів і скриптів OLX
       $(element).find('style, script').remove();
 
       const title = $(element).find('h6, h4, [data-testid="ad-title"]').first().text().trim();
       
-      // Фікс CSS-коду: витягуємо суто елемент ціни
       const priceElement = $(element).find('[data-testid="ad-price"]').first();
       priceElement.find('style, script').remove();
       let rawPriceText = priceElement.text().trim();
 
-      // Відсікаємо все, що йде після слів "грн" або CSS-вставок
       if (rawPriceText.includes('грн')) {
         rawPriceText = rawPriceText.split('грн')[0] + ' грн';
       }
 
-      // Парсимо лише перше числове значення ціни
       const match = rawPriceText.match(/(\d[\d\s]*)/);
       let numericPrice = 0;
       if (match) {
@@ -68,18 +62,23 @@ app.get('/api/search', async (req, res) => {
       const rawLink = $(element).find('a').attr('href') || '';
       const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
       
-      // Фікс фотографій: зчитуємо lazy-load атрибути data-src або src
+      // Фікс посилань на фотографії (додаємо https:)
       const imgEl = $(element).find('img').first();
       let img = imgEl.attr('src') || imgEl.attr('data-src') || '';
-      if (img.startsWith('data:image')) {
-        img = imgEl.attr('srcset') ? imgEl.attr('srcset').split(' ')[0] : '';
+      if (img.startsWith('//')) {
+        img = 'https:' + img;
+      } else if (img.startsWith('data:image')) {
+        const srcset = imgEl.attr('srcset');
+        if (srcset) {
+          const firstSrc = srcset.split(' ')[0];
+          img = firstSrc.startsWith('//') ? 'https:' + firstSrc : firstSrc;
+        }
       }
 
       const locationDate = $(element).find('[data-testid="location-date"]').first().text().trim();
 
       if (title && !isNaN(numericPrice) && numericPrice > 0 && rawLink) {
-        totalPrices += numericPrice;
-        items.push({
+        rawItems.push({
           title,
           price: numericPrice,
           priceText: `${numericPrice.toLocaleString('uk-UA')} грн`,
@@ -90,13 +89,24 @@ app.get('/api/search', async (req, res) => {
       }
     });
 
-    const averagePrice = items.length > 0 ? Math.round(totalPrices / items.length) : 0;
+    // Фільтрація аномальних цін для точної середньої ціни
+    const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
+    let averagePrice = 0;
+
+    if (prices.length > 0) {
+      // Беремо медіану для відсікання чохлів (90 грн) та дорогих аксесуарів
+      const medianPrice = prices[Math.floor(prices.length / 2)];
+      const filteredPrices = prices.filter(p => p >= medianPrice * 0.3 && p <= medianPrice * 2.5);
+      
+      const sum = filteredPrices.reduce((a, b) => a + b, 0);
+      averagePrice = filteredPrices.length > 0 ? Math.round(sum / filteredPrices.length) : medianPrice;
+    }
 
     res.json({
       success: true,
-      count: items.length,
+      count: rawItems.length,
       averagePrice,
-      items
+      items: rawItems
     });
 
   } catch (error) {
