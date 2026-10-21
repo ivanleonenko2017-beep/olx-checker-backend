@@ -38,15 +38,16 @@ app.get('/api/search', async (req, res) => {
     const $ = cheerio.load(response.data);
     const rawItems = [];
 
-    // Расширенный список слов-исключений (детали, запчасти, блокировки, аксессуары)
+    // Розширений список слів-аксесуарів та запчастин
     const stopWords = [
       'аккумулятор', 'акумулятор', 'батарея', 'батарейка', 'корпус', 'корпуси', 'корпуса',
       'шлейф', 'плата', 'материнская плата', 'материнська плата', 'камера', 'динамик', 'динамік',
-      'стекло', 'скло', 'чехол', 'чохол', 'чохли', 'чехлы', 'дисплей', 'экран', 'екран', 'тачскрин',
-      'коробка', 'кабель', 'зарядка', 'зарядное', 'зарядний', 'адаптер', 'ремешок', 'ремінець', 
-      'пленка', 'плівка', 'запчасти', 'запчастини', 'разборка', 'розбірка', 'на запчастини', 
-      'на запчасти', 'icloud', 'айклауд', 'lost', 'passcode', 'пароль', 'байпас', 'bypass', 
-      'донор', 'скупка', 'ремонт'
+      'стекло', 'скло', 'чехол', 'чохол', 'чохли', 'чехлы', 'накладка', 'наклейка', 'бампер',
+      'дисплей', 'экран', 'екран', 'тачскрин', 'коробка', 'кабель', 'зарядка', 'зарядное', 
+      'зарядний', 'адаптер', 'ремешок', 'ремінець', 'пленка', 'плівка', 'гидрогель', 'гідрогель',
+      'запчасти', 'запчастини', 'разборка', 'розбірка', 'на запчастини', 'на запчасти', 
+      'icloud', 'айклауд', 'lost', 'passcode', 'пароль', 'байпас', 'bypass', 'донор', 
+      'скупка', 'ремонт', 'копия', 'копія', 'реплика', 'репліка', 'держатель', 'тримач'
     ];
 
     $('[data-cy="l-card"], [data-testid="l-card"]').each((index, element) => {
@@ -60,7 +61,7 @@ app.get('/api/search', async (req, res) => {
       const lowerTitle = title.toLowerCase();
       const queryLower = (query || '').toLowerCase();
 
-      // Фильтрация мусора: отсекаем объявленя, если в названии есть стоп-слова
+      // Відсікаємо аксесуари та запчастини
       const hasStopWord = stopWords.some(word => lowerTitle.includes(word));
       const queryHasStopWord = stopWords.some(word => queryLower.includes(word));
 
@@ -83,20 +84,23 @@ app.get('/api/search', async (req, res) => {
       const rawLink = $(element).find('a').attr('href') || '';
       const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
       
-      // Посегментный поиск картинки напрямую из HTML карточки
+      // Пошук фотографій на CDN-серверах OLX (apollo.olxcdn.com)
       let img = '';
       const cardHtml = $(element).html();
-      const imgMatches = cardHtml.match(/https?:\/\/[^"'\s]+\.(?:jpg|jpeg|png|webp)/gi);
-      
-      if (imgMatches && imgMatches.length > 0) {
-        const validImg = imgMatches.find(url => !url.includes('data:image') && !url.includes('blank') && !url.includes('static'));
-        if (validImg) img = validImg;
+      const cdnMatches = cardHtml.match(/https?:\/\/[^"'\s<>]*(?:apollo\.olxcdn\.com|photos\.olx\.ua)[^"'\s<>]*/gi);
+
+      if (cdnMatches && cdnMatches.length > 0) {
+        const cleanUrl = cdnMatches[0].replace(/&amp;/g, '&');
+        img = cleanUrl;
       }
 
+      // Резервний варіант, якщо CDN-адресу не знайдено
       if (!img) {
-        const imgEl = $(element).find('img').first();
-        img = imgEl.attr('src') || imgEl.attr('data-src') || '';
-        if (img.startsWith('//')) img = 'https:' + img;
+        const imgMatches = cardHtml.match(/https?:\/\/[^"'\s]+\.(?:jpg|jpeg|png|webp)/gi);
+        if (imgMatches && imgMatches.length > 0) {
+          const validImg = imgMatches.find(url => !url.includes('data:image') && !url.includes('blank') && !url.includes('static'));
+          if (validImg) img = validImg;
+        }
       }
 
       const locationDate = $(element).find('[data-testid="location-date"]').first().text().trim();
@@ -113,7 +117,7 @@ app.get('/api/search', async (req, res) => {
       }
     });
 
-    // Расчет средней рыночной цены на основе чистых объявлений
+    // Фінальний розрахунок середньої ціни
     const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
     let averagePrice = 0;
 
