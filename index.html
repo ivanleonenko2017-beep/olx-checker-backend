@@ -20,7 +20,7 @@
     <!-- Header -->
     <div class="flex items-center justify-between border-b border-gray-800 pb-3">
       <div>
-        <h1 class="text-xl font-bold text-emerald-400">OLX Checker <span class="text-xs bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">BETA</span></h1>
+        <h1 class="text-xl font-bold text-emerald-400">OLX Checker <span class="text-xs bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">BETA v3</span></h1>
         <div id="userInfo" class="text-xs text-gray-400 mt-0.5">Користувач: Гість</div>
       </div>
       <span class="text-xs bg-gray-800 text-gray-300 px-2.5 py-1 rounded-full">Free Тариф</span>
@@ -92,20 +92,24 @@
       if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
         userId = tg.initDataUnsafe.user.id;
         const name = tg.initDataUnsafe.user.first_name || 'Користувач';
-        document.getElementById('userInfo').innerText = `Користувач: ${name}`;
+        document.getElementById('userInfo').innerText = 'Користувач: ' + name;
       }
     }
 
-    const BACKEND_URL = 'https://olx-checker-backend.onrender.com';
+    const BACKEND_URL = window.location.origin;
 
     function shareReferralLink() {
       if (!userId) {
         alert('Відкрийте додаток всередині Telegram, щоб отримати реферальну ссылку.');
         return;
       }
-      const refLink = `https://t.me/OLXhelpler_bot?start=ref_${userId}`;
-      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent('Користуйся швидким OLX Чекером для пошуку вигідних оголошень!')}`;
-      tg.openTelegramLink(shareUrl);
+      const refLink = 'https://t.me/OLXhelpler_bot?start=ref_' + userId;
+      const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(refLink) + '&text=' + encodeURIComponent('Користуйся швидким OLX Чекером для пошуку вигідних оголошень!');
+      if (tg && tg.openTelegramLink) {
+        tg.openTelegramLink(shareUrl);
+      } else {
+        window.open(shareUrl, '_blank');
+      }
     }
 
     async function runSearch() {
@@ -124,16 +128,16 @@
       resultsDiv.innerHTML = '<div class="text-center text-gray-400 py-8">Завантаження даних з OLX...</div>';
 
       try {
-        let apiUrl = `${BACKEND_URL}/api/search?`;
+        let apiUrl = BACKEND_URL + '/api/search?';
         
         if (inputVal.startsWith('http://') || inputVal.startsWith('https://')) {
-          apiUrl += `categoryUrl=${encodeURIComponent(inputVal)}`;
+          apiUrl += 'categoryUrl=' + encodeURIComponent(inputVal);
         } else {
-          apiUrl += `query=${encodeURIComponent(inputVal)}`;
+          apiUrl += 'query=' + encodeURIComponent(inputVal);
         }
 
-        if (minPrice) apiUrl += `&minPrice=${minPrice}`;
-        if (maxPrice) apiUrl += `&maxPrice=${maxPrice}`;
+        if (minPrice) apiUrl += '&minPrice=' + minPrice;
+        if (maxPrice) apiUrl += '&maxPrice=' + maxPrice;
 
         const res = await fetch(apiUrl);
         const data = await res.json();
@@ -144,8 +148,8 @@
           return;
         }
 
-        document.getElementById('avgPrice').innerText = `${data.averagePrice.toLocaleString('uk-UA')} грн`;
-        document.getElementById('itemsCount').innerText = `Знайдено ${data.count} товарів`;
+        document.getElementById('avgPrice').innerText = data.averagePrice.toLocaleString('uk-UA') + ' грн';
+        document.getElementById('itemsCount').innerText = 'Знайдено ' + data.count + ' товарів';
         analyticsDiv.classList.remove('hidden');
 
         resultsDiv.innerHTML = data.items.map(item => {
@@ -162,7 +166,7 @@
                   <div class="text-[11px] text-gray-400 mt-1 truncate">${item.locationDate || ''}</div>
                 </div>
               </div>
-              ${isCheap ? `<div class="text-xs bg-emerald-950/80 text-emerald-300 px-2.5 py-1 rounded-xl border border-emerald-800/60 text-center font-medium">🔥 Вигодно! Нижче ринку на ${discount}%</div>` : ''}
+              ${isCheap ? `<div class="text-xs bg-emerald-950/80 text-emerald-300 px-2.5 py-1 rounded-xl border border-emerald-800/60 text-center font-medium">🔥 Вигідно! Нижче ринку на ${discount}%</div>` : ''}
             </a>
           `;
         }).join('');
