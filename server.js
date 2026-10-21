@@ -14,7 +14,7 @@ const HEADERS = {
   'Cache-Control': 'no-cache'
 };
 
-// Вбудований інтерфейс Mini App (HTML + CSS + JS)
+// Інтерфейс Mini App (HTML + Tailwind CSS + JS)
 const HTML_CONTENT = `
 <!DOCTYPE html>
 <html lang="uk">
@@ -202,13 +202,11 @@ const HTML_CONTENT = `
 </html>
 `;
 
-// Головний маршрут — віддає HTML без кешування
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.send(HTML_CONTENT);
 });
 
-// API для пошуку та парсингу OLX
 app.get('/api/search', async (req, res) => {
   try {
     const { query, categoryUrl, minPrice, maxPrice } = req.query;
@@ -297,68 +295,11 @@ app.get('/api/search', async (req, res) => {
       }
 
       if (!candidate) {
-        const sourceSrcset = $(element).find('picture source').first().attr('srcset') \vert{}\vert{}$(element).find('picture source').first().attr('data-srcset') || '';
+        const picSrc = $(element).find('picture source').first();
+        const sourceSrcset = picSrc.attr('srcset') || picSrc.attr('data-srcset') || '';
         if (sourceSrcset && !sourceSrcset.startsWith('data:')) {
           candidate = sourceSrcset.split(',')[0].trim().split(' ')[0];
         }
       }
 
       if (!candidate) {
-        const cardHtml = $(element).html() || '';
-        const cdnMatch = cardHtml.match(/https?:\/\/[^"'\s<>]*?olxcdn[^"'\s<>]*/gi);
-        if (cdnMatch && cdnMatch.length > 0) {
-          candidate = cdnMatch[0];
-        }
-      }
-
-      if (candidate) {
-        candidate = candidate.replace(/\\/g, '').replace(/&amp;/g, '&');
-        if (candidate.startsWith('//')) {
-          candidate = 'https:' + candidate;
-        } else if (candidate.startsWith('/')) {
-          candidate = 'https://www.olx.ua' + candidate;
-        }
-        if (!candidate.startsWith('data:')) {
-          img = candidate;
-        }
-      }
-
-      const locationDate = $(element).find('[data-testid="location-date"]').first().text().trim();
-
-      if (title && !isNaN(numericPrice) && numericPrice > 0 && rawLink) {
-        rawItems.push({
-          title,
-          price: numericPrice,
-          priceText: `${numericPrice.toLocaleString('uk-UA')} грн`,
-          link,
-          img,
-          locationDate
-        });
-      }
-    });
-
-    const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
-    let averagePrice = 0;
-
-    if (prices.length > 0) {
-      const medianPrice = prices[Math.floor(prices.length / 2)];
-      const filteredPrices = prices.filter(p => p >= medianPrice * 0.5 && p <= medianPrice * 2.0);
-      const sum = filteredPrices.reduce((a, b) => a + b, 0);
-      averagePrice = filteredPrices.length > 0 ? Math.round(sum / filteredPrices.length) : medianPrice;
-    }
-
-    res.json({
-      success: true,
-      count: rawItems.length,
-      averagePrice,
-      items: rawItems
-    });
-
-  } catch (error) {
-    console.error('Parsing error:', error.message);
-    res.status(500).json({ success: false, error: 'Помилка отримання даних з OLX або блок IP' });
-  }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
