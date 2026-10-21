@@ -38,11 +38,15 @@ app.get('/api/search', async (req, res) => {
     const $ = cheerio.load(response.data);
     const rawItems = [];
 
-    // Список слів-аксесуарів та запчастин для відсікання
-    const accessoryKeywords = [
-      'стекло', 'скло', 'чехол', 'чохол', 'чохли', 'чехлы', 
-      'дисплей', 'экран', 'екран', 'коробка', 'кабель', 
-      'зарядка', 'адаптер', 'ремешок', 'ремінець', 'плівка', 'пленка'
+    // Расширенный список слов-исключений (детали, запчасти, блокировки, аксессуары)
+    const stopWords = [
+      'аккумулятор', 'акумулятор', 'батарея', 'батарейка', 'корпус', 'корпуси', 'корпуса',
+      'шлейф', 'плата', 'материнская плата', 'материнська плата', 'камера', 'динамик', 'динамік',
+      'стекло', 'скло', 'чехол', 'чохол', 'чохли', 'чехлы', 'дисплей', 'экран', 'екран', 'тачскрин',
+      'коробка', 'кабель', 'зарядка', 'зарядное', 'зарядний', 'адаптер', 'ремешок', 'ремінець', 
+      'пленка', 'плівка', 'запчасти', 'запчастини', 'разборка', 'розбірка', 'на запчастини', 
+      'на запчасти', 'icloud', 'айклауд', 'lost', 'passcode', 'пароль', 'байпас', 'bypass', 
+      'донор', 'скупка', 'ремонт'
     ];
 
     $('[data-cy="l-card"], [data-testid="l-card"]').each((index, element) => {
@@ -51,14 +55,16 @@ app.get('/api/search', async (req, res) => {
       $(element).find('style, script').remove();
 
       const title = $(element).find('h6, h4, [data-testid="ad-title"]').first().text().trim();
-      
-      // Фіксуємо фільтрацію: якщо шукають "iPhone 11", прибираємо з видачі чохли та стекла
+      if (!title) return;
+
       const lowerTitle = title.toLowerCase();
       const queryLower = (query || '').toLowerCase();
-      const isAccessory = accessoryKeywords.some(kw => lowerTitle.includes(kw)) && 
-                          !accessoryKeywords.some(kw => queryLower.includes(kw));
 
-      if (isAccessory) return; // Пропускаємо аксесуари
+      // Фильтрация мусора: отсекаем объявленя, если в названии есть стоп-слова
+      const hasStopWord = stopWords.some(word => lowerTitle.includes(word));
+      const queryHasStopWord = stopWords.some(word => queryLower.includes(word));
+
+      if (hasStopWord && !queryHasStopWord) return;
 
       const priceElement = $(element).find('[data-testid="ad-price"]').first();
       priceElement.find('style, script').remove();
@@ -77,27 +83,20 @@ app.get('/api/search', async (req, res) => {
       const rawLink = $(element).find('a').attr('href') || '';
       const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
       
-      // Глибокий витяг реальної фотографії (з урахуванням lazy-loading OLX)
+      // Посегментный поиск картинки напрямую из HTML карточки
       let img = '';
-      const pictureSource = $(element).find('picture source').first().attr('srcset');
-      const imgObj = $(element).find('img').first();
+      const cardHtml = $(element).html();
+      const imgMatches = cardHtml.match(/https?:\/\/[^"'\s]+\.(?:jpg|jpeg|png|webp)/gi);
       
-      if (pictureSource) {
-        img = pictureSource.split(',')[0].split(' ')[0];
-      } else {
-        const srcset = imgObj.attr('srcset');
-        img = srcset ? srcset.split(',')[0].split(' ')[0] : (imgObj.attr('src') || imgObj.attr('data-src') || '');
+      if (imgMatches && imgMatches.length > 0) {
+        const validImg = imgMatches.find(url => !url.includes('data:image') && !url.includes('blank') && !url.includes('static'));
+        if (validImg) img = validImg;
       }
 
-      if (img) {
-        if (img.startsWith('//')) {
-          img = 'https:' + img;
-        } else if (img.startsWith('/')) {
-          img = 'https://www.olx.ua' + img;
-        }
-        if (img.startsWith('data:image')) {
-          img = ''; // Ігноруємо порожні SVG заповнювачі
-        }
+      if (!img) {
+        const imgEl = $(element).find('img').first();
+        img = imgEl.attr('src') || imgEl.attr('data-src') || '';
+        if (img.startsWith('//')) img = 'https:' + img;
       }
 
       const locationDate = $(element).find('[data-testid="location-date"]').first().text().trim();
@@ -114,13 +113,13 @@ app.get('/api/search', async (req, res) => {
       }
     });
 
-    // Розрахунок медіанної ринкової ціни
+    // Расчет средней рыночной цены на основе чистых объявлений
     const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
     let averagePrice = 0;
 
     if (prices.length > 0) {
       const medianPrice = prices[Math.floor(prices.length / 2)];
-      const filteredPrices = prices.filter(p => p >= medianPrice * 0.4 && p <= medianPrice * 2.2);
+      const filteredPrices = prices.filter(p => p >= medianPrice * 0.5 && p <= medianPrice * 2.0);
       const sum = filteredPrices.reduce((a, b) => a + b, 0);
       averagePrice = filteredPrices.length > 0 ? Math.round(sum / filteredPrices.length) : medianPrice;
     }
