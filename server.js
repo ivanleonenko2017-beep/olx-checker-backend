@@ -38,13 +38,28 @@ app.get('/api/search', async (req, res) => {
     const $ = cheerio.load(response.data);
     const rawItems = [];
 
+    // Список слів-аксесуарів та запчастин для відсікання
+    const accessoryKeywords = [
+      'стекло', 'скло', 'чехол', 'чохол', 'чохли', 'чехлы', 
+      'дисплей', 'экран', 'екран', 'коробка', 'кабель', 
+      'зарядка', 'адаптер', 'ремешок', 'ремінець', 'плівка', 'пленка'
+    ];
+
     $('[data-cy="l-card"], [data-testid="l-card"]').each((index, element) => {
-      if (rawItems.length >= 25) return;
+      if (rawItems.length >= 30) return;
 
       $(element).find('style, script').remove();
 
       const title = $(element).find('h6, h4, [data-testid="ad-title"]').first().text().trim();
       
+      // Фіксуємо фільтрацію: якщо шукають "iPhone 11", прибираємо з видачі чохли та стекла
+      const lowerTitle = title.toLowerCase();
+      const queryLower = (query || '').toLowerCase();
+      const isAccessory = accessoryKeywords.some(kw => lowerTitle.includes(kw)) && 
+                          !accessoryKeywords.some(kw => queryLower.includes(kw));
+
+      if (isAccessory) return; // Пропускаємо аксесуари
+
       const priceElement = $(element).find('[data-testid="ad-price"]').first();
       priceElement.find('style, script').remove();
       let rawPriceText = priceElement.text().trim();
@@ -62,16 +77,26 @@ app.get('/api/search', async (req, res) => {
       const rawLink = $(element).find('a').attr('href') || '';
       const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
       
-      // Фікс посилань на фотографії (додаємо https:)
-      const imgEl = $(element).find('img').first();
-      let img = imgEl.attr('src') || imgEl.attr('data-src') || '';
-      if (img.startsWith('//')) {
-        img = 'https:' + img;
-      } else if (img.startsWith('data:image')) {
-        const srcset = imgEl.attr('srcset');
-        if (srcset) {
-          const firstSrc = srcset.split(' ')[0];
-          img = firstSrc.startsWith('//') ? 'https:' + firstSrc : firstSrc;
+      // Глибокий витяг реальної фотографії (з урахуванням lazy-loading OLX)
+      let img = '';
+      const pictureSource = $(element).find('picture source').first().attr('srcset');
+      const imgObj = $(element).find('img').first();
+      
+      if (pictureSource) {
+        img = pictureSource.split(',')[0].split(' ')[0];
+      } else {
+        const srcset = imgObj.attr('srcset');
+        img = srcset ? srcset.split(',')[0].split(' ')[0] : (imgObj.attr('src') || imgObj.attr('data-src') || '');
+      }
+
+      if (img) {
+        if (img.startsWith('//')) {
+          img = 'https:' + img;
+        } else if (img.startsWith('/')) {
+          img = 'https://www.olx.ua' + img;
+        }
+        if (img.startsWith('data:image')) {
+          img = ''; // Ігноруємо порожні SVG заповнювачі
         }
       }
 
@@ -89,15 +114,13 @@ app.get('/api/search', async (req, res) => {
       }
     });
 
-    // Фільтрація аномальних цін для точної середньої ціни
+    // Розрахунок медіанної ринкової ціни
     const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
     let averagePrice = 0;
 
     if (prices.length > 0) {
-      // Беремо медіану для відсікання чохлів (90 грн) та дорогих аксесуарів
       const medianPrice = prices[Math.floor(prices.length / 2)];
-      const filteredPrices = prices.filter(p => p >= medianPrice * 0.3 && p <= medianPrice * 2.5);
-      
+      const filteredPrices = prices.filter(p => p >= medianPrice * 0.4 && p <= medianPrice * 2.2);
       const sum = filteredPrices.reduce((a, b) => a + b, 0);
       averagePrice = filteredPrices.length > 0 ? Math.round(sum / filteredPrices.length) : medianPrice;
     }
