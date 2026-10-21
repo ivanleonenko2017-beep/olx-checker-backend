@@ -393,7 +393,7 @@
     }
 
     function payViaTelegramStars() {
-      alert('Інвойс Telegram Stars підключено до платформи!');
+      alert('Інвойс Telegram Stars підключено!');
     }
 
     function getFavorites() {
@@ -406,20 +406,23 @@
     }
 
     async function loadActiveFilters() {
-      if (!userId) {
-        userFilters = JSON.parse(localStorage.getItem('olx_active_filters') || '[]');
-        renderActiveFilters();
-        return;
+      const localData = JSON.parse(localStorage.getItem('olx_active_filters') || '[]');
+      if (userId) {
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/user/filters?userId=${userId}`);
+          const data = await res.json();
+          if (data.filters && data.filters.length > 0) {
+            userFilters = data.filters;
+          } else {
+            userFilters = localData;
+          }
+        } catch (err) {
+          userFilters = localData;
+        }
+      } else {
+        userFilters = localData;
       }
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/user/filters?userId=${userId}`);
-        const data = await res.json();
-        userFilters = data.filters || [];
-        renderActiveFilters();
-      } catch (err) {
-        userFilters = JSON.parse(localStorage.getItem('olx_active_filters') || '[]');
-        renderActiveFilters();
-      }
+      renderActiveFilters();
     }
 
     async function deleteActiveFilter(id) {
@@ -427,6 +430,7 @@
         await fetch(`${BACKEND_URL}/api/filters/${id}`, { method: 'DELETE' });
       } catch (e) {}
       userFilters = userFilters.filter(f => f.id !== id);
+      localStorage.setItem('olx_active_filters', JSON.stringify(userFilters));
       renderActiveFilters();
     }
 
@@ -527,6 +531,15 @@
         return;
       }
 
+      const newObj = {
+        id: Date.now(),
+        query,
+        min_price: parseInt(minPrice) || 0,
+        max_price: parseInt(maxPrice) || 0,
+        city,
+        condition
+      };
+
       if (userId) {
         try {
           const res = await fetch(`${BACKEND_URL}/api/filters`, {
@@ -544,8 +557,12 @@
         } catch (e) {}
       }
 
+      userFilters.push(newObj);
+      localStorage.setItem('olx_active_filters', JSON.stringify(userFilters));
+
       closeAddFilterModal();
-      await loadActiveFilters();
+      renderActiveFilters();
+
       document.getElementById('modalQuery').value = '';
       document.getElementById('modalMinPrice').value = '';
       document.getElementById('modalMaxPrice').value = '';
@@ -575,7 +592,7 @@
             <div>
               <div class="text-xs font-semibold text-white">${f.query}</div>
               <div class="text-[10px] text-gray-400">
-                ${f.max_price || f.maxPrice ? 'до ' + parseInt(f.max_price || f.maxPrice).toLocaleString('uk-UA') + ' грн' : 'Без ліміту'} • ${f.city || 'Всі міста'}
+                ${(f.max_price || f.maxPrice) ? 'до ' + parseInt(f.max_price || f.maxPrice).toLocaleString('uk-UA') + ' грн' : 'Без ліміту'} • ${f.city || 'Всі міста'}
               </div>
             </div>
           </div>
