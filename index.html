@@ -130,7 +130,7 @@
           <div>
             <label class="block text-[11px] text-gray-400 mb-1 font-medium">Стан товару</label>
             <select id="conditionSelect" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
-              <option value="all font-medium">Усі пропозиції</option>
+              <option value="all">Усі пропозиції</option>
               <option value="used">Вживане (Б/У)</option>
               <option value="new">Нове</option>
             </select>
@@ -143,14 +143,28 @@
         </button>
       </div>
 
-      <div id="analytics" class="hidden p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-2">
-        <div class="text-xs text-gray-400">Аналітика ринку</div>
-        <div class="flex justify-between items-end">
-          <div>
-            <div class="text-2xl font-bold text-emerald-400" id="avgPrice">0 грн</div>
-            <div class="text-[10px] text-gray-400">Середня ринкова ціна</div>
+      <!-- Analytics & Quick Filter Conversion Banner -->
+      <div id="analytics" class="hidden space-y-3">
+        <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-2">
+          <div class="text-xs text-gray-400">Аналітика ринку</div>
+          <div class="flex justify-between items-end">
+            <div>
+              <div class="text-2xl font-bold text-emerald-400" id="avgPrice">0 грн</div>
+              <div class="text-[10px] text-gray-400">Середня ринкова ціна</div>
+            </div>
+            <span id="itemsCount" class="text-xs bg-blue-900/50 text-blue-300 px-2.5 py-1 rounded-full border border-blue-800">0 товарів</span>
           </div>
-          <span id="itemsCount" class="text-xs bg-blue-900/50 text-blue-300 px-2.5 py-1 rounded-full border border-blue-800">0 товарів</span>
+        </div>
+
+        <!-- Conversion Prompt -->
+        <div class="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-gray-900 border border-emerald-800/80 flex items-center justify-between">
+          <div>
+            <div class="text-xs font-bold text-emerald-300">Сподобався результат?</div>
+            <div class="text-[10px] text-gray-400">Отримуйте сповіщення у чат бота про нові позиції</div>
+          </div>
+          <button onclick="convertCurrentSearchToFilter()" class="px-3.5 py-2 bg-emerald-400 hover:bg-emerald-300 text-black font-extrabold rounded-xl text-xs transition shadow-md">
+            ➕ Відстежувати
+          </button>
         </div>
       </div>
 
@@ -296,9 +310,7 @@
       <div class="bg-gray-900 border border-gray-800 rounded-3xl p-4 w-full max-w-sm space-y-3 relative">
         <button onclick="closeAdModal()" class="absolute right-3 top-3 bg-gray-800 text-gray-400 w-7 h-7 rounded-full flex items-center justify-center text-xs">✕</button>
 
-        <div id="modalAdImgContainer" class="w-full h-44 rounded-2xl bg-gray-800 overflow-hidden flex items-center justify-center">
-          <!-- Image via JS -->
-        </div>
+        <div id="modalAdImgContainer" class="w-full h-44 rounded-2xl bg-gray-800 overflow-hidden flex items-center justify-center"></div>
 
         <div>
           <div id="modalAdTitle" class="text-xs font-bold text-white">...</div>
@@ -386,7 +398,7 @@
     }
 
     function payViaTelegramStars() {
-      alert('Інвойс Telegram Stars буде підключено на наступному кроці разом із базою даних!');
+      alert('Інвойс Telegram Stars буде підключено разом із базою даних!');
     }
 
     function getFavorites() {
@@ -416,9 +428,34 @@
       saveActiveFilters(filters);
     }
 
-    function openAddFilterModal() {
+    function convertCurrentSearchToFilter() {
+      const query = document.getElementById('searchInput').value.trim();
+      const minPrice = document.getElementById('minPrice').value.trim();
+      const maxPrice = document.getElementById('maxPrice').value.trim();
+      const city = document.getElementById('cityInput').value.trim() || 'Всі міста';
+      const condition = document.getElementById('conditionSelect').value;
+
+      if (!query) return;
+
       const filters = getActiveFilters();
       if (filters.length >= 2) {
+        document.getElementById('limitModal').classList.remove('hidden');
+        document.getElementById('limitModal').classList.add('flex');
+        return;
+      }
+
+      document.getElementById('modalQuery').value = query;
+      document.getElementById('modalMinPrice').value = minPrice;
+      document.getElementById('modalMaxPrice').value = maxPrice;
+      document.getElementById('modalCity').value = city;
+      document.getElementById('modalCondition').value = condition;
+
+      openAddFilterModal();
+    }
+
+    function openAddFilterModal() {
+      const filters = getActiveFilters();
+      if (filters.length >= 2 && document.getElementById('addFilterModal').classList.contains('hidden')) {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
