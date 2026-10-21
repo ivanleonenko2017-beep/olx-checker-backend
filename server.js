@@ -8,7 +8,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Відключаємо кешування для статики
+// Вимикаємо кешування для статики
 app.use(express.static(__dirname, {
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
@@ -22,11 +22,13 @@ const HEADERS = {
   'Cache-Control': 'no-cache'
 };
 
+// Головна сторінка — віддає index.html
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// API для парсингу OLX
 app.get('/api/search', async (req, res) => {
   try {
     const { query, categoryUrl, minPrice, maxPrice } = req.query;
@@ -53,14 +55,10 @@ app.get('/api/search', async (req, res) => {
     const rawItems = [];
 
     const stopWords = [
-      'аккумулятор', 'акумулятор', 'батарея', 'батарейка', 'корпус', 'корпуси', 'корпуса',
-      'шлейф', 'плата', 'материнская плата', 'материнська плата', 'камера', 'динамик', 'динамік',
-      'стекло', 'скло', 'чехол', 'чохол', 'чохли', 'чехлы', 'накладка', 'наклейка', 'бампер',
-      'дисплей', 'экран', 'екран', 'тачскрин', 'коробка', 'кабель', 'зарядка', 'зарядное', 
-      'зарядний', 'адаптер', 'ремешок', 'ремінець', 'пленка', 'плівка', 'гидрогель', 'гідрогель',
-      'запчасти', 'запчастини', 'разборка', 'розбірка', 'на запчастини', 'на запчасти', 
-      'icloud', 'айклауд', 'lost', 'passcode', 'пароль', 'байпас', 'bypass', 'донор', 
-      'скупка', 'ремонт', 'копия', 'копія', 'реплика', 'репліка', 'держатель', 'тримач'
+      'аккумулятор', 'акумулятор', 'батарея', 'корпус', 'шлейф', 'плата', 'камера', 'динамик',
+      'стекло', 'скло', 'чехол', 'чохол', 'накладка', 'бампер', 'дисплей', 'экран', 'екран',
+      'коробка', 'кабель', 'зарядка', 'адаптер', 'ремешок', 'пленка', 'запчасти', 'разборка',
+      'icloud', 'lost', 'passcode', 'пароль', 'bypass', 'донор', 'скупка', 'ремонт', 'копия', 'реплика'
     ];
 
     $('[data-cy="l-card"], [data-testid="l-card"]').each((index, element) => {
@@ -95,3 +93,78 @@ app.get('/api/search', async (req, res) => {
 
       if (minPrice && numericPrice < parseInt(minPrice, 10)) return;
       if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
+
+      const rawLink = $(element).find('a').attr('href') || '';
+      const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
+
+      let img = '';
+      const imgEl = $(element).find('img').first();
+      const src = imgEl.attr('src') || '';
+      const dataSrc = imgEl.attr('data-src') || '';
+      const srcset = imgEl.attr('srcset') || imgEl.attr('data-srcset') || '';
+
+      let candidate = '';
+      if (dataSrc && !dataSrc.startsWith('data:')) candidate = dataSrc;
+      else if (srcset && !srcset.startsWith('data:')) candidate = srcset.split(',')[0].trim().split(' ')[0];
+      else if (src && !src.startsWith('data:')) candidate = src;
+
+      if (!candidate) {
+        const picSrc = $(element).find('picture source').first();
+        const sourceSrcset = picSrc.attr('srcset') || picSrc.attr('data-srcset') || '';
+        if (sourceSrcset && !sourceSrcset.startsWith('data:')) {
+          candidate = sourceSrcset.split(',')[0].trim().split(' ')[0];
+        }
+      }
+
+      if (!candidate) {
+        const cardHtml = $(element).html() || '';
+        const cdnMatch = cardHtml.match(/https?:\/\/[^"'\s<>]*?olxcdn[^"'\s<>]*/gi);
+        if (cdnMatch && cdnMatch.length > 0) candidate = cdnMatch[0];
+      }
+
+      if (candidate) {
+        candidate = candidate.replace(/\\/g, '').replace(/&amp;/g, '&');
+        if (candidate.startsWith('//')) candidate = 'https:' + candidate;
+        else if (candidate.startsWith('/')) candidate = 'https://www.olx.ua' + candidate;
+        if (!candidate.startsWith('data:')) img = candidate;
+      }
+
+      const locationDate = $(element).find('[data-testid="location-date"]').first().text().trim();
+
+      if (title && !isNaN(numericPrice) && numericPrice > 0 && rawLink) {
+        rawItems.push({
+          title,
+          price: numericPrice,
+          priceText: `${numericPrice.toLocaleString('uk-UA')} грн`,
+          link,
+          img,
+          locationDate
+        });
+      }
+    });
+
+    const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
+    let averagePrice = 0;
+
+    if (prices.length > 0) {
+      const medianPrice = prices[Math.floor(prices.length / 2)];
+      const filteredPrices = prices.filter(p => p >= medianPrice * 0.5 && p <= medianPrice * 2.0);
+      const sum = filteredPrices.reduce((a, b) => a + b, 0);
+      averagePrice = filteredPrices.length > 0 ? Math.round(sum / filteredPrices.length) : medianPrice;
+    }
+
+    res.json({
+      success: true,
+      count: rawItems.length,
+      averagePrice,
+      items: rawItems
+    });
+
+  } catch (error) {
+    console.error('Parsing error:', error.message);
+    res.status(500).json({ success: false, error: 'Помилка отримання даних з OLX' });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
