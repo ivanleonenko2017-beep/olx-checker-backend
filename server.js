@@ -23,11 +23,19 @@ app.get('/', (req, res) => {
 
 app.get('/api/search', async (req, res) => {
   try {
-    const { query, categoryUrl } = req.query;
+    const { query, categoryUrl, minPrice, maxPrice } = req.query;
     let targetUrl = categoryUrl;
 
     if (!targetUrl && query) {
-      targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(query)}/`;
+      let searchParams = `q-${encodeURIComponent(query)}/`;
+      if (minPrice || maxPrice) {
+        const searchMin = minPrice ? `search%5Bfilter_float_price%3Afrom%5D=${minPrice}` : '';
+        const searchMax = maxPrice ? `search%5Bfilter_float_price%3Ato%5D=${maxPrice}` : '';
+        const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
+        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(query)}/?${queryParams}`;
+      } else {
+        targetUrl = `https://www.olx.ua/uk/list/${searchParams}`;
+      }
     }
 
     if (!targetUrl) {
@@ -79,10 +87,13 @@ app.get('/api/search', async (req, res) => {
         numericPrice = parseInt(match[1].replace(/\s/g, ''), 10);
       }
 
+      // Фильтр цен на стороне сервера
+      if (minPrice && numericPrice < parseInt(minPrice, 10)) return;
+      if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
+
       const rawLink = $(element).find('a').attr('href') || '';
       const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
       
-      // Точный поиск CDN фото OLX
       let img = '';
       const imgEl = $(element).find('img').first();
       const src = imgEl.attr('src') || '';
