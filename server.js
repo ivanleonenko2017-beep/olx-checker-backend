@@ -2,10 +2,14 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Віддаємо статичні файли (index.html) з цієї ж папки
+app.use(express.static(__dirname));
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -14,6 +18,12 @@ const HEADERS = {
   'Cache-Control': 'no-cache'
 };
 
+// Головна сторінка — відкриває інтерфейс Mini App
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// API для пошуку та парсингу OLX
 app.get('/api/search', async (req, res) => {
   try {
     const { query, categoryUrl } = req.query;
@@ -32,7 +42,6 @@ app.get('/api/search', async (req, res) => {
     const items = [];
     let totalPrices = 0;
 
-    // Шукаємо оголошення за новими та резервними селекторами OLX
     $('[data-cy="l-card"], [data-testid="l-card"], div.css-1sw7q4x').each((index, element) => {
       if (items.length >= 15) return;
 
