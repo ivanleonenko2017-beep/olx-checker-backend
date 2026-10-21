@@ -8,7 +8,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Вимикаємо кешування для статики
 app.use(express.static(__dirname, {
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
@@ -22,13 +21,35 @@ const HEADERS = {
   'Cache-Control': 'no-cache'
 };
 
-// Головна сторінка — віддає index.html
+// Проксі для фото OLX (обхід CORS та заблокованих картинок)
+app.get('/api/proxy-image', async (req, res) => {
+  try {
+    const imageUrl = req.query.url;
+    if (!imageUrl) return res.status(400).send('No image URL provided');
+
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': HEADERS['User-Agent'],
+        'Referer': 'https://www.olx.ua/'
+      },
+      timeout: 5000
+    });
+
+    const contentType = response.headers['content-type'] || 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(response.data);
+  } catch (err) {
+    res.status(404).send('Image fetch failed');
+  }
+});
+
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// API для парсингу OLX
 app.get('/api/search', async (req, res) => {
   try {
     const { query, categoryUrl, minPrice, maxPrice } = req.query;
@@ -126,13 +147,17 @@ app.get('/api/search', async (req, res) => {
         candidate = candidate.replace(/\\/g, '').replace(/&amp;/g, '&');
         if (candidate.startsWith('//')) candidate = 'https:' + candidate;
         else if (candidate.startsWith('/')) candidate = 'https://www.olx.ua' + candidate;
-        if (!candidate.startsWith('data:')) img = candidate;
+        
+        if (!candidate.startsWith('data:')) {
+          img = `/api/proxy-image?url=${encodeURIComponent(candidate)}`;
+        }
       }
 
       const locationDate = $(element).find('[data-testid="location-date"]').first().text().trim();
 
       if (title && !isNaN(numericPrice) && numericPrice > 0 && rawLink) {
         rawItems.push({
+          id: 'ad_' + Math.random().toString(36).substr(2, 9),
           title,
           price: numericPrice,
           priceText: `${numericPrice.toLocaleString('uk-UA')} грн`,
