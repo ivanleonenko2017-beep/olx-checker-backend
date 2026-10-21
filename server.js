@@ -215,7 +215,7 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// API получения и сохранения активных фильтров пользователя из Supabase
+// API получения и сохранения фильтров
 app.get('/api/user/filters', async (req, res) => {
   try {
     const { userId } = req.query;
@@ -231,31 +231,35 @@ app.get('/api/user/filters', async (req, res) => {
 app.post('/api/filters', async (req, res) => {
   try {
     const { userId, query, minPrice, maxPrice, city, condition } = req.body;
-    if (!supabase || !userId || !query) {
+    if (!userId || !query) {
       return res.status(400).json({ error: 'Недостатньо даних для збереження' });
     }
 
-    await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
+    if (supabase) {
+      await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
 
-    const { data: userFilters } = await supabase.from('filters').select('id').eq('user_id', userId);
-    const { data: userData } = await supabase.from('users').select('tariff').eq('telegram_id', userId).single();
+      const { data: userFilters } = await supabase.from('filters').select('id').eq('user_id', userId);
+      const { data: userData } = await supabase.from('users').select('tariff').eq('telegram_id', userId).single();
 
-    const isPremium = userData && userData.tariff === 'premium';
-    if (!isPremium && userFilters && userFilters.length >= 2) {
-      return res.status(403).json({ error: 'LIMIT_EXCEEDED' });
+      const isPremium = userData && userData.tariff === 'premium';
+      if (!isPremium && userFilters && userFilters.length >= 2) {
+        return res.status(403).json({ error: 'LIMIT_EXCEEDED' });
+      }
+
+      const { data, error } = await supabase.from('filters').insert([{
+        user_id: userId,
+        query,
+        min_price: parseInt(minPrice) || 0,
+        max_price: parseInt(maxPrice) || 0,
+        city: city || 'Всі міста',
+        condition: condition || 'all'
+      }]).select();
+
+      if (error) throw error;
+      return res.json({ success: true, filter: data[0] });
+    } else {
+      return res.json({ success: true });
     }
-
-    const { data, error } = await supabase.from('filters').insert([{
-      user_id: userId,
-      query,
-      min_price: parseInt(minPrice) || 0,
-      max_price: parseInt(maxPrice) || 0,
-      city: city || 'Всі міста',
-      condition: condition || 'all'
-    }]).select();
-
-    if (error) throw error;
-    res.json({ success: true, filter: data[0] });
 
   } catch (err) {
     console.error('Save filter error:', err.message);
@@ -274,12 +278,12 @@ app.delete('/api/filters/:id', async (req, res) => {
   }
 });
 
-// ФОНОВЫЙ МОНИТОРИНГ И ОТПРАВКА УВЕДОМЛЕНИЙ В ТЕЛЕГРАМ (CRON WORKER)
+// ФОНОВЫЙ МОНИТОРИНГ
 async function runBackgroundWorker() {
   if (!supabase || !TELEGRAM_BOT_TOKEN) return;
 
   try {
-    const { data: filters } = await supabase.from('filters').select('*, users(tariff)');
+    const { data: filters } = await supabase.from('filters').select('*');
     if (!filters || filters.length === 0) return;
 
     for (const filter of filters) {
@@ -315,7 +319,7 @@ async function runBackgroundWorker() {
           }
         }
       } catch (fErr) {
-        console.error(`Error checking filter ${filter.id}:`, fErr.message);
+        console.error(`Error checking filter ID ${filter.id}:`, fErr.message);
       }
     }
   } catch (err) {
@@ -323,7 +327,6 @@ async function runBackgroundWorker() {
   }
 }
 
-// Запуск проверки каждые 60 секунд
 setInterval(runBackgroundWorker, 60000);
 
 const PORT = process.env.PORT || 3000;
