@@ -38,7 +38,6 @@ app.get('/api/search', async (req, res) => {
     const $ = cheerio.load(response.data);
     const rawItems = [];
 
-    // Розширений список слів-аксесуарів та запчастин
     const stopWords = [
       'аккумулятор', 'акумулятор', 'батарея', 'батарейка', 'корпус', 'корпуси', 'корпуса',
       'шлейф', 'плата', 'материнская плата', 'материнська плата', 'камера', 'динамик', 'динамік',
@@ -61,7 +60,6 @@ app.get('/api/search', async (req, res) => {
       const lowerTitle = title.toLowerCase();
       const queryLower = (query || '').toLowerCase();
 
-      // Відсікаємо аксесуари та запчастини
       const hasStopWord = stopWords.some(word => lowerTitle.includes(word));
       const queryHasStopWord = stopWords.some(word => queryLower.includes(word));
 
@@ -84,22 +82,46 @@ app.get('/api/search', async (req, res) => {
       const rawLink = $(element).find('a').attr('href') || '';
       const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
       
-      // Пошук фотографій на CDN-серверах OLX (apollo.olxcdn.com)
+      // Точный поиск CDN фото OLX
       let img = '';
-      const cardHtml = $(element).html();
-      const cdnMatches = cardHtml.match(/https?:\/\/[^"'\s<>]*(?:apollo\.olxcdn\.com|photos\.olx\.ua)[^"'\s<>]*/gi);
+      const imgEl = $(element).find('img').first();
+      const src = imgEl.attr('src') || '';
+      const dataSrc = imgEl.attr('data-src') || '';
+      const srcset = imgEl.attr('srcset') || imgEl.attr('data-srcset') || '';
 
-      if (cdnMatches && cdnMatches.length > 0) {
-        const cleanUrl = cdnMatches[0].replace(/&amp;/g, '&');
-        img = cleanUrl;
+      let candidate = '';
+      if (dataSrc && !dataSrc.startsWith('data:')) {
+        candidate = dataSrc;
+      } else if (srcset && !srcset.startsWith('data:')) {
+        candidate = srcset.split(',')[0].trim().split(' ')[0];
+      } else if (src && !src.startsWith('data:')) {
+        candidate = src;
       }
 
-      // Резервний варіант, якщо CDN-адресу не знайдено
-      if (!img) {
-        const imgMatches = cardHtml.match(/https?:\/\/[^"'\s]+\.(?:jpg|jpeg|png|webp)/gi);
-        if (imgMatches && imgMatches.length > 0) {
-          const validImg = imgMatches.find(url => !url.includes('data:image') && !url.includes('blank') && !url.includes('static'));
-          if (validImg) img = validImg;
+      if (!candidate) {
+        const sourceSrcset = $(element).find('picture source').first().attr('srcset') \vert{}\vert{}$(element).find('picture source').first().attr('data-srcset') || '';
+        if (sourceSrcset && !sourceSrcset.startsWith('data:')) {
+          candidate = sourceSrcset.split(',')[0].trim().split(' ')[0];
+        }
+      }
+
+      if (!candidate) {
+        const cardHtml = $(element).html() || '';
+        const cdnMatch = cardHtml.match(/https?:\/\/[^"'\s<>]*?olxcdn[^"'\s<>]*/gi);
+        if (cdnMatch && cdnMatch.length > 0) {
+          candidate = cdnMatch[0];
+        }
+      }
+
+      if (candidate) {
+        candidate = candidate.replace(/\\/g, '').replace(/&amp;/g, '&');
+        if (candidate.startsWith('//')) {
+          candidate = 'https:' + candidate;
+        } else if (candidate.startsWith('/')) {
+          candidate = 'https://www.olx.ua' + candidate;
+        }
+        if (!candidate.startsWith('data:')) {
+          img = candidate;
         }
       }
 
@@ -117,7 +139,6 @@ app.get('/api/search', async (req, res) => {
       }
     });
 
-    // Фінальний розрахунок середньої ціни
     const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
     let averagePrice = 0;
 
