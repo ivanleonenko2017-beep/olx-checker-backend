@@ -10,14 +10,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Отключение кэширования для статических файлов и API
+// Отключение кэширования для статики
 app.use(express.static(__dirname, {
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   }
 }));
 
-// Очистка и нормализация Supabase URL
+// Нормализация Supabase URL
 let rawUrl = (process.env.SUPABASE_URL || '').trim();
 if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 if (rawUrl.endsWith('/rest/v1')) rawUrl = rawUrl.slice(0, -8);
@@ -27,7 +27,7 @@ const SUPABASE_URL = rawUrl;
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 
-// Парсинг ADMIN_IDS с приведением к числовому типу (number)
+// Нормализация ADMIN_IDS
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
   .split(',')
   .map(id => parseInt(id.trim(), 10))
@@ -37,8 +37,6 @@ let supabase = null;
 if (SUPABASE_URL && SUPABASE_KEY) {
   supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
   console.log(`✅ Supabase успішно підключено до: ${SUPABASE_URL}`);
-} else {
-  console.warn('⚠️ Змінні SUPABASE_URL або SUPABASE_KEY не задані!');
 }
 
 const HEADERS = {
@@ -48,7 +46,7 @@ const HEADERS = {
   'Cache-Control': 'no-cache'
 };
 
-// Валидация Telegram WebApp initData (HMAC-SHA256)
+// Проверка HMAC-SHA256 подписи Telegram
 function verifyTelegramInitData(initDataRaw) {
   if (!initDataRaw || !TELEGRAM_BOT_TOKEN) return null;
   try {
@@ -77,7 +75,7 @@ function verifyTelegramInitData(initDataRaw) {
   return null;
 }
 
-// Проверка прав Администратора с нормализацией типов
+// Проверка прав Администратора
 async function checkIsAdmin(userId) {
   if (!userId) return false;
   const numericId = parseInt(userId, 10);
@@ -90,7 +88,7 @@ async function checkIsAdmin(userId) {
   return Boolean(user && user.is_admin === true);
 }
 
-// Middleware для защиты административных REST API
+// Middleware защиты административных эндпоинтов
 async function adminAuthMiddleware(req, res, next) {
   const initData = req.headers['x-telegram-init-data'];
   let userId = req.query.adminId || req.body.adminId;
@@ -111,7 +109,6 @@ async function adminAuthMiddleware(req, res, next) {
   next();
 }
 
-// Функция добавления дней Premium
 async function addPremiumDays(userId, days) {
   if (!supabase) return;
   const numericId = parseInt(userId, 10);
@@ -131,7 +128,6 @@ async function addPremiumDays(userId, days) {
   }, { onConflict: 'telegram_id' });
 }
 
-// Оболочки Telegram API
 async function sendTelegramMessage(chatId, text, replyMarkup = null) {
   if (!TELEGRAM_BOT_TOKEN) return;
   try {
@@ -286,7 +282,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   return { items: rawItems, averagePrice };
 }
 
-// REST API поиска
+// REST API
 app.get('/api/search', async (req, res) => {
   try {
     const { query, categoryUrl, minPrice, maxPrice } = req.query;
@@ -312,7 +308,6 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// Роут получения профиля
 app.get('/api/user/profile', async (req, res) => {
   try {
     const initData = req.headers['x-telegram-init-data'];
@@ -384,7 +379,6 @@ app.post('/api/filters', async (req, res) => {
       if (error) throw error;
       const createdFilter = data[0];
 
-      // Прогрев без спама
       try {
         const targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(query)}/`;
         const { items } = await parseOlx(targetUrl, minPrice, maxPrice, query);
@@ -417,7 +411,7 @@ app.delete('/api/filters/:id', async (req, res) => {
   }
 });
 
-// АДМИНИСТРАТИВНЫЕ ЭНДПОИНТЫ REST API
+// АДМИНИСТРАТИВНЫЕ ЭНДПОИНТЫ
 app.get('/api/admin/stats', adminAuthMiddleware, async (req, res) => {
   try {
     const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
@@ -479,7 +473,6 @@ app.post('/telegram-webhook', async (req, res) => {
 
   const webAppUrl = process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com';
 
-  // Команда /start
   if (text.startsWith('/start')) {
     const args = text.split(' ');
     let referrerId = null;
@@ -522,7 +515,6 @@ app.post('/telegram-webhook', async (req, res) => {
     return;
   }
 
-  // Команда /admin
   if (text.startsWith('/admin')) {
     const isAdmin = await checkIsAdmin(chatId);
 
