@@ -26,7 +26,7 @@ const SUPABASE_URL = rawUrl;
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 
-// Список ID администраторов из переменных окружения
+// Список ID администраторов из переменных окружения (например: "668277478")
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
   .split(',')
   .map(id => parseInt(id.trim(), 10))
@@ -233,7 +233,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   return { items: rawItems, averagePrice };
 }
 
-// REST API Поиска
+// REST API
 app.get('/api/search', async (req, res) => {
   try {
     const { query, categoryUrl, minPrice, maxPrice } = req.query;
@@ -259,7 +259,7 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// Профиль пользователя и проверка статуса Админа
+// Данные профиля
 app.get('/api/user/profile', async (req, res) => {
   try {
     const { userId } = req.query;
@@ -357,61 +357,6 @@ app.delete('/api/filters/:id', async (req, res) => {
   }
 });
 
-// АДМИНИСТРАТИВНЫЕ REST API СЕРВЕРА
-app.get('/api/admin/stats', async (req, res) => {
-  try {
-    const { adminId } = req.query;
-    if (!(await checkIsAdmin(adminId))) {
-      return res.status(403).json({ error: 'Доступ заборонено' });
-    }
-
-    const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    const { count: filtersCount } = await supabase.from('filters').select('*', { count: 'exact', head: true });
-    const { count: premiumCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('tariff', 'premium');
-
-    res.json({
-      success: true,
-      stats: {
-        users: usersCount || 0,
-        filters: filtersCount || 0,
-        premium: premiumCount || 0
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/users', async (req, res) => {
-  try {
-    const { adminId } = req.query;
-    if (!(await checkIsAdmin(adminId))) {
-      return res.status(403).json({ error: 'Доступ заборонено' });
-    }
-
-    const { data: users } = await supabase.from('users').select('*').order('created_at', { ascending: false }).limit(50);
-    res.json({ success: true, users: users || [] });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/admin/grant-premium', async (req, res) => {
-  try {
-    const { adminId, targetUserId, days } = req.body;
-    if (!(await checkIsAdmin(adminId))) {
-      return res.status(403).json({ error: 'Доступ заборонено' });
-    }
-
-    await addPremiumDays(targetUserId, parseInt(days) || 30);
-    await sendTelegramMessage(targetUserId, `🎁 <b>Адміністратор нарахував вам ${days} днів Premium!</b>`);
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // TELEGRAM BOT WEBHOOK
 app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
@@ -445,7 +390,7 @@ app.post('/telegram-webhook', async (req, res) => {
     return;
   }
 
-  // Команда /start на украинском языке с Onboarding
+  // Команда /start с Onboarding
   if (text.startsWith('/start')) {
     const args = text.split(' ');
     let referrerId = null;
@@ -489,12 +434,12 @@ app.post('/telegram-webhook', async (req, res) => {
     return;
   }
 
-  // Команды Администратора
+  // Гарантированная обработка админ-команд
   const isAdmin = await checkIsAdmin(chatId);
 
   if (text.startsWith('/admin') || text.startsWith('/stats') || text.startsWith('/grant') || text.startsWith('/broadcast')) {
     if (!isAdmin) {
-      await sendTelegramMessage(chatId, '❌ <b>У доступі відмовлено.</b> Ця команда доступна лише адміністраторам.');
+      await sendTelegramMessage(chatId, `❌ <b>У доступі відмовлено.</b> Ваш ID: <code>${chatId}</code> не знайдено у списку адміністраторів.`);
       return;
     }
 
@@ -539,7 +484,7 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 });
 
-// ФОНОВЫЙ ВОРКЕР МАРКЕТПЛЕЙСА
+// ФОНОВЫЙ ВОРКЕР
 async function runBackgroundWorker() {
   if (!supabase || !TELEGRAM_BOT_TOKEN) return;
 
