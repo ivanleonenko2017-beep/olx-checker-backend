@@ -13,13 +13,14 @@
       --text: #ffffff;
       --text-muted: #8a909a;
       --danger: #ff4757;
+      --border: #22272e;
     }
     body {
       margin: 0;
       background-color: var(--bg-color);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      padding-bottom: 70px;
+      padding-bottom: 80px;
     }
     .container { padding: 16px; }
     .nav-bar {
@@ -31,7 +32,8 @@
       display: flex;
       justify-content: space-around;
       align-items: center;
-      border-top: 1px solid #22272e;
+      border-top: 1px solid var(--border);
+      z-index: 1000;
     }
     .nav-item {
       color: var(--text-muted);
@@ -48,44 +50,102 @@
       border-radius: 12px;
       padding: 16px;
       margin-bottom: 12px;
+      border: 1px solid var(--border);
     }
     .btn {
       background: var(--accent);
       color: #000;
       border: none;
-      padding: 10px 16px;
+      padding: 12px 16px;
       border-radius: 8px;
       font-weight: bold;
       cursor: pointer;
       width: 100%;
+      font-size: 14px;
     }
     .btn-danger { background: var(--danger); color: #fff; }
+    .btn-secondary { background: #22272e; color: #fff; border: 1px solid #333; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .stat-val { font-size: 22px; font-weight: bold; color: var(--accent); }
-    input {
+    input, select {
       width: 100%;
-      padding: 10px;
+      padding: 12px;
       margin-bottom: 10px;
       background: #22272e;
       border: 1px solid #333;
       color: #fff;
-      border-radius: 6px;
+      border-radius: 8px;
       box-sizing: border-box;
+      font-size: 14px;
+    }
+    .filter-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .filter-item:last-child { border-bottom: none; }
+    .badge {
+      background: rgba(0, 255, 136, 0.1);
+      color: var(--accent);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
     }
   </style>
 </head>
 <body>
 
   <div class="container" id="app">
-    <!-- Главный поисковый экран -->
+    <!-- 1. Главный экран: Поиск и Фільтри -->
     <div id="screen-main">
-      <h2>🔍 OLX Checker</h2>
+      <h2>🔍 Пошукові Фільтри</h2>
+      
+      <!-- Форма создания фильтра -->
       <div class="card">
-        <p>Моніторинг оголошень активовано. Створюйте фільтри та отримуйте сповіщення у чат.</p>
+        <h3>Створити новий фільтр</h3>
+        <input type="text" id="query-input" placeholder="Запит (наприклад: iPhone 13)">
+        <div class="grid">
+          <input type="number" id="min-price" placeholder="Мін. ціна (грн)">
+          <input type="number" id="max-price" placeholder="Макс. ціна (грн)">
+        </div>
+        <button class="btn" onclick="createFilter()">+ Додати фільтр</button>
+      </div>
+
+      <!-- Список активных фильтров -->
+      <div class="card">
+        <h3>Мої активні фільтри</h3>
+        <div id="filters-list">
+          <small style="color: var(--text-muted);">Завантаження фільтрів...</small>
+        </div>
       </div>
     </div>
 
-    <!-- Раздел Администрирования (Отображается только администраторам) -->
+    <!-- 2. Экран: Мій кабінет & Рефералы -->
+    <div id="screen-profile" style="display: none;">
+      <h2>👤 Мій Кабінет</h2>
+
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 18px; font-weight: bold;" id="user-name">Користувач</div>
+            <small style="color: var(--text-muted);" id="user-id">ID: -</small>
+          </div>
+          <span class="badge" id="tariff-badge">FREE</span>
+        </div>
+        <div style="margin-top: 12px; font-size: 13px; color: var(--text-muted);" id="premium-until"></div>
+      </div>
+
+      <div class="card">
+        <h3>🎁 Реферальна програма</h3>
+        <p style="font-size: 13px; color: var(--text-muted);">Отримуйте +3 дні Premium за кожного запрошеного друга!</p>
+        <input type="text" id="ref-link" readonly onclick="copyRefLink()">
+        <button class="btn btn-secondary" onclick="copyRefLink()">📋 Скопіювати посилання</button>
+      </div>
+    </div>
+
+    <!-- 3. Экран: Адміністрування (Для админов) -->
     <div id="screen-admin" style="display: none;">
       <h2>⚙️ Адміністрування</h2>
       
@@ -118,9 +178,10 @@
     </div>
   </div>
 
-  <!-- Нижняя панель навигации -->
+  <!-- Нижнее меню навигации -->
   <div class="nav-bar">
     <div class="nav-item active" id="tab-main" onclick="showScreen('main')">🔍 Пошук</div>
+    <div class="nav-item" id="tab-profile" onclick="showScreen('profile')">👤 Кабінет</div>
     <div class="nav-item" id="admin-tab" style="display: none;" onclick="showScreen('admin')">⚙️ Адмін</div>
   </div>
 
@@ -130,18 +191,40 @@
 
     const initData = tg?.initData || '';
     const userId = tg?.initDataUnsafe?.user?.id || 668277478;
+    const firstName = tg?.initDataUnsafe?.user?.first_name || 'Користувач';
+
+    let userBotRefLink = `https://t.me/olx_checker_bot?start=ref_${userId}`;
 
     async function initProfile() {
+      document.getElementById('user-name').innerText = firstName;
+      document.getElementById('user-id').innerText = `ID: ${userId}`;
+      document.getElementById('ref-link').value = userBotRefLink;
+
       try {
         const res = await fetch(`/api/user/profile?userId=${userId}`, {
           headers: { 'x-telegram-init-data': initData }
         });
         const data = await res.json();
         
-        if (data.isAdmin) {
-          document.getElementById('admin-tab').style.display = 'flex';
-          loadAdminStats();
+        if (data.success) {
+          const u = data.user;
+          const isPrem = u.tariff === 'premium' && new Date(u.premium_until) > new Date();
+          
+          document.getElementById('tariff-badge').innerText = isPrem ? 'PREMIUM 💎' : 'FREE';
+          document.getElementById('tariff-badge').style.color = isPrem ? '#00ff88' : '#8a909a';
+          
+          if (isPrem && u.premium_until) {
+            const expDate = new Date(u.premium_until).toLocaleDateString('uk-UA');
+            document.getElementById('premium-until').innerText = `Підписка дійсна до: ${expDate}`;
+          }
+
+          if (data.isAdmin) {
+            document.getElementById('admin-tab').style.display = 'flex';
+            loadAdminStats();
+          }
         }
+
+        loadUserFilters();
 
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('screen') === 'admin' && data.isAdmin) {
@@ -154,10 +237,76 @@
 
     function showScreen(name) {
       document.getElementById('screen-main').style.display = name === 'main' ? 'block' : 'none';
+      document.getElementById('screen-profile').style.display = name === 'profile' ? 'block' : 'none';
       document.getElementById('screen-admin').style.display = name === 'admin' ? 'block' : 'none';
       
       document.getElementById('tab-main').classList.toggle('active', name === 'main');
+      document.getElementById('tab-profile').classList.toggle('active', name === 'profile');
       document.getElementById('admin-tab').classList.toggle('active', name === 'admin');
+    }
+
+    async function loadUserFilters() {
+      try {
+        const res = await fetch(`/api/user/filters?userId=${userId}`);
+        const data = await res.json();
+        const container = document.getElementById('filters-list');
+
+        if (!data.filters || data.filters.length === 0) {
+          container.innerHTML = '<small style="color: var(--text-muted);">У вас поки немає активних фільтрів</small>';
+          return;
+        }
+
+        container.innerHTML = data.filters.map(f => `
+          <div class="filter-item">
+            <div>
+              <strong>${f.query}</strong><br>
+              <small style="color: var(--text-muted);">${f.min_price || 0} - ${f.max_price || '∞'} грн</small>
+            </div>
+            <button class="btn btn-danger" style="width: auto; padding: 6px 12px; font-size: 12px;" onclick="deleteFilter('${f.id}')">Видалити</button>
+          </div>
+        `).join('');
+      } catch (e) {
+        document.getElementById('filters-list').innerHTML = '<small style="color: var(--danger);">Помилка завантаження</small>';
+      }
+    }
+
+    async function createFilter() {
+      const query = document.getElementById('query-input').value.trim();
+      const minPrice = document.getElementById('min-price').value;
+      const maxPrice = document.getElementById('max-price').value;
+
+      if (!query) {
+        alert('Введіть пошуковий запит!');
+        return;
+      }
+
+      const res = await fetch('/api/filters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, query, minPrice, maxPrice })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        document.getElementById('query-input').value = '';
+        document.getElementById('min-price').value = '';
+        document.getElementById('max-price').value = '';
+        loadUserFilters();
+      } else if (data.error === 'LIMIT_EXCEEDED') {
+        alert('Перевищено ліміт фільтрів (макс. 2 для Free тарифу). Отримайте Premium для безліміту!');
+      } else {
+        alert('Помилка: ' + data.error);
+      }
+    }
+
+    async function deleteFilter(id) {
+      await fetch(`/api/filters/${id}`, { method: 'DELETE' });
+      loadUserFilters();
+    }
+
+    function copyRefLink() {
+      navigator.clipboard.writeText(userBotRefLink);
+      alert('Реферальне посилання скопійовано!');
     }
 
     async function loadAdminStats() {
