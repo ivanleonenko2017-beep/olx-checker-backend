@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Отключение кэширования для статических файлов и API
+// Отключение кэширования для статики и API
 app.use(express.static(__dirname, {
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
@@ -26,7 +26,7 @@ const SUPABASE_URL = rawUrl;
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 
-// Загрузка списка ID администраторов
+// Список ID администраторов из переменных окружения
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
   .split(',')
   .map(id => parseInt(id.trim(), 10))
@@ -66,7 +66,7 @@ async function addPremiumDays(userId, days) {
   }, { onConflict: 'telegram_id' });
 }
 
-// Telegram API Wrapper
+// Telegram API Wrapper (ИСПРАВЛЕННЫЕ URL)
 async function sendTelegramMessage(chatId, text, replyMarkup = null) {
   if (!TELEGRAM_BOT_TOKEN) return;
   try {
@@ -405,8 +405,7 @@ app.post('/telegram-webhook', async (req, res) => {
     const webAppUrl = process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com';
     const keyboard = {
       inline_keyboard: [
-        [{ text: '🚀 Открыть OLX Checker', web_app: { url: webAppUrl } }],
-        [{ text: '💎 Мой Кабинет & Рефералы', callback_data: 'btn_profile' }, { text: '❓ Помощь', callback_data: 'btn_help' }]
+        [{ text: '🚀 Открыть OLX Checker', web_app: { url: webAppUrl } }]
       ]
     };
 
@@ -440,7 +439,7 @@ app.post('/telegram-webhook', async (req, res) => {
     if (text === '/stats') {
       const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
       const { count: filtersCount } = await supabase.from('filters').select('*', { count: 'exact', head: true });
-      await sendTelegramMessage(chatId, `📊 <b>Статистика бота:</b>\n\nПользователей: <b>${usersCount \vert{}\vert{} 0}</b>\nАктивных фильтров: <b>${filtersCount || 0}</b>`);
+      await sendTelegramMessage(chatId, `📊 <b>Статистика бота:</b>\n\nПользователей: <b>${usersCount || 0}</b>\nАктивных фильтров: <b>${filtersCount || 0}</b>`);
       return;
     }
 
@@ -504,7 +503,7 @@ async function runBackgroundWorker() {
 
             const text = `🔥 <b>НОВОЕ ОБЪЯВЛЕНИЕ</b>\n\n` +
                          `📌 <b>Название:</b> ${item.title}\n` +
-                         `💰 <b>Цена:</b> ${item.priceText}${isCheap ? `(Ниже рынка на ${discount}%)` : ''}\n` +
+                         `💰 <b>Цена:</b> ${item.priceText} ${isCheap ? `(Ниже рынка на ${discount}%)` : ''}\n` +
                          `📍 <b>Местоположение:</b> ${item.locationDate || 'Украина'}\n` +
                          `📝 <b>Описание:</b> ${item.description}\n\n` +
                          `🔎 <i>Запрос: ${filter.query}</i>`;
