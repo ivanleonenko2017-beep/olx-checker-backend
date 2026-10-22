@@ -15,6 +15,7 @@ app.use(express.static(__dirname, {
   }
 }));
 
+// Очистка и инициализация Supabase URL
 let rawUrl = (process.env.SUPABASE_URL || '').trim();
 if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 if (rawUrl.endsWith('/rest/v1')) rawUrl = rawUrl.slice(0, -8);
@@ -39,6 +40,7 @@ const HEADERS = {
   'Cache-Control': 'no-cache'
 };
 
+// Функция продления/выдачи PRO подписки
 async function addPremiumDays(userId, days) {
   if (!supabase) return;
   const { data: user } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
@@ -57,6 +59,7 @@ async function addPremiumDays(userId, days) {
   }, { onConflict: 'telegram_id' });
 }
 
+// Telegram API функции
 async function sendTelegramMessage(chatId, text, replyMarkup = null) {
   if (!TELEGRAM_BOT_TOKEN) return;
   try {
@@ -87,6 +90,7 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
   }
 }
 
+// Прокси для картинок
 app.get('/api/proxy-image', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -109,6 +113,13 @@ app.get('/api/proxy-image', async (req, res) => {
   }
 });
 
+// Главная страница
+app.get('/', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Парсер OLX
 async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
   const $ = cheerio.load(response.data);
@@ -203,6 +214,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   return { items: rawItems, averagePrice };
 }
 
+// REST API
 app.get('/api/search', async (req, res) => {
   try {
     const { query, categoryUrl, minPrice, maxPrice } = req.query;
@@ -283,7 +295,8 @@ app.delete('/api/filters/:id', async (req, res) => {
   }
 });
 
-app.post(`/telegram-webhook`, async (req, res) => {
+// TELEGRAM WEBHOOK (Прием команд и оплаты)
+app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
   const update = req.body;
 
@@ -385,6 +398,7 @@ app.post(`/telegram-webhook`, async (req, res) => {
   }
 });
 
+// ФОНОВЫЙ ВОРКЕР (Авто-поиск новых объявлений)
 async function runBackgroundWorker() {
   if (!supabase || !TELEGRAM_BOT_TOKEN) return;
 
@@ -440,6 +454,7 @@ async function runBackgroundWorker() {
   }
 }
 
+// Запуск воркера каждые 60 секунд
 setInterval(runBackgroundWorker, 60000);
 
 const PORT = process.env.PORT || 3000;
