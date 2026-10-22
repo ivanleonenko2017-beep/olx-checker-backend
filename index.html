@@ -255,10 +255,10 @@
       </div>
 
       <!-- Legal Links -->
-      <div class="text-center pt-2 space-x-3 text-[10px] text-gray-500">
-        <button onclick="openLegalDoc('terms')" class="hover:underline">Публічна оферта</button>
+      <div class="text-center pt-2 pb-4 space-x-3 text-[11px] text-gray-400 font-medium">
+        <button onclick="openLegalDoc('terms')" class="hover:text-emerald-400 transition underline underline-offset-4">Публічна оферта</button>
         <span>•</span>
-        <button onclick="openLegalDoc('privacy')" class="hover:underline">Політика конфіденційності</button>
+        <button onclick="openLegalDoc('privacy')" class="hover:text-emerald-400 transition underline underline-offset-4">Політика конфіденційності</button>
       </div>
     </div>
 
@@ -958,6 +958,7 @@
       }
     }
 
+    // ВІДКРИТТЯ ЮРИДИЧНИХ ДОКУМЕНТІВ
     function openLegalDoc(type) {
       const docs = {
         terms: {
