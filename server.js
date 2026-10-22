@@ -15,15 +15,20 @@ app.use(express.static(__dirname, {
   }
 }));
 
-// Инициализация Supabase и Telegram
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+// Автоматическая очистка URL от лишних слэшей и REST-префиксов
+let rawUrl = (process.env.SUPABASE_URL || '').trim();
+if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
+if (rawUrl.endsWith('/rest/v1')) rawUrl = rawUrl.slice(0, -8);
+if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
+
+const SUPABASE_URL = rawUrl;
+const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
+const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 
 let supabase = null;
 if (SUPABASE_URL && SUPABASE_KEY) {
   supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-  console.log('✅ Supabase успешно подключен');
+  console.log(`✅ Supabase успешно подключен к: ${SUPABASE_URL}`);
 } else {
   console.warn('⚠️ Переменные SUPABASE_URL или SUPABASE_KEY не заданы!');
 }
@@ -239,7 +244,7 @@ app.post('/api/filters', async (req, res) => {
       await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
 
       const { data: userFilters } = await supabase.from('filters').select('id').eq('user_id', userId);
-      const { data: userData } = await supabase.from('users').select('tariff').eq('telegram_id', userId).single();
+      const { data: userData } = await supabase.from('users').select('tariff').eq('telegram_id', userId).maybeSingle();
 
       const isPremium = userData && userData.tariff === 'premium';
       if (!isPremium && userFilters && userFilters.length >= 2) {
@@ -255,7 +260,10 @@ app.post('/api/filters', async (req, res) => {
         condition: condition || 'all'
       }]).select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase Error:', error.message);
+        throw error;
+      }
       return res.json({ success: true, filter: data[0] });
     } else {
       return res.json({ success: true });
@@ -263,7 +271,7 @@ app.post('/api/filters', async (req, res) => {
 
   } catch (err) {
     console.error('Save filter error:', err.message);
-    res.status(500).json({ error: 'Помилка збереження в базу даних' });
+    res.status(500).json({ error: 'Помилка збереження в базу даних: ' + err.message });
   }
 });
 
@@ -283,8 +291,10 @@ async function runBackgroundWorker() {
   if (!supabase || !TELEGRAM_BOT_TOKEN) return;
 
   try {
-    const { data: filters } = await supabase.from('filters').select('*');
-    if (!filters || filters.length === 0) return;
+    const { data: filters, error } = await supabase.from('filters').select('*');
+    if (error || !filters || filters.length === 0) return;
+
+    console.log(`🔍 Checking ${filters.length} active filters...`);
 
     for (const filter of filters) {
       try {
@@ -316,6 +326,7 @@ async function runBackgroundWorker() {
             };
 
             await sendTelegramMessage(filter.user_id, text, keyboard);
+            console.log(`✅ Notification sent to ${filter.user_id}`);
           }
         }
       } catch (fErr) {
