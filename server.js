@@ -9,13 +9,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Отключение кэширования для статики и API
 app.use(express.static(__dirname, {
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   }
 }));
 
-// Очистка и инициализация Supabase URL
+// Нормализация Supabase URL
 let rawUrl = (process.env.SUPABASE_URL || '').trim();
 if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 if (rawUrl.endsWith('/rest/v1')) rawUrl = rawUrl.slice(0, -8);
@@ -25,10 +26,16 @@ const SUPABASE_URL = rawUrl;
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 
+// Список ID администраторов из переменных окружения (например: "668277478,123456789")
+const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
+  .split(',')
+  .map(id => parseInt(id.trim(), 10))
+  .filter(Boolean);
+
 let supabase = null;
 if (SUPABASE_URL && SUPABASE_KEY) {
   supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-  console.log(`✅ Supabase подключен к: ${SUPABASE_URL}`);
+  console.log(`✅ Supabase подключен: ${SUPABASE_URL}`);
 } else {
   console.warn('⚠️ Переменные SUPABASE_URL или SUPABASE_KEY не заданы!');
 }
@@ -40,12 +47,12 @@ const HEADERS = {
   'Cache-Control': 'no-cache'
 };
 
-// Функция продления/выдачи PRO подписки
+// Хелпер: Управление Premium подпиской
 async function addPremiumDays(userId, days) {
   if (!supabase) return;
   const { data: user } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
   
-  let now = new Date();
+  const now = new Date();
   let baseDate = (user && user.premium_until && new Date(user.premium_until) > now) 
     ? new Date(user.premium_until) 
     : now;
@@ -59,7 +66,7 @@ async function addPremiumDays(userId, days) {
   }, { onConflict: 'telegram_id' });
 }
 
-// Telegram API функции
+// Telegram API wrappers
 async function sendTelegramMessage(chatId, text, replyMarkup = null) {
   if (!TELEGRAM_BOT_TOKEN) return;
   try {
@@ -71,7 +78,7 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null) {
       reply_markup: replyMarkup
     });
   } catch (err) {
-    console.error(`Ошибка sendMessage (${chatId}):`, err.response?.data || err.message);
+    console.error(`Ошибка sendTelegramMessage (${chatId}):`, err.response?.data || err.message);
   }
 }
 
@@ -86,11 +93,12 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
       reply_markup: replyMarkup
     });
   } catch (err) {
+    // Fallback на текстовое сообщение при ошибке загрузки фото
     await sendTelegramMessage(chatId, caption, replyMarkup);
   }
 }
 
-// Прокси для картинок
+// Эндпоинт проксирования изображений (Обход CORS и Referer ограничения)
 app.get('/api/proxy-image', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -102,7 +110,7 @@ app.get('/api/proxy-image', async (req, res) => {
         'User-Agent': HEADERS['User-Agent'],
         'Referer': 'https://www.olx.ua/'
       },
-      timeout: 5000
+      timeout: 7000
     });
 
     res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
@@ -113,13 +121,13 @@ app.get('/api/proxy-image', async (req, res) => {
   }
 });
 
-// Главная страница
+// Главный роут Mini App
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Парсер OLX
+// Канонический парсер OLX
 async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
   const $ = cheerio.load(response.data);
@@ -196,7 +204,8 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
         link,
         rawImgUrl,
         proxyImg: rawImgUrl ? `/api/proxy-image?url=${encodeURIComponent(rawImgUrl)}` : '',
-        locationDate
+        locationDate: locationDate || 'Україна',
+        description: 'Опис відсутній'
       });
     }
   });
@@ -214,7 +223,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   return { items: rawItems, averagePrice };
 }
 
-// REST API
+// REST API поиска для Mini App
 app.get('/api/search', async (req, res) => {
   try {
     const { query, categoryUrl, minPrice, maxPrice } = req.query;
@@ -236,7 +245,7 @@ app.get('/api/search', async (req, res) => {
     const { items, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query);
     res.json({ success: true, count: items.length, averagePrice, items });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Помилка отримання данных з OLX' });
+    res.status(500).json({ success: false, error: 'Помилка отримання даних з OLX' });
   }
 });
 
@@ -251,6 +260,7 @@ app.get('/api/user/filters', async (req, res) => {
   }
 });
 
+// Создание фильтра с ПЕРВИЧНЫМ ИМПОРТОМ (Warm-up без отправки сообщений)
 app.post('/api/filters', async (req, res) => {
   try {
     const { userId, query, minPrice, maxPrice, city, condition } = req.body;
@@ -277,7 +287,24 @@ app.post('/api/filters', async (req, res) => {
       }]).select();
 
       if (error) throw error;
-      return res.json({ success: true, filter: data[0] });
+      const createdFilter = data[0];
+
+      // Первичная регистрация существующих объявлений без спама в Telegram
+      try {
+        const targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(query)}/`;
+        const { items } = await parseOlx(targetUrl, minPrice, maxPrice, query);
+        if (items && items.length > 0) {
+          const seenRecords = items.map(item => ({
+            filter_id: createdFilter.id,
+            ad_link: item.link
+          }));
+          await supabase.from('seen_ads').insert(seenRecords).catch(() => {});
+        }
+      } catch (e) {
+        console.error('Ошибка первичного прогрева фильтра:', e.message);
+      }
+
+      return res.json({ success: true, filter: createdFilter });
     }
     return res.json({ success: true });
   } catch (err) {
@@ -295,7 +322,7 @@ app.delete('/api/filters/:id', async (req, res) => {
   }
 });
 
-// TELEGRAM WEBHOOK (Прием команд и оплаты)
+// TELEGRAM BOT WEBHOOK
 app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
   const update = req.body;
@@ -313,6 +340,7 @@ app.post('/telegram-webhook', async (req, res) => {
   const chatId = msg.chat.id;
   const text = msg.text || '';
 
+  // 1. Оплата Telegram Stars
   if (msg.successful_payment) {
     const payload = JSON.parse(msg.successful_payment.invoice_payload);
     await addPremiumDays(chatId, payload.days);
@@ -327,6 +355,7 @@ app.post('/telegram-webhook', async (req, res) => {
     return;
   }
 
+  // 2. Команда /start (с поддержкой реферальных ссылок)
   if (text.startsWith('/start')) {
     const args = text.split(' ');
     let referrerId = null;
@@ -340,32 +369,55 @@ app.post('/telegram-webhook', async (req, res) => {
     if (!existingUser) {
       await supabase.from('users').insert([{
         telegram_id: chatId,
-        first_name: msg.from.first_name,
+        first_name: msg.from.first_name || 'Користувач',
         referred_by: (referrerId && referrerId !== chatId) ? referrerId : null
       }]);
 
       if (referrerId && referrerId !== chatId) {
         await addPremiumDays(referrerId, 3);
-        await supabase.from('referral_logs').insert([{ referrer_id: referrerId, referred_id: chatId }]);
-        await sendTelegramMessage(referrerId, `🎁 <b>Новий реферал!</b> Пользователь ${msg.from.first_name} зарегистрировался. Вам начислено +3 дня Premium!`);
+        await supabase.from('referral_logs').insert([{ referrer_id: referrerId, referred_id: chatId }]).catch(() => {});
+        await sendTelegramMessage(referrerId, `🎁 <b>Новий реферал!</b> Користувач ${msg.from.first_name} зареєструвався. Вам нараховано +3 дні Premium!`);
       }
     }
 
-    await sendTelegramMessage(chatId, `Вітаємо, <b>${msg.from.first_name}</b> в OLX Checker Beta 1.0!\n\nИспользуйте веб-интерфейс для настройки фильтров.`);
+    const webAppUrl = process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com';
+    const keyboard = {
+      inline_keyboard: [[
+        { text: '🚀 Відкрити OLX Checker', web_app: { url: webAppUrl } }
+      ]]
+    };
+
+    const welcomeMessage = `Вітаємо, <b>${msg.from.first_name || 'користувач'}</b> в <b>OLX Checker</b>! 🚀\n\n` +
+      `Бот допомагає відстежувати найвигідніші пропозиції на OLX у реальному часі.\n\n` +
+      `📌 <b>Можливості:</b>\n` +
+      `• Миттєві сповіщення про нові оголошення\n` +
+      `• Автоматичний розрахунок середньої ціни та знижок\n` +
+      `• Зручний пошук через Mini App\n\n` +
+      `Натисніть кнопку нижче, щоб налаштувати ваші фільтри:`;
+
+    await sendTelegramMessage(chatId, welcomeMessage, keyboard);
     return;
   }
 
-  const { data: user } = await supabase.from('users').select('is_admin').eq('telegram_id', chatId).maybeSingle();
-  if (user && user.is_admin) {
+  // 3. Админ-панель
+  const { data: dbUser } = await supabase.from('users').select('is_admin').eq('telegram_id', chatId).maybeSingle();
+  const isAdmin = ADMIN_IDS.includes(chatId) || (dbUser && dbUser.is_admin);
+
+  if (text.startsWith('/admin') || text.startsWith('/stats') || text.startsWith('/grant') || text.startsWith('/broadcast')) {
+    if (!isAdmin) {
+      await sendTelegramMessage(chatId, '❌ <b>У доступі відмовлено.</b> Ця команда доступна лише адміністраторам.');
+      return;
+    }
+
     if (text === '/admin') {
-      await sendTelegramMessage(chatId, `🛠 <b>Админ Панель:</b>\n/stats - Статистика\n/grant <id> <days> - Выдать PRO\n/broadcast <text> - Рассылка`);
+      await sendTelegramMessage(chatId, `🛠 <b>Адмін Панель OLX Checker:</b>\n\n/stats — Статистика системи\n/grant <id> <days> — Видати Premium\n/broadcast <text> — Масова розсилка`);
       return;
     }
 
     if (text === '/stats') {
       const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
       const { count: filtersCount } = await supabase.from('filters').select('*', { count: 'exact', head: true });
-      await sendTelegramMessage(chatId, `📊 <b>Статистика:</b>\nПользователей: ${usersCount}\nАктивных фильтров: ${filtersCount}`);
+      await sendTelegramMessage(chatId, `📊 <b>Статистика бота:</b>\n\nКористувачів: <b>${usersCount || 0}</b>\nАктивних фільтрів: <b>${filtersCount || 0}</b>`);
       return;
     }
 
@@ -375,8 +427,8 @@ app.post('/telegram-webhook', async (req, res) => {
         const targetId = parseInt(parts[1], 10);
         const days = parseInt(parts[2], 10);
         await addPremiumDays(targetId, days);
-        await sendTelegramMessage(chatId, `✅ Пользователю ${targetId} выдано ${days} дней Premium.`);
-        await sendTelegramMessage(targetId, `🎁 Вам вручную начислено ${days} дней Premium!`);
+        await sendTelegramMessage(chatId, `✅ Користувачу <code>${targetId}</code> видано Premium на ${days} днів.`);
+        await sendTelegramMessage(targetId, `🎁 Вам вручну нараховано ${days} днів Premium!`);
       }
       return;
     }
@@ -387,18 +439,18 @@ app.post('/telegram-webhook', async (req, res) => {
 
       const { data: allUsers } = await supabase.from('users').select('telegram_id');
       let sent = 0;
-      for (const u of allUsers) {
+      for (const u of (allUsers || [])) {
         await sendTelegramMessage(u.telegram_id, broadcastText);
         sent++;
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise(r => setTimeout(r, 50)); // Rate limit 20 msg/sec
       }
-      await sendTelegramMessage(chatId, `📢 Рассылка завершена. Доставлено: ${sent}`);
+      await sendTelegramMessage(chatId, `📢 Розсилку завершено. Доставлено: ${sent}`);
       return;
     }
   }
 });
 
-// ФОНОВЫЙ ВОРКЕР (Авто-поиск новых объявлений)
+// ФОНОВЫЙ ВОРКЕР МОНИТОРИНГА (Только для действительно новых объявлений)
 async function runBackgroundWorker() {
   if (!supabase || !TELEGRAM_BOT_TOKEN) return;
 
@@ -406,7 +458,7 @@ async function runBackgroundWorker() {
     const { data: filters, error } = await supabase.from('filters').select('*');
     if (error || !filters || filters.length === 0) return;
 
-    console.log(`🔍 Проверка ${filters.length} активных фильтров...`);
+    console.log(`🔍 Моніторинг ${filters.length} активних фільтрів...`);
 
     await Promise.allSettled(filters.map(async (filter) => {
       try {
@@ -416,12 +468,14 @@ async function runBackgroundWorker() {
         if (!items || items.length === 0) return;
 
         for (const item of items) {
+          // Проверяем, было ли уже увиденное объявление
           const { data: seen } = await supabase.from('seen_ads')
             .select('id')
             .eq('filter_id', filter.id)
             .eq('ad_link', item.link);
 
           if (!seen || seen.length === 0) {
+            // Регистрируем объявление в БД
             await supabase.from('seen_ads').insert([{ filter_id: filter.id, ad_link: item.link }]);
 
             const isCheap = averagePrice > 0 && item.price < averagePrice * 0.85;
@@ -442,19 +496,19 @@ async function runBackgroundWorker() {
             } else {
               await sendTelegramMessage(filter.user_id, text, keyboard);
             }
-            console.log(`✅ Уведомление отправлено пользователю ${filter.user_id}`);
+            console.log(`✅ Сповіщення відправлено користувачу ${filter.user_id}`);
           }
         }
       } catch (fErr) {
-        console.error(`Ошибка обработки фильтра ID ${filter.id}:`, fErr.message);
+        console.error(`Помилка фільтра ID ${filter.id}:`, fErr.message);
       }
     }));
   } catch (err) {
-    console.error('Ошибка воркера:', err.message);
+    console.error('Помилка воркера:', err.message);
   }
 }
 
-// Запуск воркера каждые 60 секунд
+// Запуск фонового поиска каждые 60 секунд
 setInterval(runBackgroundWorker, 60000);
 
 const PORT = process.env.PORT || 3000;
