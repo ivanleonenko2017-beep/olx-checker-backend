@@ -77,7 +77,7 @@
 <body>
 
   <div class="container" id="app">
-    <!-- Поисковый экран -->
+    <!-- Главный поисковый экран -->
     <div id="screen-main">
       <h2>🔍 OLX Checker</h2>
       <div class="card">
@@ -85,7 +85,7 @@
       </div>
     </div>
 
-    <!-- Раздел Администрирования -->
+    <!-- Раздел Администрирования (Отображается только администраторам) -->
     <div id="screen-admin" style="display: none;">
       <h2>⚙️ Адміністрування</h2>
       
@@ -118,6 +118,7 @@
     </div>
   </div>
 
+  <!-- Нижняя панель навигации -->
   <div class="nav-bar">
     <div class="nav-item active" id="tab-main" onclick="showScreen('main')">🔍 Пошук</div>
     <div class="nav-item" id="admin-tab" style="display: none;" onclick="showScreen('admin')">⚙️ Адмін</div>
@@ -178,6 +179,11 @@
       const targetUserId = document.getElementById('grant-id').value;
       const days = document.getElementById('grant-days').value;
       
+      if (!targetUserId) {
+        alert('Будь ласка, вкажіть Telegram ID');
+        return;
+      }
+
       const res = await fetch('/api/admin/grant-premium', {
         method: 'POST',
         headers: {
@@ -197,6 +203,12 @@
 
     async function revokePremium() {
       const targetUserId = document.getElementById('grant-id').value;
+      
+      if (!targetUserId) {
+        alert('Будь ласка, вкажіть Telegram ID');
+        return;
+      }
+
       const res = await fetch('/api/admin/revoke-premium', {
         method: 'POST',
         headers: {
