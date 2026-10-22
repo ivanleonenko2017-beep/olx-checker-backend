@@ -10,7 +10,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Захист статики та локальний placeholder
+// Защита статики
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 app.use(express.static(__dirname, {
   setHeaders: (res) => {
@@ -18,7 +18,7 @@ app.use(express.static(__dirname, {
   }
 }));
 
-// Нормалізація Supabase URL
+// Нормализация Supabase URL
 let rawUrl = (process.env.SUPABASE_URL || '').trim();
 if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 if (rawUrl.endsWith('/rest/v1')) rawUrl = rawUrl.slice(0, -8);
@@ -133,7 +133,7 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
   }
 }
 
-// ПРОКСІ ДЛЯ ФОТОГРАФІЙ
+// ПРОКСИ ДЛЯ КАРТИНОК
 app.get('/api/proxy-image', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -162,7 +162,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// АВТОРИЗАЦІЯ ТА ПРОФІЛЬ
+// АВТОРИЗАЦИЯ И ПРОФИЛЬ
 app.get('/api/user/profile', async (req, res) => {
   try {
     const userId = req.query.userId;
@@ -217,6 +217,7 @@ app.delete('/api/filters/:id', async (req, res) => {
   }
 });
 
+// ПАРСЕР OLX
 async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
   const $ = cheerio.load(response.data);
@@ -337,7 +338,7 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// СТВОРЕННЯ ФІЛЬТРА З ТИХИМ ПРОГРЕВОМ
+// СОЗДАНИЕ ФИЛЬТРА
 app.post('/api/filters', async (req, res) => {
   try {
     const { userId, query, minPrice, maxPrice, city, condition } = req.body;
@@ -366,7 +367,6 @@ app.post('/api/filters', async (req, res) => {
       if (error) throw error;
       const createdFilter = data[0];
 
-      // ТИХИЙ ПРОГРЕВ
       try {
         const targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(query)}/`;
         const { items } = await parseOlx(targetUrl, minPrice, maxPrice, query);
@@ -389,7 +389,7 @@ app.post('/api/filters', async (req, res) => {
   }
 });
 
-// ЮРИДИЧНІ ЕНДПОЇНТИ
+// ЮРИДИЧЕСКИЕ ЭНДПОИНТЫ
 app.get('/api/legal/terms', (req, res) => {
   res.json({
     title: "Публічна оферта та Умови використання OLX Checker",
@@ -404,7 +404,7 @@ app.get('/api/legal/privacy', (req, res) => {
   });
 });
 
-// АДМІНКА
+// АДМИНКА
 app.get('/api/admin/stats', adminAuthMiddleware, async (req, res) => {
   try {
     if (!supabase) return res.json({ success: true, stats: { totalUsers: 0, totalFilters: 0, totalSeen: 0 } });
@@ -457,7 +457,7 @@ app.get('/api/admin/diagnostics', adminAuthMiddleware, async (req, res) => {
   res.json({ success: true, supabaseOk: Boolean(supabase), botOk: Boolean(TELEGRAM_BOT_TOKEN) });
 });
 
-// РОЗСИЛКА ПОВІДОМЛЕНЬ
+// РОЗСЫЛКА
 app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
   try {
     const { text } = req.body;
@@ -480,7 +480,7 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
   }
 });
 
-// TELEGRAM BOT WEBHOOK
+// TELEGRAM WEBHOOK
 app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
   const update = req.body;
@@ -530,7 +530,7 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 });
 
-// ФОНОВИЙ ВОРКЕР МИТТЄВОГО МОНІТОРИНГУ
+// ВОРКЕР МОНИТОРИНГА
 async function runBackgroundWorker() {
   if (!supabase || !TELEGRAM_BOT_TOKEN) return;
 
