@@ -10,7 +10,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Защита статики и раздача локального placeholder
+// Захист статики та локальний placeholder
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 app.use(express.static(__dirname, {
   setHeaders: (res) => {
@@ -18,7 +18,7 @@ app.use(express.static(__dirname, {
   }
 }));
 
-// Нормализация Supabase URL
+// Нормалізація Supabase URL
 let rawUrl = (process.env.SUPABASE_URL || '').trim();
 if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 if (rawUrl.endsWith('/rest/v1')) rawUrl = rawUrl.slice(0, -8);
@@ -68,7 +68,7 @@ function verifyTelegramWebAppData(initDataRaw) {
       return userStr ? JSON.parse(userStr) : null;
     }
   } catch (e) {
-    console.error('Ошибка проверки InitData:', e.message);
+    console.error('Помилка перевірки InitData:', e.message);
   }
   return null;
 }
@@ -101,7 +101,7 @@ async function adminAuthMiddleware(req, res, next) {
 }
 
 async function sendTelegramMessage(chatId, text, replyMarkup = null) {
-  if (!TELEGRAM_BOT_TOKEN) return;
+  if (!TELEGRAM_BOT_TOKEN) return false;
   try {
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       chat_id: chatId,
@@ -110,13 +110,15 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null) {
       disable_web_page_preview: false,
       reply_markup: replyMarkup
     });
+    return true;
   } catch (err) {
     console.error(`Помилка sendTelegramMessage (${chatId}):`, err.response?.data || err.message);
+    return false;
   }
 }
 
 async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) {
-  if (!TELEGRAM_BOT_TOKEN) return;
+  if (!TELEGRAM_BOT_TOKEN) return false;
   try {
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
       chat_id: chatId,
@@ -125,12 +127,13 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
       parse_mode: 'HTML',
       reply_markup: replyMarkup
     });
+    return true;
   } catch (err) {
-    await sendTelegramMessage(chatId, caption, replyMarkup);
+    return await sendTelegramMessage(chatId, caption, replyMarkup);
   }
 }
 
-// ПЕРЕПИСАННЫЙ НАДЕЖНЫЙ ПРОКСИ ДЛЯ ФОТОГРАФИЙ
+// ПРОКСІ ДЛЯ ФОТОГРАФІЙ
 app.get('/api/proxy-image', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -159,7 +162,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// АВТОРИЗАЦИЯ И ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (ИСПРАВЛЯЕТ ПРОПАЖУ АДМИНКИ)
+// АВТОРИЗАЦІЯ ТА ПРОФІЛЬ
 app.get('/api/user/profile', async (req, res) => {
   try {
     const userId = req.query.userId;
@@ -334,7 +337,7 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// СОЗДАНИЕ ФИЛЬТРА С ТИХИМ ПРОГРЕВОМ (ФЛУД ИСКЛЮЧЕН)
+// СТВОРЕННЯ ФІЛЬТРА З ТИХИМ ПРОГРЕВОМ
 app.post('/api/filters', async (req, res) => {
   try {
     const { userId, query, minPrice, maxPrice, city, condition } = req.body;
@@ -363,7 +366,7 @@ app.post('/api/filters', async (req, res) => {
       if (error) throw error;
       const createdFilter = data[0];
 
-      // ТИХИЙ ПРОГРЕВ: сохраняем существующие ссылки как просмотренные БЕЗ отправки сообщений
+      // ТИХИЙ ПРОГРЕВ
       try {
         const targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(query)}/`;
         const { items } = await parseOlx(targetUrl, minPrice, maxPrice, query);
@@ -375,7 +378,7 @@ app.post('/api/filters', async (req, res) => {
           await supabase.from('seen_ads').insert(initialSeen).catch(() => {});
         }
       } catch (warmupErr) {
-        console.error('Ошибка прогрева:', warmupErr.message);
+        console.error('Помилка прогреву:', warmupErr.message);
       }
 
       return res.json({ success: true, filter: createdFilter });
@@ -386,7 +389,7 @@ app.post('/api/filters', async (req, res) => {
   }
 });
 
-// Единые юридические эндпоинты
+// ЮРИДИЧНІ ЕНДПОЇНТИ
 app.get('/api/legal/terms', (req, res) => {
   res.json({
     title: "Публічна оферта та Умови використання OLX Checker",
@@ -401,7 +404,7 @@ app.get('/api/legal/privacy', (req, res) => {
   });
 });
 
-// ЭНДПОИНТЫ АДМИН-ПАНЕЛИ (СТАТИСТИКА, ПОИСК И ВЫДАЧА PRO)
+// АДМІНКА
 app.get('/api/admin/stats', adminAuthMiddleware, async (req, res) => {
   try {
     if (!supabase) return res.json({ success: true, stats: { totalUsers: 0, totalFilters: 0, totalSeen: 0 } });
@@ -454,24 +457,21 @@ app.get('/api/admin/diagnostics', adminAuthMiddleware, async (req, res) => {
   res.json({ success: true, supabaseOk: Boolean(supabase), botOk: Boolean(TELEGRAM_BOT_TOKEN) });
 });
 
-// АДМИНКА: Массовая рассылка сообщений с задержкой
+// РОЗСИЛКА ПОВІДОМЛЕНЬ
 app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text || !supabase) return res.status(400).json({ error: 'Текст рассылки пуст' });
+    if (!text || !supabase) return res.status(400).json({ error: 'Текст розсилки порожній' });
 
     const { data: users } = await supabase.from('users').select('telegram_id');
     if (!users || users.length === 0) return res.json({ success: true, sentCount: 0 });
 
     let sentCount = 0;
     for (const u of users) {
-      try {
-        await sendTelegramMessage(u.telegram_id, text);
-        sentCount++;
-        await new Promise(r => setTimeout(r, 40));
-      } catch (err) {
-        console.error(`Ошибка рассылки для ${u.telegram_id}:`, err.message);
-      }
+      if (!u.telegram_id) continue;
+      const ok = await sendTelegramMessage(u.telegram_id, text);
+      if (ok) sentCount++;
+      await new Promise(r => setTimeout(r, 50));
     }
 
     res.json({ success: true, sentCount });
@@ -491,11 +491,28 @@ app.post('/telegram-webhook', async (req, res) => {
   const text = msg.text || '';
   const webAppUrl = process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com';
 
+  if (supabase) {
+    await supabase.from('users').upsert({ telegram_id: chatId }, { onConflict: 'telegram_id' }).catch(() => {});
+  }
+
   if (text.startsWith('/start')) {
+    const welcomeText = 
+      `👋 <b>Ласкаво просимо до OLX Checker Beta 1.0 RC!</b>\n\n` +
+      `⚡️ <b>Твій персональний інструмент для швидкого перекупу та вигідних покупок на OLX.</b>\n\n` +
+      `🎯 <b>Що вміє бот:</b>\n` +
+      `• <b>Авто-моніторинг 24/7:</b> миттєво знаходить нові оголошення раніше за інших.\n` +
+      `• <b>Аналітика ринку:</b> розраховує середню ціну та підказує знижки від 20%.\n` +
+      `• <b>Розумні фільтри:</b> відсіює чохли, запчастини, коробки та спам.\n\n` +
+      `👑 <b>Переваги PREMIUM:</b>\n` +
+      `✓ Перевірка нових товарів кожні <b>60 секунд</b>.\n` +
+      `✓ <b>Безлімітні</b> активні відстеження.\n` +
+      `✓ Пріоритетне надсилання сповіщень.\n\n` +
+      `👇 <i>Натисніть кнопку нижче, щоб відкрити додаток та налаштувати пошук:</i>`;
+
     const keyboard = {
       inline_keyboard: [[{ text: '🚀 Відкрити OLX Checker', web_app: { url: webAppUrl } }]]
     };
-    await sendTelegramMessage(chatId, `Вітаємо в <b>OLX Checker Beta 1.0 RC</b>! 🚀\n\nНатисніть кнопку нижче для запуску:`, keyboard);
+    await sendTelegramMessage(chatId, welcomeText, keyboard);
     return;
   }
 
@@ -513,7 +530,7 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 });
 
-// ВОРКЕР МОНИТОРИНГА С ГАРАНТИРОВАННОЙ ДЕДУПЛИКАЦИЕЙ
+// ФОНОВИЙ ВОРКЕР МИТТЄВОГО МОНІТОРИНГУ
 async function runBackgroundWorker() {
   if (!supabase || !TELEGRAM_BOT_TOKEN) return;
 
@@ -529,13 +546,11 @@ async function runBackgroundWorker() {
         if (!items || items.length === 0) continue;
 
         for (const item of items) {
-          // Гарантированная вставка с защитой от дубликатов
           const { data: inserted, error: insertErr } = await supabase
             .from('seen_ads')
             .insert([{ filter_id: filter.id, ad_link: item.link }])
             .select();
 
-          // Если вставить не удалось (уже было отправлено ранее) — пропускаем
           if (insertErr || !inserted || inserted.length === 0) continue;
 
           const isCheap = averagePrice > 0 && item.price < averagePrice * 0.85;
@@ -562,11 +577,11 @@ async function runBackgroundWorker() {
           }
         }
       } catch (fErr) {
-        console.error(`Ошибка воркера для фильтра ${filter.id}:`, fErr.message);
+        console.error(`Помилка воркера для фільтра ${filter.id}:`, fErr.message);
       }
     }
   } catch (err) {
-    console.error('Ошибка воркера:', err.message);
+    console.error('Помилка воркера:', err.message);
   }
 }
 
