@@ -476,7 +476,7 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
       if (userError) throw userError;
       const isPremium = isAdmin || Boolean(userData && userData.tariff === 'premium' &&
         userData.premium_until && Date.parse(userData.premium_until) > Date.now());
-      if (!isPremium && uniqueQueries.size >= 2) {
+      if (!isPremium && uniqueQueries.size >= 1) {
         return res.status(403).json({ success: false, error: 'LIMIT_EXCEEDED' });
       }
 
@@ -678,7 +678,7 @@ app.post('/telegram-webhook', async (req, res) => {
   if (text.startsWith('/start')) {
     // Accept one referral attribution per Telegram account; never count self-referrals.
     const startPayload = text.trim().split(/\\s+/, 2)[1] || '';
-    const referralMatch = /^ref_(\\d{1,20})$/.exec(startPayload);
+    const referralMatch = /^ref_(\d{1,20})$/.exec(startPayload);
     if (referralMatch && supabase) {
       const inviterId = Number(referralMatch[1]);
       const inviteeId = Number(chatId);
@@ -698,7 +698,7 @@ app.post('/telegram-webhook', async (req, res) => {
           if (!inviterReadError && inviter) {
             const currentExpiry = inviter.premium_until ? Date.parse(inviter.premium_until) : 0;
             const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
-            const nextExpiry = new Date(rewardBase + 3 * 24 * 60 * 60 * 1000).toISOString();
+            const nextExpiry = new Date(rewardBase + 1 * 24 * 60 * 60 * 1000).toISOString();
             const { error: rewardError } = await supabase.from('users').update({
               tariff: 'premium',
               premium_until: nextExpiry
