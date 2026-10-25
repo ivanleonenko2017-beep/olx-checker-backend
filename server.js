@@ -224,6 +224,15 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+function locationMatches(locationDate, requestedLocation) {
+  const requested = String(requestedLocation || '').trim().toLocaleLowerCase('uk-UA');
+  if (!requested || requested === 'всі міста' || requested === 'вся україна' || requested === 'уся україна') return true;
+  const actual = String(locationDate || '').toLocaleLowerCase('uk-UA');
+  // OLX cards usually expose the city in their location/date label. Match the
+  // requested place only against that label; never pretend a broad search is local.
+  return actual.includes(requested);
+}
+
 async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
   const $ = cheerio.load(response.data);
@@ -910,7 +919,12 @@ async function runBackgroundWorker() {
           }
         }
 
-        const { items, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
+        const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
+        const requestedLocation = String(filter.city || '').trim();
+        const items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+        if (requestedLocation && !['всі міста', 'вся україна', 'уся україна'].includes(requestedLocation.toLocaleLowerCase('uk-UA')) && parsedItems.length > 0 && items.length === 0) {
+          console.log(`[Location Filter] Для фільтра ${filter.id} не знайдено карток із локацією "${requestedLocation}" серед ${parsedItems.length} результатів OLX.`);
+        }
         const { error: checkedAtError } = await supabase.from('filters')
           .update({ last_checked_at: new Date().toISOString() }).eq('id', filter.id);
         if (checkedAtError) {
