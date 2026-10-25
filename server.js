@@ -338,7 +338,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
 
 app.get('/api/search', async (req, res) => {
   try {
-    const { query, categoryUrl, minPrice, maxPrice, city } = req.query;
+    const { query, categoryUrl, minPrice, maxPrice, city, condition } = req.query;
     let targetUrl = categoryUrl;
 
     if (!targetUrl && query) {
@@ -359,7 +359,13 @@ app.get('/api/search', async (req, res) => {
 
     const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query);
     const requestedLocation = String(city || '').trim();
-    const items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+    let items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+    const requestedCondition = String(condition || 'all').trim().toLowerCase();
+    if (requestedCondition === 'new') {
+      items = items.filter(item => /\b(нове|новый|новая|новое|нові|новые|новая річ|новий товар)\b/i.test(`${item.title} ${item.description || ''}`));
+    } else if (requestedCondition === 'used') {
+      items = items.filter(item => /\b(б\/у|бу|вживан|уживан|після використання|used)\b/i.test(`${item.title} ${item.description || ''}`));
+    }
     res.json({ success: true, count: items.length, averagePrice, items });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Помилка отримання даних з OLX' });
