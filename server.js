@@ -660,11 +660,85 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
 app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
   const update = req.body;
-  if (!update || !update.message) return;
+  if (!update) return;
 
+  // Telegram Stars checkout: approve only the expected digital Premium product.
+  if (update.pre_checkout_query) {
+    const query = update.pre_checkout_query;
+    const valid = query.currency === 'XTR' && query.invoice_payload === 'olx_checker_premium_30d_v1' &&
+      Number(query.total_amount) === Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
+    try {
+      await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery`, {
+        pre_checkout_query_id: query.id,
+        ok: valid,
+        ...(valid ? {} : { error_message: 'Цей рахунок недійсний. Будь ласка, створіть новий.' })
+      });
+    } catch (err) {
+      console.error('Не вдалося підтвердити Telegram Stars checkout:', err.message);
+    }
+    return;
+  }
+
+  if (!update.message) return;
   const msg = update.message;
   const chatId = msg.chat.id;
   const text = msg.text || '';
+
+  // Grant Premium only after Telegram confirms a successful Stars payment.
+  if (msg.successful_payment) {
+    const payment = msg.successful_payment;
+    const expectedStars = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
+    if (payment.currency !== 'XTR' || payment.invoice_payload !== 'olx_checker_premium_30d_v1' ||
+        Number(payment.total_amount) !== expectedStars || !payment.telegram_payment_charge_id) {
+      console.error('Отримано платіж із неочікуваними параметрами; Premium не нараховано.');
+      await sendTelegramMessage(chatId, 'Не вдалося автоматично підтвердити платіж. Напишіть на ivanleonenko2016@gmail.com.');
+      return;
+    }
+    if (!supabase) {
+      await sendTelegramMessage(chatId, 'Платіж отримано, але тимчасово недоступна база даних. Напишіть на ivanleonenko2016@gmail.com.');
+      return;
+    }
+    try {
+      const { data: existingPayment, error: paymentReadError } = await supabase
+        .from('star_payments').select('telegram_payment_charge_id')
+        .eq('telegram_payment_charge_id', payment.telegram_payment_charge_id).maybeSingle();
+      if (paymentReadError) throw paymentReadError;
+      if (existingPayment) {
+        await sendTelegramMessage(chatId, 'Цей платіж уже оброблено. Перевірте статус Premium у профілі.');
+        return;
+      }
+
+      const { data: currentUser, error: userReadError } = await supabase
+        .from('users').select('premium_until,tariff').eq('telegram_id', chatId).maybeSingle();
+      if (userReadError) throw userReadError;
+      const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
+      const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
+      const premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+      const { error: paymentInsertError } = await supabase.from('star_payments').insert([{
+        telegram_payment_charge_id: payment.telegram_payment_charge_id,
+        provider_payment_charge_id: payment.provider_payment_charge_id || null,
+        telegram_id: chatId,
+        currency: payment.currency,
+        total_amount: payment.total_amount,
+        invoice_payload: payment.invoice_payload
+      }]);
+      if (paymentInsertError) throw paymentInsertError;
+
+      const { error: grantError } = await supabase.from('users').upsert({
+        telegram_id: chatId,
+        first_name: msg.from?.first_name || 'User',
+        tariff: 'premium',
+        premium_until: premiumUntil
+      }, { onConflict: 'telegram_id' });
+      if (grantError) throw grantError;
+      await sendTelegramMessage(chatId, 'Оплату Telegram Stars підтверджено! Premium активовано на 30 днів. Дякуємо за підтримку OLX Checker.');
+    } catch (err) {
+      console.error('Помилка обробки Telegram Stars платежу:', err.message);
+      await sendTelegramMessage(chatId, 'Платіж отримано, але не вдалося завершити активацію автоматично. Напишіть на ivanleonenko2016@gmail.com.');
+    }
+    return;
+  }
 
   if (supabase) {
     try {
@@ -676,6 +750,25 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 
   if (text.startsWith('/start')) {
+    const startPayload = text.trim().split(/\\s+/, 2)[1] || '';
+    if (startPayload === 'buy_premium') {
+      const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
+      try {
+        await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendInvoice`, {
+          chat_id: chatId,
+          title: 'OLX Checker Premium — 30 днів',
+          description: '30 днів Premium: до 1 перевірки кожні 2 хвилини та безлімітні фільтри.',
+          payload: 'olx_checker_premium_30d_v1',
+          provider_token: '',
+          currency: 'XTR',
+          prices: [{ label: 'Premium на 30 днів', amount: starsPrice }]
+        });
+      } catch (err) {
+        console.error('Не вдалося створити Telegram Stars рахунок:', err.message);
+        await sendTelegramMessage(chatId, 'Не вдалося створити рахунок. Спробуйте пізніше або напишіть на ivanleonenko2016@gmail.com.');
+      }
+      return;
+    }
     // Accept one referral attribution per Telegram account; never count self-referrals.
     const startPayload = text.trim().split(/\\s+/, 2)[1] || '';
     const referralMatch = /^ref_(\d{1,20})$/.exec(startPayload);
