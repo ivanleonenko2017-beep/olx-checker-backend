@@ -684,12 +684,29 @@ app.post('/telegram-webhook', async (req, res) => {
       const inviteeId = Number(chatId);
       if (Number.isSafeInteger(inviterId) && inviterId > 0 &&
           Number.isSafeInteger(inviteeId) && inviteeId > 0 && inviterId !== inviteeId) {
-        const { error: referralError } = await supabase.from('referrals').upsert({
+        const { data: newReferral, error: referralError } = await supabase.from('referrals').upsert({
           inviter_telegram_id: inviterId,
           invitee_telegram_id: inviteeId
-        }, { onConflict: 'invitee_telegram_id', ignoreDuplicates: true });
+        }, { onConflict: 'invitee_telegram_id', ignoreDuplicates: true }).select('id');
         if (referralError && !/does not exist|schema cache|relation .*referrals/i.test(referralError.message || '')) {
           console.warn('Не вдалося зберегти реферала:', referralError.message);
+        } else if (!referralError && newReferral && newReferral.length > 0) {
+          // Reward only when a new, unique referral row was actually inserted.
+          // Extend an existing subscription rather than overwriting remaining days.
+          const { data: inviter, error: inviterReadError } = await supabase
+            .from('users').select('tariff,premium_until').eq('telegram_id', inviterId).maybeSingle();
+          if (!inviterReadError && inviter) {
+            const currentExpiry = inviter.premium_until ? Date.parse(inviter.premium_until) : 0;
+            const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
+            const nextExpiry = new Date(rewardBase + 3 * 24 * 60 * 60 * 1000).toISOString();
+            const { error: rewardError } = await supabase.from('users').update({
+              tariff: 'premium',
+              premium_until: nextExpiry
+            }).eq('telegram_id', inviterId);
+            if (rewardError) console.warn('Не вдалося нарахувати реферальний Premium:', rewardError.message);
+          } else if (inviterReadError) {
+            console.warn('Не вдалося перевірити власника реферального посилання:', inviterReadError.message);
+          }
         }
       }
     }
