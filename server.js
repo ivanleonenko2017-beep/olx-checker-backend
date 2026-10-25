@@ -226,6 +226,11 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+function isPublishedToday(locationDate) {
+  const label = String(locationDate || '').toLocaleLowerCase('uk-UA');
+  return /(?:^|[\\s,·])(?:сьогодні|сегодня|today)(?=$|[\\s,·])/i.test(label);
+}
+
 function locationMatches(locationDate, requestedLocation) {
   const requested = String(requestedLocation || '').trim().toLocaleLowerCase('uk-UA');
   if (!requested || requested === 'всі міста' || requested === 'вся україна' || requested === 'уся україна') return true;
@@ -276,8 +281,10 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
 
   const stopWords = [
     'аккумулятор', 'акумулятор', 'батарея', 'корпус', 'шлейф', 'плата', 'камера', 'динамик',
-    'стекло', 'скло', 'чехол', 'чохол', 'накладка', 'бампер', 'дисплей', 'экран', 'екран',
-    'коробка', 'кабель', 'зарядка', 'адаптер', 'ремешок', 'пленка', 'запчасти', 'разборка',
+    'стекло', 'скло', 'чехол', 'чехлы', 'чохол', 'чохли', 'накладка', 'накладки', 'бампер', 'бамперы',
+    'дисплей', 'экран', 'екран', 'коробка', 'кабель', 'зарядка', 'адаптер', 'ремешок', 'пленка',
+    'запчасти', 'запчасть', 'разборка', 'обложка', 'обкладинка', 'накидка', 'защитное стекло',
+    'защитная пленка', 'аксессуар', 'аксессуары', 'аксесуар', 'аксесуари',
     'icloud', 'lost', 'passcode', 'пароль', 'bypass', 'донор', 'скупка', 'ремонт', 'копия', 'реплика'
   ];
 
@@ -469,6 +476,54 @@ app.get('/api/search', async (req, res) => {
       return res.status(502).json({ success: false, error: error.message });
     }
     res.status(502).json({ success: false, error: 'Не вдалося отримати оголошення з OLX. Спробуйте ще раз трохи пізніше.' });
+  }
+});
+
+app.get('/api/ad-details', async (req, res) => {
+  try {
+    const inputUrl = typeof req.query.url === 'string' ? req.query.url : '';
+    if (!inputUrl || inputUrl.length > 2048) return res.status(400).json({ success: false, error: 'Некоректне посилання' });
+    let parsedUrl;
+    try { parsedUrl = new URL(inputUrl); } catch {
+      return res.status(400).json({ success: false, error: 'Некоректне посилання' });
+    }
+    const host = parsedUrl.hostname.toLowerCase();
+    if (parsedUrl.protocol !== 'https:' || !(host === 'olx.ua' || host.endsWith('.olx.ua')) ||
+        parsedUrl.username || parsedUrl.password ||
+        !(/\\/d\\//.test(parsedUrl.pathname) || /\\/obyavlenie\\//.test(parsedUrl.pathname))) {
+      return res.status(400).json({ success: false, error: 'Посилання має вести на оголошення OLX' });
+    }
+    const response = await axios.get(parsedUrl.toString(), {
+      headers: { ...HEADERS, Referer: 'https://www.olx.ua/' },
+      timeout: 10000,
+      maxRedirects: 0,
+      validateStatus: status => status >= 200 && status < 400
+    });
+    const $ = cheerio.load(String(response.data || ''));
+    let description = $('meta[name="description"]').attr('content') ||
+      $('meta[property="og:description"]').attr('content') ||
+      $('[data-testid="ad-description"]').text() ||
+      $('[data-cy="ad-description"]').text() || '';
+    if (!String(description).trim()) {
+      $('script[type="application/ld+json"]').each((_, el) => {
+        if (String(description).trim()) return;
+        try {
+          const json = JSON.parse($(el).contents().text());
+          for (const item of (Array.isArray(json) ? json : [json])) {
+            if (item && typeof item.description === 'string' && item.description.trim()) {
+              description = item.description;
+              break;
+            }
+          }
+        } catch (_) {}
+      });
+    }
+    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();
+    if (description.length > 500) description = description.slice(0, 497).trimEnd() + '...';
+    res.json({ success: true, description });
+  } catch (err) {
+    console.warn('[Ad details] Не вдалося отримати опис OLX:', err.response?.status || err.code || err.message);
+    res.status(502).json({ success: false, description: '' });
   }
 });
 
@@ -1046,7 +1101,9 @@ async function runBackgroundWorker() {
 
         const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
         const requestedLocation = String(filter.city || '').trim();
-        const items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+        // Only notify about listings OLX explicitly labels as published today.
+        const todaysItems = parsedItems.filter(item => isPublishedToday(item.locationDate));
+        const items = todaysItems.filter(item => locationMatches(item.locationDate, requestedLocation));
         if (requestedLocation && !['всі міста', 'вся україна', 'уся україна'].includes(requestedLocation.toLocaleLowerCase('uk-UA')) && parsedItems.length > 0 && items.length === 0) {
           console.log(`[Location Filter] Для фільтра ${filter.id} не знайдено карток із локацією "${requestedLocation}" серед ${parsedItems.length} результатів OLX.`);
         }
