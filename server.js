@@ -64,18 +64,20 @@ function verifyTelegramWebAppData(initDataRaw) {
     const secretKey = crypto.createHmac('sha256', 'WebAppData').update(TELEGRAM_BOT_TOKEN).digest();
     const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
-    if (calculatedHash === hash) {
-      const userStr = urlParams.get('user');
-      const authDate = parseInt(urlParams.get('auth_date') || '0', 10);
-      
-      const now = Math.floor(Date.now() / 1000);
-      if (now - authDate > 86400) {
-        console.warn('[Auth Warning] Истёк срок действия initData');
-        return null;
-      }
+    const providedHash = Buffer.from(hash, 'hex');
+    const expectedHash = Buffer.from(calculatedHash, 'hex');
+    if (providedHash.length !== expectedHash.length || !crypto.timingSafeEqual(providedHash, expectedHash)) return null;
 
-      return userStr ? JSON.parse(userStr) : null;
+    const userStr = urlParams.get('user');
+    const authDate = Number.parseInt(urlParams.get('auth_date') || '0', 10);
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isFinite(authDate) || authDate <= 0 || authDate > now + 60 || now - authDate > 86400) {
+      console.warn('[Auth Warning] Недійсні або застарілі initData');
+      return null;
     }
+    if (!userStr) return null;
+    const user = JSON.parse(userStr);
+    return user && Number.isSafeInteger(Number(user.id)) && Number(user.id) > 0 ? user : null;
   } catch (e) {
     console.error('[Auth Error] Ошибка проверки initData:', e.message);
   }
@@ -334,27 +336,38 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
   try {
     const userId = req.telegramUser.id;
     const isAdmin = await checkIsAdmin(userId);
-    let userData = { tariff: 'free' };
+    let userData = { tariff: 'free', premium_until: null };
 
     if (supabase) {
-      const { data } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
+      const { data, error } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
+      if (error) throw error;
       if (data) {
         userData = data;
       } else {
-        try {
-          await supabase.from('users').upsert({ telegram_id: userId, is_admin: isAdmin }, { onConflict: 'telegram_id' });
-        } catch (uErr) {}
+        const { error: upsertError } = await supabase.from('users').upsert({
+          telegram_id: userId, first_name: req.telegramUser.first_name || 'User', is_admin: isAdmin
+        }, { onConflict: 'telegram_id' });
+        if (upsertError) throw upsertError;
       }
     }
 
+    const hasActivePremium = isAdmin || (
+      userData.tariff === 'premium' &&
+      Boolean(userData.premium_until) &&
+      Number.isFinite(Date.parse(userData.premium_until)) &&
+      Date.parse(userData.premium_until) > Date.now()
+    );
     if (isAdmin) {
       userData.tariff = 'premium';
       userData.is_admin = true;
+    } else if (!hasActivePremium) {
+      userData.tariff = 'free';
     }
 
     res.json({
       success: true,
       isAdmin,
+      hasActivePremium,
       user: userData,
       stats: { totalReferrals: 0 }
     });
@@ -402,21 +415,25 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
         await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
       } catch (uErr) {}
 
-      const { data: existingFilters } = await supabase
+      const { data: existingFilters, error: filtersError } = await supabase
         .from('filters')
         .select('*')
         .eq('user_id', userId);
+      if (filtersError) throw filtersError;
 
-      const isDuplicate = (existingFilters || []).some(f => f.query.toLowerCase() === cleanQuery.toLowerCase());
+      const normalizedQuery = cleanQuery.trim().toLocaleLowerCase('uk-UA');
+      const uniqueQueries = new Set((existingFilters || []).map(f => String(f.query || '').trim().toLocaleLowerCase('uk-UA')));
+      const isDuplicate = uniqueQueries.has(normalizedQuery);
       if (isDuplicate) {
         return res.status(400).json({ success: false, error: 'Такий фільтр вже існує у вашому списку' });
       }
 
       const isAdmin = await checkIsAdmin(userId);
-      const { data: userData } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
-      const isPremium = isAdmin || (userData && userData.tariff === 'premium' && new Date(userData.premium_until) > new Date());
-      
-      if (!isPremium && existingFilters && existingFilters.length >= 2) {
+      const { data: userData, error: userError } = await supabase.from('users').select('tariff,premium_until').eq('telegram_id', userId).maybeSingle();
+      if (userError) throw userError;
+      const isPremium = isAdmin || Boolean(userData && userData.tariff === 'premium' &&
+        userData.premium_until && Date.parse(userData.premium_until) > Date.now());
+      if (!isPremium && uniqueQueries.size >= 2) {
         return res.status(403).json({ success: false, error: 'LIMIT_EXCEEDED' });
       }
 
@@ -465,7 +482,7 @@ app.delete('/api/filters/:id', userAuthMiddleware, async (req, res) => {
     if (supabase) {
       const { data: filter, error: fetchErr } = await supabase
         .from('filters')
-        .select('user_id')
+        .select('id,user_id,query')
         .eq('id', filterId)
         .maybeSingle();
 
@@ -477,9 +494,19 @@ app.delete('/api/filters/:id', userAuthMiddleware, async (req, res) => {
         return res.status(403).json({ success: false, error: 'Forbidden: Ви не є власником цього фільтра' });
       }
 
-      await supabase.from('seen_ads').delete().eq('filter_id', filterId);
-      const { error: deleteErr } = await supabase.from('filters').delete().eq('id', filterId);
-      if (deleteErr) throw deleteErr;
+      const normalizedQuery = String(filter.query || '').trim().toLocaleLowerCase('uk-UA');
+      const { data: sameFilters, error: sameError } = await supabase
+        .from('filters').select('id,query').eq('user_id', userId);
+      if (sameError) throw sameError;
+      const duplicateIds = (sameFilters || [])
+        .filter(item => String(item.query || '').trim().toLocaleLowerCase('uk-UA') === normalizedQuery)
+        .map(item => item.id);
+      if (duplicateIds.length) {
+        const { error: seenDeleteError } = await supabase.from('seen_ads').delete().in('filter_id', duplicateIds);
+        if (seenDeleteError) throw seenDeleteError;
+        const { error: deleteErr } = await supabase.from('filters').delete().in('id', duplicateIds).eq('user_id', userId);
+        if (deleteErr) throw deleteErr;
+      }
     }
 
     res.json({ success: true });
@@ -538,11 +565,12 @@ app.post('/api/admin/grant-premium', adminAuthMiddleware, async (req, res) => {
     const now = new Date();
     now.setDate(now.getDate() + parseInt(days, 10));
 
-    await supabase.from('users').upsert({
+    const { error: grantError } = await supabase.from('users').upsert({
       telegram_id: parseInt(targetId, 10),
       tariff: 'premium',
       premium_until: now.toISOString()
     }, { onConflict: 'telegram_id' });
+    if (grantError) throw grantError;
 
     res.json({ success: true });
   } catch (e) {
@@ -564,23 +592,22 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
     if (!text || !supabase) return res.status(400).json({ error: 'Текст розсилки порожній' });
 
     const { data: users, error } = await supabase.from('users').select('telegram_id');
-    if (error || !users || users.length === 0) return res.json({ success: true, sentCount: 0, total: 0 });
+    if (error) throw error;
+    if (!users || users.length === 0) return res.json({ success: true, sentCount: 0, failedCount: 0, total: 0 });
 
     let sentCount = 0;
     let failedCount = 0;
+    let skippedCount = 0;
 
     for (const u of users) {
-      if (!u.telegram_id) continue;
+      if (!u.telegram_id) { skippedCount++; continue; }
       const ok = await sendTelegramMessage(u.telegram_id, text);
-      if (ok) {
-        sentCount++;
-      } else {
-        failedCount++;
-      }
-      await new Promise(r => setTimeout(r, 200));
+      if (ok) sentCount++;
+      else failedCount++;
+      await new Promise(r => setTimeout(r, 350));
     }
 
-    res.json({ success: true, sentCount, failedCount, total: users.length });
+    res.json({ success: true, sentCount, failedCount, skippedCount, total: users.length });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
