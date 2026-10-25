@@ -478,7 +478,8 @@
   </div>
 
   <script>
-    const tg = window.Telegram.WebApp;
+    // Keep the Mini App usable even if Telegram's external WebApp script is blocked or delayed.
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
     let userId = null;
     let initDataRaw = '';
     let currentSearchResults = [];
