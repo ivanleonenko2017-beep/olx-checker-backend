@@ -182,26 +182,49 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
 }
 
 app.get('/api/proxy-image', async (req, res) => {
+  // Only proxy HTTPS images from OLX-owned domains. Never accept arbitrary URLs:
+  // this endpoint is public and must not be usable to reach internal services.
+  const fallback = () => res.redirect('/assets/no-photo.svg');
   try {
-    const imageUrl = req.query.url;
-    if (!imageUrl || imageUrl.includes('no-photo.svg')) {
-      return res.redirect('/assets/no-photo.svg');
+    const imageUrl = typeof req.query.url === 'string' ? req.query.url : '';
+    if (!imageUrl || imageUrl.length > 2048) return fallback();
+
+    let parsed;
+    try {
+      parsed = new URL(imageUrl);
+    } catch {
+      return fallback();
     }
 
-    const response = await axios.get(imageUrl, {
+    const host = parsed.hostname.toLowerCase();
+    const allowedHost = host === 'olx.ua' || host.endsWith('.olx.ua') ||
+      host === 'olxcdn.com' || host.endsWith('.olxcdn.com') ||
+      host === 'olxstatic.com' || host.endsWith('.olxstatic.com');
+    if (parsed.protocol !== 'https:' || !allowedHost || parsed.username || parsed.password) {
+      return fallback();
+    }
+
+    const response = await axios.get(parsed.toString(), {
       responseType: 'arraybuffer',
+      maxRedirects: 0,
+      maxContentLength: 5 * 1024 * 1024,
       headers: {
         'User-Agent': HEADERS['User-Agent'],
         'Referer': 'https://www.olx.ua/'
       },
-      timeout: 5000
+      timeout: 5000,
+      validateStatus: status => status >= 200 && status < 300
     });
 
-    res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+    const contentType = String(response.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (!contentType.startsWith('image/')) return fallback();
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.send(response.data);
   } catch (err) {
-    res.redirect('/assets/no-photo.svg');
+    fallback();
   }
 });
 
