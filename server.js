@@ -823,6 +823,18 @@ app.post('/telegram-webhook', async (req, res) => {
     return;
   }
 
+  if (text.startsWith('/paysupport') || text.startsWith('/support')) {
+    await sendTelegramMessage(chatId,
+      'Підтримка платежів OLX Checker. Опишіть проблему та, якщо є, дату платежу. Контакт: ivanleonenko2016@gmail.com. Не надсилайте дані банківської картки чи паролі.');
+    return;
+  }
+
+  if (text.startsWith('/terms')) {
+    await sendTelegramMessage(chatId,
+      'Умови OLX Checker: Premium надає доступ до додаткових функцій моніторингу на 30 днів після підтвердження платежу. Сервіс незалежний від OLX і не гарантує безперервну роботу стороннього сайту. Питання щодо платежів: ivanleonenko2016@gmail.com. Повні юридичні дані постачальника та остаточні умови потрібно опублікувати до публічного запуску.');
+    return;
+  }
+
   if (text.startsWith('/admin')) {
     const isAdmin = await checkIsAdmin(chatId);
     if (!isAdmin) {
