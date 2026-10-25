@@ -393,12 +393,26 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       userData.tariff = 'free';
     }
 
+    let totalReferrals = 0;
+    if (supabase) {
+      // Referral counts are backed by the optional referrals table added in the
+      // included migration. Keep profile loading usable before the migration runs.
+      const { count, error: referralCountError } = await supabase
+        .from('referrals')
+        .select('id', { count: 'exact', head: true })
+        .eq('inviter_telegram_id', userId);
+      if (!referralCountError) totalReferrals = count || 0;
+      else if (!/does not exist|schema cache|relation .*referrals/i.test(referralCountError.message || '')) {
+        console.warn('Не вдалося отримати кількість рефералів:', referralCountError.message);
+      }
+    }
+
     res.json({
       success: true,
       isAdmin,
       hasActivePremium,
       user: userData,
-      stats: { totalReferrals: 0 }
+      stats: { totalReferrals }
     });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -662,6 +676,24 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 
   if (text.startsWith('/start')) {
+    // Accept one referral attribution per Telegram account; never count self-referrals.
+    const startPayload = text.trim().split(/\\s+/, 2)[1] || '';
+    const referralMatch = /^ref_(\\d{1,20})$/.exec(startPayload);
+    if (referralMatch && supabase) {
+      const inviterId = Number(referralMatch[1]);
+      const inviteeId = Number(chatId);
+      if (Number.isSafeInteger(inviterId) && inviterId > 0 &&
+          Number.isSafeInteger(inviteeId) && inviteeId > 0 && inviterId !== inviteeId) {
+        const { error: referralError } = await supabase.from('referrals').upsert({
+          inviter_telegram_id: inviterId,
+          invitee_telegram_id: inviteeId
+        }, { onConflict: 'invitee_telegram_id', ignoreDuplicates: true });
+        if (referralError && !/does not exist|schema cache|relation .*referrals/i.test(referralError.message || '')) {
+          console.warn('Не вдалося зберегти реферала:', referralError.message);
+        }
+      }
+    }
+
     const welcomeText = 
       `👋 <b>Ласкаво просимо до OLX Checker Beta 1.0 RC!</b>\n\n` +
       `⚡️ <b>Твій персональний інструмент для швидкого перекупу та вигідних покупок на OLX.</b>\n\n` +
