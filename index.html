@@ -513,7 +513,21 @@
           }
           if (data.user && data.user.tariff === 'premium') {
             document.getElementById('userTariffBadge').innerText = 'PRO ТАРИФ';
-            document.getElementById('profileTariffBadge').innerText = 'PRO Тариф';
+            
+            let premiumInfo = 'PRO Тариф';
+            if (data.user.premium_until) {
+                const endDate = new Date(data.user.premium_until);
+                if (endDate > new Date()) {
+                    const daysLeft = Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24));
+                    premiumInfo = `PRO (залишилось ${daysLeft} дн.)`;
+                } else {
+                    premiumInfo = 'Free Тариф (Закінчився)';
+                    document.getElementById('userTariffBadge').innerText = 'FREE ТАРИФ';
+                }
+            } else if (data.isAdmin) {
+                premiumInfo = 'PRO Тариф (Адмін)';
+            }
+            document.getElementById('profileTariffBadge').innerText = premiumInfo;
           }
           if (data.stats) {
             document.getElementById('statRefUsers').innerText = data.stats.totalReferrals || 0;
@@ -569,15 +583,26 @@
     }
 
     async function deleteActiveFilter(id) {
+      if (!confirm("Дійсно видалити фільтр?")) return;
+      
       try {
-        await fetch(`${BACKEND_URL}/api/filters/${id}`, { 
+        const response = await fetch(`${BACKEND_URL}/api/filters/${id}`, { 
           method: 'DELETE',
           headers: { 'x-telegram-init-data': initDataRaw }
         });
-      } catch (e) {}
-      userFilters = userFilters.filter(f => f.id !== id);
-      localStorage.setItem('olx_active_filters', JSON.stringify(userFilters));
-      renderActiveFilters();
+        const data = await response.json();
+        
+        if (!data.success) {
+            alert(`Помилка видалення: ${data.error}`);
+            return;
+        }
+        
+        userFilters = userFilters.filter(f => f.id !== id);
+        localStorage.setItem('olx_active_filters', JSON.stringify(userFilters));
+        renderActiveFilters();
+      } catch (e) {
+        alert("Помилка з'єднання з сервером. Спробуйте пізніше.");
+      }
     }
 
     function convertCurrentSearchToFilter() {
@@ -589,7 +614,7 @@
 
       if (!query) return;
 
-      if (userFilters.length >= 2) {
+      if (userFilters.length >= 2 && !isAdminUser && document.getElementById('userTariffBadge').innerText !== 'PRO ТАРИФ') {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -605,7 +630,7 @@
     }
 
     function openAddFilterModal() {
-      if (userFilters.length >= 2 && document.getElementById('addFilterModal').classList.contains('hidden')) {
+      if (userFilters.length >= 2 && !isAdminUser && document.getElementById('userTariffBadge').innerText !== 'PRO ТАРИФ' && document.getElementById('addFilterModal').classList.contains('hidden')) {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -725,10 +750,14 @@
 
     function renderActiveFilters() {
       const container = document.getElementById('activeSearchesList');
-      const countText = `${userFilters.length} / 2 (Free)`;
+      const countText = isAdminUser || document.getElementById('userTariffBadge').innerText === 'PRO ТАРИФ' 
+        ? `${userFilters.length} / Безліміт` 
+        : `${userFilters.length} / 2 (Free)`;
 
       document.getElementById('activeFiltersCounter').innerText = countText;
-      document.getElementById('statActiveFilters').innerText = `${userFilters.length} / 2`;
+      document.getElementById('statActiveFilters').innerText = isAdminUser || document.getElementById('userTariffBadge').innerText === 'PRO ТАРИФ' 
+        ? `${userFilters.length} / ∞` 
+        : `${userFilters.length} / 2`;
 
       if (userFilters.length === 0) {
         container.innerHTML = `
@@ -972,7 +1001,6 @@
       document.getElementById('legalModal').classList.remove('flex');
     }
 
-    // ================= ADMIN FUNCTIONS =================
     async function loadAdminStats() {
       try {
         const res = await fetch(`${BACKEND_URL}/api/admin/stats`, {
