@@ -929,6 +929,7 @@
       const minPrice = document.getElementById('minPrice').value.trim();
       const maxPrice = document.getElementById('maxPrice').value.trim();
       const city = document.getElementById('cityInput').value.trim();
+      const condition = document.getElementById('conditionSelect').value;
 
       if (!inputVal) return;
 
@@ -952,6 +953,7 @@
         if (minPrice) apiUrl += '&minPrice=' + encodeURIComponent(minPrice);
         if (maxPrice) apiUrl += '&maxPrice=' + encodeURIComponent(maxPrice);
         if (city) apiUrl += '&city=' + encodeURIComponent(city);
+        if (condition && condition !== 'all') apiUrl += '&condition=' + encodeURIComponent(condition);
 
         const res = await fetch(apiUrl);
         const data = await res.json();
