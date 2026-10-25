@@ -219,7 +219,7 @@
             </div>
             <div class="text-[11px] text-gray-300 mt-0.5">Миттєві сповіщення без затримок</div>
           </div>
-          <span class="text-xs font-extrabold bg-emerald-400 text-black px-2.5 py-1 rounded-xl">149 грн/міс</span>
+          <span class="text-xs font-extrabold bg-amber-400 text-black px-2.5 py-1 rounded-xl">ТЕСТ · оплата вимкнена</span>
         </div>
 
         <div class="space-y-2 pt-1 border-t border-emerald-800/60 text-xs text-gray-200">
@@ -229,10 +229,10 @@
         </div>
 
         <div class="pt-2 space-y-2">
-          <button onclick="payViaTelegramStars()" class="w-full py-3 bg-emerald-400 hover:bg-emerald-300 text-black font-extrabold rounded-2xl text-xs transition shadow-lg shadow-emerald-950 flex items-center justify-center gap-2">
-            <span>⭐</span> Оформити Premium у Telegram Stars
+          <button type="button" disabled class="w-full py-3 bg-gray-700 text-gray-400 font-extrabold rounded-2xl text-xs cursor-not-allowed flex items-center justify-center gap-2">
+            <span>🧪</span> Оплата вимкнена на час тестування
           </button>
-          <p class="text-[10px] text-gray-400 text-center">Оплата карткою буде додана після підключення платіжного провайдера.</p>
+          <p class="text-[10px] text-gray-400 text-center">Реальні платежі не приймаються. Суму та спосіб оплати буде відкрито після окремого запуску.</p>
         </div>
       </div>
 
@@ -537,9 +537,8 @@
     }
 
     function payViaTelegramStars() {
-      const invoiceBotUrl = 'https://t.me/OLXhelpler_bot?start=buy_premium';
-      if (tg && tg.openTelegramLink) tg.openTelegramLink(invoiceBotUrl);
-      else window.open(invoiceBotUrl, '_blank');
+      alert('Оплата вимкнена на час тестування OLX Checker. Реальні платежі не приймаються.');
+      return;
     }
 
     function getFavorites() {
