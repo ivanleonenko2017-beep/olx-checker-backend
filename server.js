@@ -284,7 +284,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     $('a[href*="/d/"], a[href*="/obyavlenie/"]').each((_, linkEl) => {
       let node = $(linkEl);
       for (let depth = 0; depth < 6 && node.length; depth++, node = node.parent()) {
-        const text = node.text().replace(/\\s+/g, ' ').trim();
+        const text = node.text().replace(/\s+/g, ' ').trim();
         const hasTitle = node.find('h3, h4, h5, h6, [data-testid*="title"], [data-cy*="title"]').length > 0;
         const hasPrice = /грн|₴/.test(text);
         if (hasTitle && hasPrice && text.length < 2500) {
@@ -352,13 +352,13 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     ) || '';
 
     if (candidate) {
-      candidate = candidate.replace(/\\\\/g, '').replace(/&amp;/g, '&');
+      candidate = candidate.replace(/\\/g, '').replace(/&amp;/g, '&');
       if (candidate.startsWith('//')) candidate = 'https:' + candidate;
       else if (candidate.startsWith('/')) candidate = 'https://www.olx.ua' + candidate;
       try {
         const imageUrl = new URL(candidate);
         if (imageUrl.protocol === 'https:' &&
-            /(^|\\.)olx\\.(ua|pl|bg|ro|pt|kz|uz|az|ge|md|by)$|olxcdn\\.com$|olxstatic\\.com$/i.test(imageUrl.hostname)) {
+            /(^|\\.)olx\.(ua|pl|bg|ro|pt|kz|uz|az|ge|md|by)$|olxcdn\.com$|olxstatic\.com$/i.test(imageUrl.hostname)) {
           rawImgUrl = imageUrl.toString();
         }
       } catch (_) {
@@ -369,7 +369,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     const locationDate = $(element).find('[data-testid="location-date"], [data-cy="location-date"], [class*="location"], [class*="date"]').first().text().trim();
     const descriptionCandidate = $(element).find(
       '[data-testid="ad-description"], [data-cy="ad-description"], [class*="description"], p'
-    ).first().text().replace(/\\s+/g, ' ').trim();
+    ).first().text().replace(/\s+/g, ' ').trim();
     const description = descriptionCandidate && descriptionCandidate.length > 12
       ? descriptionCandidate.slice(0, 280)
       : 'Відкрийте оголошення на OLX, щоб переглянути повний опис продавця.';
@@ -884,7 +884,7 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 
   if (text.startsWith('/start')) {
-    const startPayload = text.trim().split(/\\s+/, 2)[1] || '';
+    const startPayload = text.trim().split(/\s+/, 2)[1] || '';
     if (startPayload === 'buy_premium') {
       const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
       try {
