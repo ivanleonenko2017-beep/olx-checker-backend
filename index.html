@@ -512,23 +512,19 @@
             document.getElementById('nav-admin').classList.remove('hidden');
             document.getElementById('nav-admin').classList.add('flex');
           }
-          if (data.user && data.user.tariff === 'premium') {
+          if (window.hasActivePremium) {
             document.getElementById('userTariffBadge').innerText = 'PRO ТАРИФ';
-            
-            let premiumInfo = 'PRO Тариф';
-            if (data.user.premium_until) {
-                const endDate = new Date(data.user.premium_until);
-                if (endDate > new Date()) {
-                    const daysLeft = Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24));
-                    premiumInfo = `PRO (залишилось ${daysLeft} дн.)`;
-                } else {
-                    premiumInfo = 'Free Тариф (Закінчився)';
-                    document.getElementById('userTariffBadge').innerText = 'FREE ТАРИФ';
-                }
-            } else if (data.isAdmin) {
-                premiumInfo = 'PRO Тариф (Адмін)';
+            let premiumInfo = data.isAdmin ? 'PRO Тариф (Адмін)' : 'PRO Тариф';
+            if (!data.isAdmin && data.user && data.user.premium_until) {
+              const endDate = new Date(data.user.premium_until);
+              const daysLeft = Math.max(0, Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24)));
+              premiumInfo = `PRO (залишилось ${daysLeft} дн.)`;
             }
             document.getElementById('profileTariffBadge').innerText = premiumInfo;
+          } else {
+            document.getElementById('userTariffBadge').innerText = 'FREE ТАРИФ';
+            document.getElementById('profileTariffBadge').innerText =
+              data.user && data.user.tariff === 'premium' ? 'Free Тариф (закінчився)' : 'Free Тариф';
           }
           if (data.stats) {
             document.getElementById('statRefUsers').innerText = data.stats.totalReferrals || 0;
@@ -615,7 +611,7 @@
 
       if (!query) return;
 
-      if (userFilters.length >= 2 && !isAdminUser && document.getElementById('userTariffBadge').innerText !== 'PRO ТАРИФ') {
+      if (userFilters.length >= 2 && !isAdminUser && window.hasActivePremium !== true) {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -631,7 +627,7 @@
     }
 
     function openAddFilterModal() {
-      if (userFilters.length >= 2 && !isAdminUser && document.getElementById('userTariffBadge').innerText !== 'PRO ТАРИФ' && document.getElementById('addFilterModal').classList.contains('hidden')) {
+      if (userFilters.length >= 2 && !isAdminUser && window.hasActivePremium !== true && document.getElementById('addFilterModal').classList.contains('hidden')) {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -660,6 +656,8 @@
       document.getElementById('modalAdTitle').innerText = item.title;
       document.getElementById('modalAdPrice').innerText = item.priceText;
       document.getElementById('modalAdLocation').innerText = item.locationDate || 'Україна';
+      const descEl = document.getElementById('modalAdDesc');
+      if (descEl) descEl.innerText = item.description || 'Відкрийте оголошення на OLX, щоб переглянути повний опис продавця.';
       document.getElementById('modalOlxLink').href = item.link;
 
       const imgContainer = document.getElementById('modalAdImgContainer');
