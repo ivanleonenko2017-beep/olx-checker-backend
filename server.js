@@ -133,7 +133,7 @@ async function adminAuthMiddleware(req, res, next) {
 }
 
 // ==========================================
-// 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ TELEGRAM
+// 2. БЕЗОПАСНАЯ ОТПРАВКА В TELEGRAM (С ЗАЩИТОЙ ОТ 429)
 // ==========================================
 
 async function sendTelegramMessage(chatId, text, replyMarkup = null) {
@@ -145,10 +145,14 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null) {
       parse_mode: 'HTML',
       disable_web_page_preview: false,
       reply_markup: replyMarkup
-    });
+    }, { timeout: 5000 });
     return true;
   } catch (err) {
-    console.error(`Помилка sendTelegramMessage (${chatId}):`, err.response?.data?.description || err.message);
+    if (err.response?.status === 429) {
+      console.warn(`⚠️ Telegram Rate Limit (429) для чата ${chatId}. Сообщение пропущено.`);
+    } else {
+      console.error(`Помилка sendTelegramMessage (${chatId}):`, err.response?.data?.description || err.message);
+    }
     return false;
   }
 }
@@ -163,9 +167,13 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
       caption: caption,
       parse_mode: 'HTML',
       reply_markup: replyMarkup
-    });
+    }, { timeout: 8000 });
     return true;
   } catch (err) {
+    if (err.response?.status === 429) {
+      console.warn(`⚠️ Telegram Rate Limit (429) на фото для чата ${chatId}.`);
+      return false;
+    }
     return await sendTelegramMessage(chatId, caption, replyMarkup);
   }
 }
@@ -326,7 +334,7 @@ app.get('/api/search', async (req, res) => {
 });
 
 // ==========================================
-// 4. ЗАЩИЩЕННЫЕ ПОЛЬЗОВАТЕЛЬСКИЕ ЕНДПОИНТЫ
+// 4. ПОЛЬЗОВАТЕЛЬСКИЕ ЕНДПОИНТЫ
 // ==========================================
 
 app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
@@ -579,7 +587,7 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
       } else {
         failedCount++;
       }
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 200));
     }
 
     res.json({ success: true, sentCount, failedCount, total: users.length });
@@ -589,7 +597,7 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// 6. TELEGRAM WEBHOOK И ИСПРАВЛЕННЫЙ ВОРКЕР
+// 6. TELEGRAM WEBHOOK И ФОНОВЫЙ ВОРКЕРС ПАУЗАМИ
 // ==========================================
 
 app.post('/telegram-webhook', async (req, res) => {
@@ -658,7 +666,6 @@ async function runBackgroundWorker() {
       try {
         let targetUrl = filter.query ? filter.query.trim() : '';
 
-        // Проверка: это готовая ссылка OLX или просто поисковый запрос?
         if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
           if (filter.min_price || filter.max_price) {
             const searchMin = filter.min_price ? `search%5Bfilter_float_price%3Afrom%5D=${filter.min_price}` : '';
@@ -704,7 +711,10 @@ async function runBackgroundWorker() {
           };
 
           const photoToSend = item.rawImgUrl || `${SERVER_URL}/assets/no-photo.svg`;
+          
+          // Отправка с задержкой 1.5 сек для защиты от бана Telegram 429
           await sendTelegramPhoto(filter.user_id, photoToSend, notificationText, keyboard);
+          await new Promise(r => setTimeout(r, 1500));
         }
       } catch (fErr) {
         console.error(`Помилка воркера для фільтра ${filter.id}:`, fErr.message);
