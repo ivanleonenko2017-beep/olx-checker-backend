@@ -129,33 +129,25 @@ async function adminAuthMiddleware(req, res, next) {
 }
 
 async function sendTelegramMessage(chatId, text, replyMarkup = null, useHtml = true) {
-  if (!TELEGRAM_BOT_TOKEN) return false;
-  
-  const payload = {
-    chat_id: chatId,
-    text: text,
-    disable_web_page_preview: false,
-    reply_markup: replyMarkup
-  };
-  
-  if (useHtml) {
-    payload.parse_mode = 'HTML';
+  if (!TELEGRAM_BOT_TOKEN) {
+    console.error('[Telegram] TELEGRAM_BOT_TOKEN не налаштовано');
+    return false;
   }
 
+  const payload = { chat_id: chatId, text, disable_web_page_preview: false };
+  if (replyMarkup) payload.reply_markup = replyMarkup;
+  if (useHtml) payload.parse_mode = 'HTML';
+
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, payload, { timeout: 5000 });
-    return true;
+    const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, payload, { timeout: 8000 });
+    return Boolean(response.data && response.data.ok);
   } catch (err) {
-    if (useHtml && err.response?.data?.description?.includes("can't parse entities")) {
-      console.warn(`⚠️ Telegram HTML Parse Error для чата ${chatId}. Пробуем отправить как обычный текст.`);
+    const description = err.response?.data?.description || err.message;
+    if (useHtml && /can't parse entities|unsupported start tag/i.test(description)) {
+      console.warn(`[Telegram] HTML parse error for chat ${chatId}; retrying as plain text`);
       return await sendTelegramMessage(chatId, text, replyMarkup, false);
     }
-    
-    if (err.response?.status === 429) {
-      console.warn(`⚠️ Telegram Rate Limit (429) для чата ${chatId}. Сообщение пропущено.`);
-    } else {
-      console.error(`Помилка sendTelegramMessage (${chatId}):`, err.response?.data?.description || err.message);
-    }
+    console.error(`[Telegram] sendMessage failed for chat ${chatId} (HTTP ${err.response?.status || 'network'}): ${description}`);
     return false;
   }
 }
@@ -632,27 +624,57 @@ app.get('/api/admin/diagnostics', adminAuthMiddleware, async (req, res) => {
 
 app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
   try {
-    const { text } = req.body;
-    if (!text || !supabase) return res.status(400).json({ error: 'Текст розсилки порожній' });
+    const messageText = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!messageText) return res.status(400).json({ success: false, error: 'Текст розсилки порожній' });
+    if (!supabase) return res.status(503).json({ success: false, error: 'База даних недоступна' });
+    if (!TELEGRAM_BOT_TOKEN) return res.status(503).json({ success: false, error: 'Telegram Bot Token не налаштовано' });
 
-    const { data: users, error } = await supabase.from('users').select('telegram_id');
-    if (error) throw error;
-    if (!users || users.length === 0) return res.json({ success: true, sentCount: 0, failedCount: 0, total: 0 });
+    // Include users known from both the user registry and existing filters.
+    // Filter owners may predate a successful /start upsert into users.
+    const [{ data: users, error: usersError }, { data: filters, error: filtersError }] = await Promise.all([
+      supabase.from('users').select('telegram_id'),
+      supabase.from('filters').select('user_id')
+    ]);
+    if (usersError) throw usersError;
+    if (filtersError) throw filtersError;
 
-    let sentCount = 0;
-    let failedCount = 0;
-    let skippedCount = 0;
-
-    for (const u of users) {
-      if (!u.telegram_id) { skippedCount++; continue; }
-      const ok = await sendTelegramMessage(u.telegram_id, text);
-      if (ok) sentCount++;
-      else failedCount++;
-      await new Promise(r => setTimeout(r, 350));
+    const recipients = new Set();
+    for (const user of users || []) {
+      const id = String(user.telegram_id || '').trim();
+      if (/^\d+$/.test(id)) recipients.add(id);
+    }
+    for (const filter of filters || []) {
+      const id = String(filter.user_id || '').trim();
+      if (/^\d+$/.test(id)) recipients.add(id);
     }
 
-    res.json({ success: true, sentCount, failedCount, skippedCount, total: users.length });
+    const recipientIds = [...recipients];
+    let sentCount = 0;
+    let failedCount = 0;
+    let blockedCount = 0;
+    const failures = [];
+
+    for (const id of recipientIds) {
+      const ok = await sendTelegramMessage(id, messageText);
+      if (ok) {
+        sentCount++;
+      } else {
+        failedCount++;
+        if (failures.length < 5) failures.push({ telegramId: id, reason: 'Telegram не підтвердив доставку; перевірте серверний журнал' });
+      }
+      await new Promise(resolve => setTimeout(resolve, 350));
+    }
+
+    res.json({
+      success: true,
+      sentCount,
+      failedCount,
+      blockedCount,
+      total: recipientIds.length,
+      failureSamples: failures
+    });
   } catch (err) {
+    console.error('[Broadcast] Не вдалося виконати розсилку:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
