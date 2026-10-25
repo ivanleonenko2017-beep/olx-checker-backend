@@ -757,6 +757,21 @@ async function runBackgroundWorker() {
 
     for (const filter of filters) {
       try {
+        const { data: filterOwner, error: ownerError } = await supabase
+          .from('users').select('tariff,premium_until,is_admin').eq('telegram_id', filter.user_id).maybeSingle();
+        if (ownerError) {
+          console.error(`Не вдалося перевірити тариф користувача для фільтра ${filter.id}:`, ownerError.message);
+          continue;
+        }
+        const ownerPremium = Boolean(filterOwner && (
+          filterOwner.is_admin === true ||
+          (filterOwner.tariff === 'premium' && filterOwner.premium_until &&
+            Number.isFinite(Date.parse(filterOwner.premium_until)) && Date.parse(filterOwner.premium_until) > Date.now())
+        ));
+        const intervalMs = (ownerPremium ? 2 : 15) * 60 * 1000;
+        const lastCheckedAt = filter.last_checked_at ? Date.parse(filter.last_checked_at) : 0;
+        if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0 && Date.now() - lastCheckedAt < intervalMs) continue;
+
         let targetUrl = filter.query ? filter.query.trim() : '';
 
         if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
@@ -771,6 +786,11 @@ async function runBackgroundWorker() {
         }
 
         const { items, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
+        const { error: checkedAtError } = await supabase.from('filters')
+          .update({ last_checked_at: new Date().toISOString() }).eq('id', filter.id);
+        if (checkedAtError) {
+          console.error(`Не вдалося оновити час перевірки фільтра ${filter.id}:`, checkedAtError.message);
+        }
 
         if (!items || items.length === 0) continue;
 
