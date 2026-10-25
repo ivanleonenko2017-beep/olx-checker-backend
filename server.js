@@ -275,6 +275,12 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     }
 
     const locationDate = $(element).find('[data-testid="location-date"]').first().text().trim();
+    const descriptionCandidate = $(element).find(
+      '[data-testid="ad-description"], [data-cy="ad-description"], [class*="description"], p'
+    ).first().text().replace(/\\s+/g, ' ').trim();
+    const description = descriptionCandidate && descriptionCandidate.length > 12
+      ? descriptionCandidate.slice(0, 280)
+      : 'Відкрийте оголошення на OLX, щоб переглянути повний опис продавця.';
 
     if (title && !isNaN(numericPrice) && numericPrice > 0 && rawLink) {
       rawItems.push({
@@ -286,7 +292,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
         rawImgUrl,
         proxyImg: rawImgUrl ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(rawImgUrl)}` : `${SERVER_URL}/assets/no-photo.svg`,
         locationDate: locationDate || 'Україна',
-        description: 'Перегляньте деталі та контактуйте з продавцем за посиланням на OLX.'
+        description
       });
     }
   });
@@ -460,7 +466,11 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
             filter_id: createdFilter.id,
             ad_link: item.link
           }));
-          await supabase.from('seen_ads').insert(initialSeen);
+          const { error: warmupInsertError } = await supabase.from('seen_ads').upsert(initialSeen, {
+            onConflict: 'filter_id,ad_link',
+            ignoreDuplicates: true
+          });
+          if (warmupInsertError) console.error('[Warmup Warning] Не вдалося позначити початкові оголошення:', warmupInsertError.message);
         }
       } catch (warmupErr) {
         console.error('[Warmup Warning] Помилка первинного прогреву:', warmupErr.message);
@@ -672,7 +682,8 @@ async function runBackgroundWorker() {
 
   try {
     isWorkerRunning = true;
-    const { data: filters } = await supabase.from('filters').select('*');
+    const { data: filters, error: filtersError } = await supabase.from('filters').select('*');
+    if (filtersError) throw filtersError;
     if (!filters || filters.length === 0) return;
 
     for (const filter of filters) {
@@ -694,17 +705,29 @@ async function runBackgroundWorker() {
 
         if (!items || items.length === 0) continue;
 
+        // Skip links already seen for this filter before attempting an insert.
+        const { data: knownRows, error: knownError } = await supabase
+          .from('seen_ads').select('ad_link').eq('filter_id', filter.id);
+        if (knownError) {
+          console.error(`Не вдалося перевірити seen_ads для фільтра ${filter.id}:`, knownError.message);
+          continue;
+        }
+        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim()));
         for (const item of items) {
-          let inserted = null;
-          try {
-            const res = await supabase
-              .from('seen_ads')
-              .insert([{ filter_id: filter.id, ad_link: item.link }])
-              .select();
-            inserted = res.data;
-          } catch (iErr) {}
+          const canonicalLink = String(item.link || '').trim().replace(/\\/$/, '');
+          if (!canonicalLink || knownLinks.has(canonicalLink)) continue;
 
-          if (!inserted || inserted.length === 0) continue;
+          const { data: inserted, error: insertError } = await supabase
+            .from('seen_ads')
+            .insert([{ filter_id: filter.id, ad_link: canonicalLink }])
+            .select('ad_link');
+          if (insertError || !inserted || inserted.length === 0) {
+            if (insertError && !/duplicate key|unique constraint/i.test(insertError.message || '')) {
+              console.error(`Не вдалося позначити оголошення як переглянуте для фільтра ${filter.id}:`, insertError.message);
+            }
+            continue;
+          }
+          knownLinks.add(canonicalLink);
 
           const isCheap = averagePrice > 0 && item.price < averagePrice * 0.85;
           const discount = isCheap ? Math.round((1 - item.price / averagePrice) * 100) : 0;
@@ -723,7 +746,9 @@ async function runBackgroundWorker() {
             ]
           };
 
-          const photoToSend = item.rawImgUrl || `${SERVER_URL}/assets/no-photo.svg`;
+          const photoToSend = item.rawImgUrl
+            ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(item.rawImgUrl)}`
+            : `${SERVER_URL}/assets/no-photo.svg`;
           
           await sendTelegramPhoto(filter.user_id, photoToSend, notificationText, keyboard);
           await new Promise(r => setTimeout(r, 1500));
