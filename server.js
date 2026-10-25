@@ -770,7 +770,6 @@ app.post('/telegram-webhook', async (req, res) => {
       return;
     }
     // Accept one referral attribution per Telegram account; never count self-referrals.
-    const startPayload = text.trim().split(/\\s+/, 2)[1] || '';
     const referralMatch = /^ref_(\d{1,20})$/.exec(startPayload);
     if (referralMatch && supabase) {
       const inviterId = Number(referralMatch[1]);
