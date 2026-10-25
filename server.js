@@ -74,7 +74,6 @@ function verifyTelegramWebAppData(initDataRaw) {
       const userStr = urlParams.get('user');
       const authDate = parseInt(urlParams.get('auth_date') || '0', 10);
       
-      // Проверка срока жизни initData (не старше 24 часов)
       const now = Math.floor(Date.now() / 1000);
       if (now - authDate > 86400) {
         console.warn('[Auth Warning] Истёк срок действия initData');
@@ -95,11 +94,14 @@ async function checkIsAdmin(userId) {
   if (ADMIN_IDS.includes(numericId)) return true;
   if (!supabase) return false;
 
-  const { data: user } = await supabase.from('users').select('is_admin').eq('telegram_id', numericId).maybeSingle();
-  return Boolean(user && user.is_admin);
+  try {
+    const { data: user } = await supabase.from('users').select('is_admin').eq('telegram_id', numericId).maybeSingle();
+    return Boolean(user && user.is_admin);
+  } catch (e) {
+    return false;
+  }
 }
 
-// Middleware для обычных пользователей
 function userAuthMiddleware(req, res, next) {
   const initDataRaw = req.headers['x-telegram-init-data'];
   const user = verifyTelegramWebAppData(initDataRaw);
@@ -115,7 +117,6 @@ function userAuthMiddleware(req, res, next) {
   next();
 }
 
-// Middleware для администраторов (СТРОГО без доверия к req.query/body.userId)
 async function adminAuthMiddleware(req, res, next) {
   const initDataRaw = req.headers['x-telegram-init-data'];
   const user = verifyTelegramWebAppData(initDataRaw);
@@ -336,7 +337,9 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       if (data) {
         userData = data;
       } else {
-        await supabase.from('users').upsert({ telegram_id: userId, is_admin: isAdmin }, { onConflict: 'telegram_id' });
+        try {
+          await supabase.from('users').upsert({ telegram_id: userId, is_admin: isAdmin }, { onConflict: 'telegram_id' });
+        } catch (uErr) {}
       }
     }
 
@@ -380,7 +383,9 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
     }
 
     if (supabase) {
-      await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
+      try {
+        await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
+      } catch (uErr) {}
 
       const { data: userFilters } = await supabase.from('filters').select('id').eq('user_id', userId);
       const { data: userData } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
@@ -411,7 +416,7 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
             filter_id: createdFilter.id,
             ad_link: item.link
           }));
-          await supabase.from('seen_ads').insert(initialSeen).catch(() => {});
+          await supabase.from('seen_ads').insert(initialSeen);
         }
       } catch (warmupErr) {
         console.error('[Warmup Warning] Помилка первинного прогреву:', warmupErr.message);
@@ -565,15 +570,14 @@ app.post('/telegram-webhook', async (req, res) => {
   const text = msg.text || '';
 
   if (supabase) {
-  try {
-    await supabase.from('users').upsert({ 
-      telegram_id: chatId, 
-      first_name: msg.from?.first_name || 'User' 
-    }, { onConflict: 'telegram_id' });
-  } catch (err) {
-    console.error('Ошибка записи пользователя в Supabase:', err.message);
+    try {
+      await supabase.from('users').upsert({ 
+        telegram_id: chatId, 
+        first_name: msg.from?.first_name || 'User' 
+      }, { onConflict: 'telegram_id' });
+    } catch (uErr) {}
   }
-}
+
   if (text.startsWith('/start')) {
     const welcomeText = 
       `👋 <b>Ласкаво просимо до OLX Checker Beta 1.0 RC!</b>\n\n` +
@@ -624,12 +628,16 @@ async function runBackgroundWorker() {
         if (!items || items.length === 0) continue;
 
         for (const item of items) {
-          const { data: inserted, error: insertErr } = await supabase
-            .from('seen_ads')
-            .insert([{ filter_id: filter.id, ad_link: item.link }])
-            .select();
+          let inserted = null;
+          try {
+            const res = await supabase
+              .from('seen_ads')
+              .insert([{ filter_id: filter.id, ad_link: item.link }])
+              .select();
+            inserted = res.data;
+          } catch (iErr) {}
 
-          if (insertErr || !inserted || inserted.length === 0) continue;
+          if (!inserted || inserted.length === 0) continue;
 
           const isCheap = averagePrice > 0 && item.price < averagePrice * 0.85;
           const discount = isCheap ? Math.round((1 - item.price / averagePrice) * 100) : 0;
