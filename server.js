@@ -336,7 +336,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
 
 app.get('/api/search', async (req, res) => {
   try {
-    const { query, categoryUrl, minPrice, maxPrice } = req.query;
+    const { query, categoryUrl, minPrice, maxPrice, city } = req.query;
     let targetUrl = categoryUrl;
 
     if (!targetUrl && query) {
@@ -355,7 +355,9 @@ app.get('/api/search', async (req, res) => {
 
     if (!targetUrl) return res.status(400).json({ error: 'Укажіть пошуковий запит' });
 
-    const { items, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query);
+    const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query);
+    const requestedLocation = String(city || '').trim();
+    const items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
     res.json({ success: true, count: items.length, averagePrice, items });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Помилка отримання даних з OLX' });
