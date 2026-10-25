@@ -734,7 +734,23 @@
           saveBtn.innerText = 'Зберегти та запустити відстеження';
           return;
         }
-      }
+      } else {
+        // Local browser preview: persist filters locally instead of silently discarding them.
+        const localFilters = JSON.parse(localStorage.getItem('olx_active_filters') || '[]');
+        const normalized = query.toLocaleLowerCase('uk-UA');
+        if (localFilters.some(f => String(f.query || '').toLocaleLowerCase('uk-UA') === normalized)) {
+          alert('Такий фільтр вже існує у списку');
+          saveBtn.disabled = false;
+          saveBtn.innerText = 'Зберегти та запустити відстеження';
+          return;
+        }
+        localFilters.push({
+          id: 'local_' + Date.now(), query,
+          min_price: Number(minPrice) || 0, max_price: Number(maxPrice) || 0,
+          minPrice: Number(minPrice) || 0, maxPrice: Number(maxPrice) || 0,
+          city, condition
+        });
+        localStorage.setItem('olx_active_filters', JSON.stringify(localFilters));
 
       closeAddFilterModal();
       saveBtn.disabled = false;
