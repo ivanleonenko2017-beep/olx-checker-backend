@@ -6,13 +6,13 @@
   <title>OLX Checker 1.0.0</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="color-scheme" content="dark">
   <style>
-    body {
-      background-color: var(--tg-theme-bg-color, #0b0f19);
-      color: var(--tg-theme-text-color, #ffffff);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      padding-bottom: 85px;
-    }
+    :root { color-scheme: dark; background: #0b0f19; }
+    html, body { min-height: 100%; background: #0b0f19 !important; }
+    body { background-color: #0b0f19 !important; color: #f9fafb !important; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding-bottom: 92px; }
+    #app { background: #0b0f19; min-height: 100vh; }
+    input, select, textarea { color-scheme: dark; }
   </style>
 </head>
 <body class="p-4">
@@ -125,7 +125,8 @@
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-[11px] text-gray-400 mb-1 font-medium">Місто / Регіон</label>
-            <input type="text" id="cityInput" placeholder="Всі міста" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
+            <input type="text" id="cityInput" list="ukraineLocations" placeholder="Уся Україна — оберіть місто або область" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
+            <datalist id="ukraineLocations"></datalist>
           </div>
           <div>
             <label class="block text-[11px] text-gray-400 mb-1 font-medium">Стан товару</label>
@@ -372,7 +373,7 @@
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-[10px] text-gray-400 mb-1 font-medium">Місто / Область</label>
-            <input type="text" id="modalCity" placeholder="Всі міста" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+            <input type="text" id="modalCity" list="ukraineLocations" placeholder="Уся Україна — місто або область" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
           </div>
           <div>
             <label class="block text-[10px] text-gray-400 mb-1 font-medium">Стан товару</label>
@@ -444,11 +445,14 @@
       </div>
     </div>
 
-    <!-- Always-visible legal links: outside tab panels so users can find them from any screen. -->
-    <div class="fixed bottom-[66px] left-0 right-0 z-30 flex justify-center gap-3 py-1.5 bg-gray-950/95 text-[10px] text-gray-400">
-      <button type="button" onclick="openLegalDoc('terms')" class="underline underline-offset-2 hover:text-emerald-400">Публічна оферта</button>
-      <span>•</span>
-      <button type="button" onclick="openLegalDoc('privacy')" class="underline underline-offset-2 hover:text-emerald-400">Політика конфіденційності</button>
+    <!-- Dedicated documents tab: legal links no longer overlap every screen. -->
+    <div id="tab-documents" class="tab-content hidden space-y-4">
+      <div class="border-b border-gray-800 pb-3">
+        <h2 class="text-base font-bold text-emerald-400">Документи</h2>
+        <p class="text-[11px] text-gray-400 mt-1">Юридична інформація та правила користування OLX Checker.</p>
+      </div>
+      <button type="button" onclick="openLegalDoc('terms')" class="w-full text-left p-4 rounded-2xl bg-gray-900 border border-gray-800 text-sm font-semibold">Публічна оферта <span class="float-right text-emerald-400">›</span></button>
+      <button type="button" onclick="openLegalDoc('privacy')" class="w-full text-left p-4 rounded-2xl bg-gray-900 border border-gray-800 text-sm font-semibold">Політика конфіденційності <span class="float-right text-emerald-400">›</span></button>
     </div>
 
     <!-- ================= BOTTOM NAVIGATION ================= -->
@@ -468,6 +472,10 @@
       <button onclick="switchTab('profile')" id="nav-profile" class="nav-btn flex flex-col items-center text-gray-500">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
         <span class="text-[10px] mt-1 font-medium">Профіль</span>
+      </button>
+      <button onclick="switchTab('documents')" id="nav-documents" class="nav-btn flex flex-col items-center text-gray-500">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4h8l4 4v12H4V4h4zm0 0v5h8V4"/></svg>
+        <span class="text-[10px] mt-1 font-medium">Документи</span>
       </button>
       <button onclick="switchTab('admin')" id="nav-admin" class="nav-btn hidden flex-col items-center text-gray-500">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
@@ -500,6 +508,19 @@
     }
 
     const BACKEND_URL = window.location.origin;
+    const ukraineLocations = [
+      'Вся Україна','Вінницька область','Волинська область','Дніпропетровська область','Донецька область',
+      'Житомирська область','Закарпатська область','Запорізька область','Івано-Франківська область',
+      'Київська область','Кіровоградська область','Луганська область','Львівська область','Миколаївська область',
+      'Одеська область','Полтавська область','Рівненська область','Сумська область','Тернопільська область',
+      'Харківська область','Херсонська область','Хмельницька область','Черкаська область','Чернівецька область',
+      'Чернігівська область','АР Крим','Київ','Севастополь','Вінниця','Луцьк','Дніпро','Донецьк','Житомир',
+      'Ужгород','Запоріжжя','Івано-Франківськ','Біла Церква','Бориспіль','Бровари','Кропивницький','Львів',
+      'Миколаїв','Одеса','Полтава','Рівне','Суми','Тернопіль','Харків','Херсон','Хмельницький','Черкаси',
+      'Чернівці','Чернігів','Кременчук','Кривий Ріг','Кам’янське','Мукачево','Маріуполь','Павлоград','Умань'
+    ];
+    const locationsList = document.getElementById('ukraineLocations');
+    if (locationsList) locationsList.innerHTML = ukraineLocations.map(location => '<option value="' + location.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"></option>').join('');
 
     async function loadUserProfile() {
       if (!initDataRaw) return;
