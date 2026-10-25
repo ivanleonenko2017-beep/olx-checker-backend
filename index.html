@@ -219,18 +219,18 @@
             </div>
             <div class="text-[11px] text-gray-300 mt-0.5">Миттєві сповіщення без затримок</div>
           </div>
-          <span class="text-xs font-extrabold bg-emerald-400 text-black px-2.5 py-1 rounded-xl">199 грн/міс</span>
+          <span class="text-xs font-extrabold bg-emerald-400 text-black px-2.5 py-1 rounded-xl">149 грн/міс</span>
         </div>
 
         <div class="space-y-2 pt-1 border-t border-emerald-800/60 text-xs text-gray-200">
-          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Перевірка товарів кожні 60 секунд</div>
+          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Перевірка товарів кожні 2 хвилини</div>
           <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Безлімітні активні відстеження</div>
           <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Пріоритетні бот-сповіщення</div>
         </div>
 
         <div class="pt-2 space-y-2">
           <button onclick="payViaMonobank()" class="w-full py-3 bg-emerald-400 hover:bg-emerald-300 text-black font-extrabold rounded-2xl text-xs transition shadow-lg shadow-emerald-950 flex items-center justify-center gap-2">
-            <span>💳</span> Оплатити 199 грн (Monobank)
+            <span>💳</span> Оплатити 149 грн
           </button>
         </div>
       </div>
@@ -435,7 +435,7 @@
           <p class="text-[11px] text-gray-300 mt-1">Для створення безлімітних відстежень переходьте на PREMIUM!</p>
         </div>
         <button onclick="goToPremiumTab()" class="w-full py-3 bg-emerald-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-emerald-950">
-          Перейти до Оплати (199 грн)
+          Перейти до Оплати (149 грн)
         </button>
       </div>
     </div>
@@ -611,7 +611,7 @@
 
       if (!query) return;
 
-      if (userFilters.length >= 2 && !isAdminUser && window.hasActivePremium !== true) {
+      if (userFilters.length >= 1 && !isAdminUser && window.hasActivePremium !== true) {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -752,12 +752,12 @@
       const hasPremiumAccess = isAdminUser || window.hasActivePremium === true;
       const countText = hasPremiumAccess
         ? `${userFilters.length} / Безліміт`
-        : `${userFilters.length} / 2 (Free)`;
+        : `${userFilters.length} / 1 (Free)`;
 
       document.getElementById('activeFiltersCounter').innerText = countText;
       document.getElementById('statActiveFilters').innerText = hasPremiumAccess
         ? `${userFilters.length} / ∞`
-        : `${userFilters.length} / 2`;
+        : `${userFilters.length} / 1`;
 
       if (userFilters.length === 0) {
         container.innerHTML = `
