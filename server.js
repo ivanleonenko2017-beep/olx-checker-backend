@@ -27,7 +27,7 @@ if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 const SUPABASE_URL = rawUrl;
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
-const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
+const SERVER_URL = (process.env.SERVER_URL || '[https://olx-checker-backend.onrender.com](https://olx-checker-backend.onrender.com)').replace(/\/$/, '');
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
   .split(',')
@@ -139,7 +139,7 @@ async function adminAuthMiddleware(req, res, next) {
 async function sendTelegramMessage(chatId, text, replyMarkup = null) {
   if (!TELEGRAM_BOT_TOKEN) return false;
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/sendMessage`, {
       chat_id: chatId,
       text: text,
       parse_mode: 'HTML',
@@ -148,7 +148,7 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null) {
     });
     return true;
   } catch (err) {
-    console.error(`Помилка sendTelegramMessage (${chatId}):`, err.response?.data || err.message);
+    console.error(`Помилка sendTelegramMessage (${chatId}):`, err.response?.data?.description || err.message);
     return false;
   }
 }
@@ -157,7 +157,7 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
   if (!TELEGRAM_BOT_TOKEN) return false;
   try {
     const fullPhotoUrl = photoUrl.startsWith('/') ? `${SERVER_URL}${photoUrl}` : photoUrl;
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+    await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/sendPhoto`, {
       chat_id: chatId,
       photo: fullPhotoUrl,
       caption: caption,
@@ -185,7 +185,7 @@ app.get('/api/proxy-image', async (req, res) => {
       responseType: 'arraybuffer',
       headers: {
         'User-Agent': HEADERS['User-Agent'],
-        'Referer': 'https://www.olx.ua/'
+        'Referer': '[https://www.olx.ua/](https://www.olx.ua/)'
       },
       timeout: 5000
     });
@@ -247,7 +247,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
 
     const rawLink = $(element).find('a').attr('href') || '';
-    const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
+    const link = rawLink.startsWith('http') ? rawLink : `[https://www.olx.ua](https://www.olx.ua)${rawLink}`;
 
     let rawImgUrl = '';
     const imgEl = $(element).find('img').first();
@@ -263,7 +263,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     if (candidate) {
       candidate = candidate.replace(/\\/g, '').replace(/&amp;/g, '&');
       if (candidate.startsWith('//')) candidate = 'https:' + candidate;
-      else if (candidate.startsWith('/')) candidate = 'https://www.olx.ua' + candidate;
+      else if (candidate.startsWith('/')) candidate = '[https://www.olx.ua](https://www.olx.ua)' + candidate;
       rawImgUrl = candidate;
     }
 
@@ -279,7 +279,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
         rawImgUrl,
         proxyImg: rawImgUrl ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(rawImgUrl)}` : `${SERVER_URL}/assets/no-photo.svg`,
         locationDate: locationDate || 'Україна',
-        description: 'Перегляньте деталі за посиланням на OLX.'
+        description: 'Перегляньте деталі та контактуйте з продавцем за посиланням на OLX.'
       });
     }
   });
@@ -307,9 +307,9 @@ app.get('/api/search', async (req, res) => {
         const searchMin = minPrice ? `search%5Bfilter_float_price%3Afrom%5D=${minPrice}` : '';
         const searchMax = maxPrice ? `search%5Bfilter_float_price%3Ato%5D=${maxPrice}` : '';
         const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
-        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(query)}/?${queryParams}`;
+        targetUrl = `[https://www.olx.ua/uk/list/q-$](https://www.olx.ua/uk/list/q-$){encodeURIComponent(query)}/?${queryParams}`;
       } else {
-        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(query)}/`;
+        targetUrl = `[https://www.olx.ua/uk/list/q-$](https://www.olx.ua/uk/list/q-$){encodeURIComponent(query)}/`;
       }
     }
 
@@ -367,7 +367,17 @@ app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
     const { data, error } = await supabase.from('filters').select('*').eq('user_id', userId);
     if (error) throw error;
 
-    res.json({ success: true, filters: data || [] });
+    // Исключаем дубликаты из результата
+    const uniqueFilters = [];
+    const seenQueries = new Set();
+    for (const f of (data || [])) {
+      if (!seenQueries.has(f.query.toLowerCase())) {
+        seenQueries.add(f.query.toLowerCase());
+        uniqueFilters.push(f);
+      }
+    }
+
+    res.json({ success: true, filters: uniqueFilters });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -382,22 +392,34 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Введіть коректний пошуковий запит' });
     }
 
+    const cleanQuery = query.trim();
+
     if (supabase) {
       try {
         await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
       } catch (uErr) {}
 
-      const { data: userFilters } = await supabase.from('filters').select('id').eq('user_id', userId);
-      const { data: userData } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
+      // Проверка на дубликат поискового запроса у этого пользователя
+      const { data: existingFilters } = await supabase
+        .from('filters')
+        .select('*')
+        .eq('user_id', userId);
 
+      const isDuplicate = (existingFilters || []).some(f => f.query.toLowerCase() === cleanQuery.toLowerCase());
+      if (isDuplicate) {
+        return res.status(400).json({ success: false, error: 'Такий фільтр вже існує у вашому списку' });
+      }
+
+      const { data: userData } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
       const isPremium = userData && userData.tariff === 'premium' && new Date(userData.premium_until) > new Date();
-      if (!isPremium && userFilters && userFilters.length >= 2) {
+      
+      if (!isPremium && existingFilters && existingFilters.length >= 2) {
         return res.status(403).json({ success: false, error: 'LIMIT_EXCEEDED' });
       }
 
       const { data, error } = await supabase.from('filters').insert([{
         user_id: userId,
-        query: query.trim(),
+        query: cleanQuery,
         min_price: parseInt(minPrice, 10) || 0,
         max_price: parseInt(maxPrice, 10) || 0,
         city: city ? city.trim() : 'Всі міста',
@@ -407,10 +429,10 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
       if (error) throw error;
       const createdFilter = data[0];
 
-      // Тихий прогрев
+      // Тихий прогрев для исключения рассылки старых объявлений
       try {
-        const targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(query)}/`;
-        const { items } = await parseOlx(targetUrl, minPrice, maxPrice, query);
+        const targetUrl = `[https://www.olx.ua/uk/list/q-$](https://www.olx.ua/uk/list/q-$){encodeURIComponent(cleanQuery)}/`;
+        const { items } = await parseOlx(targetUrl, minPrice, maxPrice, cleanQuery);
         if (items && items.length > 0) {
           const initialSeen = items.map(item => ({
             filter_id: createdFilter.id,
@@ -540,17 +562,23 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
     if (!text || !supabase) return res.status(400).json({ error: 'Текст розсилки порожній' });
 
     const { data: users, error } = await supabase.from('users').select('telegram_id');
-    if (error || !users || users.length === 0) return res.json({ success: true, sentCount: 0 });
+    if (error || !users || users.length === 0) return res.json({ success: true, sentCount: 0, total: 0 });
 
     let sentCount = 0;
+    let failedCount = 0;
+
     for (const u of users) {
       if (!u.telegram_id) continue;
       const ok = await sendTelegramMessage(u.telegram_id, text);
-      if (ok) sentCount++;
+      if (ok) {
+        sentCount++;
+      } else {
+        failedCount++;
+      }
       await new Promise(r => setTimeout(r, 50));
     }
 
-    res.json({ success: true, sentCount });
+    res.json({ success: true, sentCount, failedCount, total: users.length });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -613,16 +641,18 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 });
 
+let isWorkerRunning = false;
 async function runBackgroundWorker() {
-  if (!supabase || !TELEGRAM_BOT_TOKEN) return;
+  if (isWorkerRunning || !supabase || !TELEGRAM_BOT_TOKEN) return;
 
   try {
+    isWorkerRunning = true;
     const { data: filters } = await supabase.from('filters').select('*');
     if (!filters || filters.length === 0) return;
 
     for (const filter of filters) {
       try {
-        const targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(filter.query)}/`;
+        const targetUrl = `[https://www.olx.ua/uk/list/q-$](https://www.olx.ua/uk/list/q-$){encodeURIComponent(filter.query)}/`;
         const { items, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
 
         if (!items || items.length === 0) continue;
@@ -665,6 +695,8 @@ async function runBackgroundWorker() {
     }
   } catch (err) {
     console.error('Помилка воркера:', err.message);
+  } finally {
+    isWorkerRunning = false;
   }
 }
 
@@ -674,7 +706,7 @@ async function registerWebhook() {
   if (!TELEGRAM_BOT_TOKEN || !SERVER_URL) return;
   try {
     const targetWebhookUrl = `${SERVER_URL}/telegram-webhook`;
-    await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${encodeURIComponent(targetWebhookUrl)}`);
+    await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/setWebhook?url=${encodeURIComponent(targetWebhookUrl)}`);
     console.log(`✅ Telegram Webhook встановлено: ${targetWebhookUrl}`);
   } catch (err) {
     console.error('Помилка встановлення Webhook:', err.message);
