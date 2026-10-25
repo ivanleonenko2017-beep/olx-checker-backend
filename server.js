@@ -156,14 +156,16 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
   if (!TELEGRAM_BOT_TOKEN) return false;
   try {
     const fullPhotoUrl = photoUrl.startsWith('/') ? `${SERVER_URL}${photoUrl}` : photoUrl;
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+    const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
       chat_id: chatId,
       photo: fullPhotoUrl,
       caption: caption,
       parse_mode: 'HTML',
       reply_markup: replyMarkup
     }, { timeout: 8000 });
-    return true;
+    if (response.data?.ok === true) return true;
+    console.warn(`[Telegram] sendPhoto не підтвердив доставку для чату ${chatId}:`, response.data?.description || 'невідома помилка');
+    return await sendTelegramMessage(chatId, caption, replyMarkup);
   } catch (err) {
     if (err.response?.status === 429) {
       console.warn(`⚠️ Telegram Rate Limit (429) на фото для чата ${chatId}.`);
