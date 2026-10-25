@@ -236,8 +236,24 @@ function locationMatches(locationDate, requestedLocation) {
 }
 
 async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
-  const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
-  const $ = cheerio.load(response.data);
+  const response = await axios.get(targetUrl, {
+    headers: HEADERS,
+    timeout: 15000,
+    maxRedirects: 5,
+    validateStatus: status => status >= 200 && status < 400
+  });
+  const html = String(response.data || '');
+  const pageText = html.toLowerCase();
+  if (
+    response.status === 403 || response.status === 429 ||
+    /captcha|verify you are human|access denied|too many requests|robot check|підтверд.{0,20}що ви людина|забагато запитів/i.test(pageText)
+  ) {
+    const error = new Error('OLX тимчасово обмежив доступ до пошуку. Спробуйте пізніше.');
+    error.code = 'OLX_BLOCKED';
+    throw error;
+  }
+
+  const $ = cheerio.load(html);
   const rawItems = [];
 
   const stopWords = [
@@ -249,16 +265,38 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
 
   // OLX periodically changes card attributes. Support both current and older
   // card markup, and only use article fallback when it contains an ad link.
-  let cards = $('[data-cy="l-card"], [data-testid="l-card"]');
+  let cards = $(
+    '[data-cy="l-card"], [data-testid="l-card"], ' +
+    '[data-testid*="listing-card"], [data-cy*="listing-card"], ' +
+    '[data-testid="listing-grid"] > div, [data-cy="listing-grid"] > div'
+  ).filter((_, el) => $(el).find('a[href*="/d/"], a[href*="/obyavlenie/"]').length > 0);
+
   if (!cards.length) {
-    cards = $('article').filter((_, el) =>
+    cards = $('article, [role="listitem"]').filter((_, el) =>
       $(el).find('a[href*="/d/"], a[href*="/obyavlenie/"]').length > 0
     );
   }
+
+  // Last-resort fallback for OLX markup changes: use the smallest ancestor
+  // containing an ad link, a recognizable title and a price.
   if (!cards.length) {
-    cards = $('[data-testid="listing-grid"] > div, [data-cy="listing-grid"] > div').filter((_, el) =>
-      $(el).find('a[href*="/d/"], a[href*="/obyavlenie/"]').length > 0
-    );
+    const seen = new Set();
+    $('a[href*="/d/"], a[href*="/obyavlenie/"]').each((_, linkEl) => {
+      let node = $(linkEl);
+      for (let depth = 0; depth < 6 && node.length; depth++, node = node.parent()) {
+        const text = node.text().replace(/\\s+/g, ' ').trim();
+        const hasTitle = node.find('h3, h4, h5, h6, [data-testid*="title"], [data-cy*="title"]').length > 0;
+        const hasPrice = /грн|₴/.test(text);
+        if (hasTitle && hasPrice && text.length < 2500) {
+          const el = node.get(0);
+          if (el && !seen.has(el)) {
+            seen.add(el);
+            cards = cards.add(node);
+          }
+          break;
+        }
+      }
+    });
   }
 
   cards.each((index, element) => {
@@ -299,19 +337,33 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     let rawImgUrl = '';
     const imgEl = $(element).find('img').first();
     const src = imgEl.attr('src') || '';
-    const dataSrc = imgEl.attr('data-src') || '';
+    const lazySrc = imgEl.attr('data-src') || imgEl.attr('data-lazy-src') ||
+      imgEl.attr('data-original') || imgEl.attr('data-image') || '';
     const srcset = imgEl.attr('srcset') || imgEl.attr('data-srcset') || '';
+    const candidates = [
+      lazySrc,
+      srcset && !srcset.startsWith('data:') ? srcset.split(',').pop().trim().split(/\\s+/)[0] : '',
+      src,
+      imgEl.attr('content') || ''
+    ];
 
-    let candidate = '';
-    if (dataSrc && !dataSrc.startsWith('data:')) candidate = dataSrc;
-    else if (srcset && !srcset.startsWith('data:')) candidate = srcset.split(',')[0].trim().split(' ')[0];
-    else if (src && !src.startsWith('data:')) candidate = src;
+    let candidate = candidates.find(value =>
+      value && !value.startsWith('data:') && !/placeholder|no-photo|noimage|blank\\.gif/i.test(value)
+    ) || '';
 
     if (candidate) {
-      candidate = candidate.replace(/\\/g, '').replace(/&amp;/g, '&');
+      candidate = candidate.replace(/\\\\/g, '').replace(/&amp;/g, '&');
       if (candidate.startsWith('//')) candidate = 'https:' + candidate;
       else if (candidate.startsWith('/')) candidate = 'https://www.olx.ua' + candidate;
-      rawImgUrl = candidate;
+      try {
+        const imageUrl = new URL(candidate);
+        if (imageUrl.protocol === 'https:' &&
+            /(^|\\.)olx\\.(ua|pl|bg|ro|pt|kz|uz|az|ge|md|by)$|olxcdn\\.com$|olxstatic\\.com$/i.test(imageUrl.hostname)) {
+          rawImgUrl = imageUrl.toString();
+        }
+      } catch (_) {
+        rawImgUrl = '';
+      }
     }
 
     const locationDate = $(element).find('[data-testid="location-date"], [data-cy="location-date"], [class*="location"], [class*="date"]').first().text().trim();
@@ -345,6 +397,12 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     const filteredPrices = prices.filter(p => p >= medianPrice * 0.5 && p <= medianPrice * 2.0);
     const sum = filteredPrices.reduce((a, b) => a + b, 0);
     averagePrice = filteredPrices.length > 0 ? Math.round(sum / filteredPrices.length) : medianPrice;
+  }
+
+  if (!rawItems.length && /olx/i.test(targetUrl) && !/search|listing|og:/.test(pageText)) {
+    const error = new Error('Не вдалося розпізнати сторінку OLX. Сайт міг змінити розмітку або тимчасово обмежити доступ.');
+    error.code = 'OLX_PARSE_EMPTY';
+    throw error;
   }
 
   return { items: rawItems, averagePrice };
@@ -382,7 +440,14 @@ app.get('/api/search', async (req, res) => {
     }
     res.json({ success: true, count: items.length, averagePrice, items });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Помилка отримання даних з OLX' });
+    if (error.code === 'OLX_BLOCKED') {
+      return res.status(503).json({ success: false, error: error.message });
+    }
+    if (error.code === 'OLX_PARSE_EMPTY') {
+      return res.status(502).json({ success: false, error: error.message });
+    }
+    console.error('[OLX search] Failed:', error.response?.status || error.message);
+    res.status(502).json({ success: false, error: 'Не вдалося отримати оголошення з OLX. Спробуйте ще раз трохи пізніше.' });
   }
 });
 
