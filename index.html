@@ -506,6 +506,7 @@
         });
         const data = await res.json();
         if (data.success) {
+          window.hasActivePremium = data.hasActivePremium === true || data.isAdmin === true;
           if (data.isAdmin) {
             isAdminUser = true;
             document.getElementById('nav-admin').classList.remove('hidden');
@@ -597,8 +598,8 @@
             return;
         }
         
-        userFilters = userFilters.filter(f => f.id !== id);
-        localStorage.setItem('olx_active_filters', JSON.stringify(userFilters));
+        userFilters = userFilters.filter(f => String(f.id) !== String(id));
+        await loadActiveFilters();
         renderActiveFilters();
       } catch (e) {
         alert("Помилка з'єднання з сервером. Спробуйте пізніше.");
@@ -750,13 +751,14 @@
 
     function renderActiveFilters() {
       const container = document.getElementById('activeSearchesList');
-      const countText = isAdminUser || document.getElementById('userTariffBadge').innerText === 'PRO ТАРИФ' 
-        ? `${userFilters.length} / Безліміт` 
+      const hasPremiumAccess = isAdminUser || window.hasActivePremium === true;
+      const countText = hasPremiumAccess
+        ? `${userFilters.length} / Безліміт`
         : `${userFilters.length} / 2 (Free)`;
 
       document.getElementById('activeFiltersCounter').innerText = countText;
-      document.getElementById('statActiveFilters').innerText = isAdminUser || document.getElementById('userTariffBadge').innerText === 'PRO ТАРИФ' 
-        ? `${userFilters.length} / ∞` 
+      document.getElementById('statActiveFilters').innerText = hasPremiumAccess
+        ? `${userFilters.length} / ∞`
         : `${userFilters.length} / 2`;
 
       if (userFilters.length === 0) {
@@ -981,11 +983,11 @@
       const docs = {
         terms: {
           title: "Публічна оферта та Умови використання OLX Checker",
-          content: "Дана Оферта є офіційною пропозицією сервісу OLX Checker для фізичних осіб щодо надання доступу до функцій автоматичного моніторингу оголошень. Оплата послуг або використання Telegram Mini App означає повне прийняття цих умов."
+          content: "ПУБЛІЧНА ОФЕРТА OLX CHECKER\\n\\n1. Постачальник послуги: власник сервісу OLX Checker; найменування, реєстраційні та контактні дані мають бути внесені власником до запуску платних послуг.\\n\\n2. Предмет: доступ до функцій пошуку та моніторингу оголошень OLX відповідно до обраного тарифу. Сервіс не є частиною OLX і не гарантує безперервну доступність стороннього сайту, повноту оголошень або комерційний результат користувача.\\n\\n3. Тарифи, ціна, тривалість доступу та спосіб оплати мають бути показані до підтвердження платежу. Доступ Premium надається після підтвердження успішної оплати або адміністративного нарахування.\\n\\n4. Користувач відповідає за законність використання сервісу та не повинен обходити технічні обмеження сторонніх платформ або використовувати сервіс для спаму.\\n\\n5. Повернення коштів, порядок звернень, дата набрання чинності та повні дані постачальника необхідно конкретизувати до публічного запуску. Це робочий шаблон, а не юридичний висновок."
         },
         privacy: {
           title: "Політика конфіденційності",
-          content: "Сервіс OLX Checker обробляє тільки публічні дані Telegram (ID, ім'я) та збережені параметри фільтрів. Платіжні дані обробляються виключно ліцензованими провайдерами (Monobank / Telegram Stars)."
+          content: "ПОЛІТИКА КОНФІДЕНЦІЙНОСТІ OLX CHECKER\\n\\n1. Дані: сервіс може обробляти Telegram ID, ім'я профілю, налаштування фільтрів, історію вже надісланих оголошень і технічні журнали, потрібні для роботи та захисту сервісу.\\n\\n2. Мета: авторизація, збереження фільтрів, надсилання сповіщень, підтримка користувачів, адміністрування та запобігання зловживанням.\\n\\n3. Оплата: платіжні реквізити не повинні зберігатися в OLX Checker; платіж обробляє відповідний провайдер згідно з його правилами.\\n\\n4. Передавання: дані можуть оброблятися постачальниками інфраструктури, необхідними для роботи сервісу. До запуску потрібно додати точні назви провайдерів, строки зберігання та контакт для запитів щодо даних.\\n\\n5. Безпека: доступ до даних обмежується функціями сервісу та адміністрування. Користувач може звернутися до власника сервісу із запитом щодо своїх даних. Це робочий шаблон, який власник має доповнити фактичними даними до публічного запуску."
         }
       };
 
