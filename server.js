@@ -10,7 +10,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Защита статических файлов
+// Защита статических ресурсов
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 app.use(express.static(__dirname, {
   setHeaders: (res) => {
@@ -27,7 +27,7 @@ if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 const SUPABASE_URL = rawUrl;
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
-const SERVER_URL = (process.env.SERVER_URL || '[https://olx-checker-backend.onrender.com](https://olx-checker-backend.onrender.com)').replace(/\/$/, '');
+const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
   .split(',')
@@ -48,7 +48,7 @@ const HEADERS = {
 };
 
 // ==========================================
-// 1. АВТОРИЗАЦИЯ И КРИПТОГРАФИЧЕСКАЯ ПРОВЕРКА
+// 1. БЕЗОПАСНОСТЬ И ВАЛИДАЦИЯ TELEGRAM INITDATA
 // ==========================================
 
 function verifyTelegramWebAppData(initDataRaw) {
@@ -139,7 +139,7 @@ async function adminAuthMiddleware(req, res, next) {
 async function sendTelegramMessage(chatId, text, replyMarkup = null) {
   if (!TELEGRAM_BOT_TOKEN) return false;
   try {
-    await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       chat_id: chatId,
       text: text,
       parse_mode: 'HTML',
@@ -157,7 +157,7 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
   if (!TELEGRAM_BOT_TOKEN) return false;
   try {
     const fullPhotoUrl = photoUrl.startsWith('/') ? `${SERVER_URL}${photoUrl}` : photoUrl;
-    await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
       chat_id: chatId,
       photo: fullPhotoUrl,
       caption: caption,
@@ -185,7 +185,7 @@ app.get('/api/proxy-image', async (req, res) => {
       responseType: 'arraybuffer',
       headers: {
         'User-Agent': HEADERS['User-Agent'],
-        'Referer': '[https://www.olx.ua/](https://www.olx.ua/)'
+        'Referer': 'https://www.olx.ua/'
       },
       timeout: 5000
     });
@@ -247,7 +247,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
 
     const rawLink = $(element).find('a').attr('href') || '';
-    const link = rawLink.startsWith('http') ? rawLink : `[https://www.olx.ua](https://www.olx.ua)${rawLink}`;
+    const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
 
     let rawImgUrl = '';
     const imgEl = $(element).find('img').first();
@@ -263,7 +263,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     if (candidate) {
       candidate = candidate.replace(/\\/g, '').replace(/&amp;/g, '&');
       if (candidate.startsWith('//')) candidate = 'https:' + candidate;
-      else if (candidate.startsWith('/')) candidate = '[https://www.olx.ua](https://www.olx.ua)' + candidate;
+      else if (candidate.startsWith('/')) candidate = 'https://www.olx.ua' + candidate;
       rawImgUrl = candidate;
     }
 
@@ -303,13 +303,16 @@ app.get('/api/search', async (req, res) => {
     let targetUrl = categoryUrl;
 
     if (!targetUrl && query) {
-      if (minPrice || maxPrice) {
+      const cleanQ = query.trim();
+      if (cleanQ.startsWith('http://') || cleanQ.startsWith('https://')) {
+        targetUrl = cleanQ;
+      } else if (minPrice || maxPrice) {
         const searchMin = minPrice ? `search%5Bfilter_float_price%3Afrom%5D=${minPrice}` : '';
         const searchMax = maxPrice ? `search%5Bfilter_float_price%3Ato%5D=${maxPrice}` : '';
         const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
-        targetUrl = `[https://www.olx.ua/uk/list/q-$](https://www.olx.ua/uk/list/q-$){encodeURIComponent(query)}/?${queryParams}`;
+        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/?${queryParams}`;
       } else {
-        targetUrl = `[https://www.olx.ua/uk/list/q-$](https://www.olx.ua/uk/list/q-$){encodeURIComponent(query)}/`;
+        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/`;
       }
     }
 
@@ -367,7 +370,6 @@ app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
     const { data, error } = await supabase.from('filters').select('*').eq('user_id', userId);
     if (error) throw error;
 
-    // Исключаем дубликаты из результата
     const uniqueFilters = [];
     const seenQueries = new Set();
     for (const f of (data || [])) {
@@ -399,7 +401,6 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
         await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
       } catch (uErr) {}
 
-      // Проверка на дубликат поискового запроса у этого пользователя
       const { data: existingFilters } = await supabase
         .from('filters')
         .select('*')
@@ -429,9 +430,12 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
       if (error) throw error;
       const createdFilter = data[0];
 
-      // Тихий прогрев для исключения рассылки старых объявлений
+      // Тихий прогрев
       try {
-        const targetUrl = `[https://www.olx.ua/uk/list/q-$](https://www.olx.ua/uk/list/q-$){encodeURIComponent(cleanQuery)}/`;
+        let targetUrl = cleanQuery;
+        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+          targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQuery)}/`;
+        }
         const { items } = await parseOlx(targetUrl, minPrice, maxPrice, cleanQuery);
         if (items && items.length > 0) {
           const initialSeen = items.map(item => ({
@@ -585,7 +589,7 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// 6. TELEGRAM WEBHOOK И ФОНОВЫЙ ВОРКЕР
+// 6. TELEGRAM WEBHOOK И ИСПРАВЛЕННЫЙ ВОРКЕР
 // ==========================================
 
 app.post('/telegram-webhook', async (req, res) => {
@@ -652,7 +656,20 @@ async function runBackgroundWorker() {
 
     for (const filter of filters) {
       try {
-        const targetUrl = `[https://www.olx.ua/uk/list/q-$](https://www.olx.ua/uk/list/q-$){encodeURIComponent(filter.query)}/`;
+        let targetUrl = filter.query ? filter.query.trim() : '';
+
+        // Проверка: это готовая ссылка OLX или просто поисковый запрос?
+        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+          if (filter.min_price || filter.max_price) {
+            const searchMin = filter.min_price ? `search%5Bfilter_float_price%3Afrom%5D=${filter.min_price}` : '';
+            const searchMax = filter.max_price ? `search%5Bfilter_float_price%3Ato%5D=${filter.max_price}` : '';
+            const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
+            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/?${queryParams}`;
+          } else {
+            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/`;
+          }
+        }
+
         const { items, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
 
         if (!items || items.length === 0) continue;
@@ -706,7 +723,7 @@ async function registerWebhook() {
   if (!TELEGRAM_BOT_TOKEN || !SERVER_URL) return;
   try {
     const targetWebhookUrl = `${SERVER_URL}/telegram-webhook`;
-    await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/setWebhook?url=${encodeURIComponent(targetWebhookUrl)}`);
+    await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${encodeURIComponent(targetWebhookUrl)}`);
     console.log(`✅ Telegram Webhook встановлено: ${targetWebhookUrl}`);
   } catch (err) {
     console.error('Помилка встановлення Webhook:', err.message);
