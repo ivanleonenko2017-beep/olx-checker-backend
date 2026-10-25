@@ -236,12 +236,19 @@ function locationMatches(locationDate, requestedLocation) {
 }
 
 async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
-  const response = await axios.get(targetUrl, {
-    headers: HEADERS,
-    timeout: 15000,
-    maxRedirects: 5,
-    validateStatus: status => status >= 200 && status < 400
-  });
+  let response;
+  try {
+    response = await axios.get(targetUrl, {
+      headers: HEADERS,
+      timeout: 15000,
+      maxRedirects: 5,
+      validateStatus: status => status >= 200 && status < 400
+    });
+    console.log(`[OLX search] Upstream response: status=${response.status}, htmlBytes=${Buffer.byteLength(String(response.data || ''), 'utf8')}`);
+  } catch (requestError) {
+    console.error(`[OLX search] Upstream request failed: status=${requestError.response?.status || 'no-http-status'}, code=${requestError.code || 'unknown'}`);
+    throw requestError;
+  }
   const html = String(response.data || '');
   const pageText = html.toLowerCase();
   if (
@@ -409,6 +416,8 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
 }
 
 app.get('/api/search', async (req, res) => {
+  const startedAt = Date.now();
+  console.log(`[API search] Request received: queryProvided=${Boolean(req.query.query)}, categoryUrlProvided=${Boolean(req.query.categoryUrl)}, filters=${Boolean(req.query.minPrice || req.query.maxPrice || req.query.city || req.query.condition)}`);
   try {
     const { query, categoryUrl, minPrice, maxPrice, city, condition } = req.query;
     let targetUrl = categoryUrl;
@@ -438,15 +447,16 @@ app.get('/api/search', async (req, res) => {
     } else if (requestedCondition === 'used') {
       items = items.filter(item => /\b(б\/у|бу|вживан|уживан|після використання|used)\b/i.test(`${item.title} ${item.description || ''}`));
     }
+    console.log(`[API search] Completed: parsed=${parsedItems.length}, returned=${items.length}, durationMs=${Date.now() - startedAt}`);
     res.json({ success: true, count: items.length, averagePrice, items });
   } catch (error) {
+    console.error(`[API search] Failed: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}, message=${String(error.message || 'unknown').slice(0, 180)}, durationMs=${Date.now() - startedAt}`);
     if (error.code === 'OLX_BLOCKED') {
       return res.status(503).json({ success: false, error: error.message });
     }
     if (error.code === 'OLX_PARSE_EMPTY') {
       return res.status(502).json({ success: false, error: error.message });
     }
-    console.error('[OLX search] Failed:', error.response?.status || error.message);
     res.status(502).json({ success: false, error: 'Не вдалося отримати оголошення з OLX. Спробуйте ще раз трохи пізніше.' });
   }
 });
