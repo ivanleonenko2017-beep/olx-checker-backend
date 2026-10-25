@@ -683,7 +683,22 @@
       document.getElementById('modalAdPrice').innerText = item.priceText;
       document.getElementById('modalAdLocation').innerText = item.locationDate || 'Україна';
       const descEl = document.getElementById('modalAdDesc');
-      if (descEl) descEl.innerText = item.description || 'Відкрийте оголошення на OLX, щоб переглянути повний опис продавця.';
+      if (descEl) {
+        descEl.innerText = 'Завантажуємо опис продавця з OLX…';
+        fetch(`${BACKEND_URL}/api/ad-details?url=${encodeURIComponent(item.link)}`)
+          .then(response => response.ok ? response.json() : null)
+          .then(data => {
+            if (document.getElementById('modalAdTitle').innerText !== item.title) return;
+            descEl.innerText = data && data.success && data.description
+              ? data.description
+              : 'Опис продавця зараз недоступний. Відкрийте оголошення на OLX для деталей.';
+          })
+          .catch(() => {
+            if (document.getElementById('modalAdTitle').innerText === item.title) {
+              descEl.innerText = 'Опис продавця зараз недоступний. Відкрийте оголошення на OLX для деталей.';
+            }
+          });
+      }
       document.getElementById('modalOlxLink').href = item.link;
 
       const imgContainer = document.getElementById('modalAdImgContainer');
