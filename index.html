@@ -125,32 +125,7 @@
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-[11px] text-gray-400 mb-1 font-medium">Місто / Регіон</label>
-            <select id="cityInput" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
-              <option value="Всі міста">Всі міста</option>
-              <option value="Київ">Київ</option>
-              <option value="Харків">Харків</option>
-              <option value="Одеса">Одеса</option>
-              <option value="Дніпро">Дніпро</option>
-              <option value="Львів">Львів</option>
-              <option value="Запоріжжя">Запоріжжя</option>
-              <option value="Вінниця">Вінниця</option>
-              <option value="Полтава">Полтава</option>
-              <option value="Чернігів">Чернігів</option>
-              <option value="Черкаси">Черкаси</option>
-              <option value="Житомир">Житомир</option>
-              <option value="Суми">Суми</option>
-              <option value="Рівне">Рівне</option>
-              <option value="Луцьк">Луцьк</option>
-              <option value="Тернопіль">Тернопіль</option>
-              <option value="Івано-Франківськ">Івано-Франківськ</option>
-              <option value="Ужгород">Ужгород</option>
-              <option value="Миколаїв">Миколаїв</option>
-              <option value="Хмельницький">Хмельницький</option>
-              <option value="Кропивницький">Кропивницький</option>
-              <option value="Чернівці">Чернівці</option>
-              <option value="Кривий Ріг">Кривий Ріг</option>
-              <option value="Біла Церква">Біла Церква</option>
-            </select>
+            <input type="text" id="cityInput" placeholder="Всі міста" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
           </div>
           <div>
             <label class="block text-[11px] text-gray-400 mb-1 font-medium">Стан товару</label>
@@ -397,32 +372,7 @@
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-[10px] text-gray-400 mb-1 font-medium">Місто / Область</label>
-            <select id="modalCity" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
-              <option value="Всі міста">Всі міста</option>
-              <option value="Київ">Київ</option>
-              <option value="Харків">Харків</option>
-              <option value="Одеса">Одеса</option>
-              <option value="Дніпро">Дніпро</option>
-              <option value="Львів">Львів</option>
-              <option value="Запоріжжя">Запоріжжя</option>
-              <option value="Вінниця">Вінниця</option>
-              <option value="Полтава">Полтава</option>
-              <option value="Чернігів">Чернігів</option>
-              <option value="Черкаси">Черкаси</option>
-              <option value="Житомир">Житомир</option>
-              <option value="Суми">Суми</option>
-              <option value="Рівне">Рівне</option>
-              <option value="Луцьк">Луцьк</option>
-              <option value="Тернопіль">Тернопіль</option>
-              <option value="Івано-Франківськ">Івано-Франківськ</option>
-              <option value="Ужгород">Ужгород</option>
-              <option value="Миколаїв">Миколаїв</option>
-              <option value="Хмельницький">Хмельницький</option>
-              <option value="Кропивницький">Кропивницький</option>
-              <option value="Чернівці">Чернівці</option>
-              <option value="Кривий Ріг">Кривий Ріг</option>
-              <option value="Біла Церква">Біла Церква</option>
-            </select>
+            <input type="text" id="modalCity" placeholder="Всі міста" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
           </div>
           <div>
             <label class="block text-[10px] text-gray-400 mb-1 font-medium">Стан товару</label>
@@ -556,6 +506,7 @@
         const res = await fetch(`${BACKEND_URL}/api/user/profile`, {
           headers: { 'x-telegram-init-data': initDataRaw }
         });
+        if (!res.ok) throw new Error(`Profile request failed: ${res.status}`);
         const data = await res.json();
         if (data.success) {
           window.hasActivePremium = data.hasActivePremium === true || data.isAdmin === true;
@@ -581,9 +532,11 @@
           if (data.stats) {
             document.getElementById('statRefUsers').innerText = data.stats.totalReferrals || 0;
           }
+        } else {
+          console.error('Profile response did not contain success=true; preserving current tariff display.');
         }
       } catch (err) {
-        console.error('Profile load error:', err);
+        console.error('Profile load error; preserving current tariff display:', err);
       }
     }
 
