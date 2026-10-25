@@ -737,7 +737,24 @@ app.post('/telegram-webhook', async (req, res) => {
         .eq('telegram_payment_charge_id', payment.telegram_payment_charge_id).maybeSingle();
       if (paymentReadError) throw paymentReadError;
       if (existingPayment) {
-        await sendTelegramMessage(chatId, 'Цей платіж уже оброблено. Перевірте статус Premium у профілі.');
+        // Recover an interrupted activation if the ledger row exists but Premium was not granted.
+        const { data: existingUser, error: existingUserError } = await supabase
+          .from('users').select('premium_until,tariff').eq('telegram_id', chatId).maybeSingle();
+        if (existingUserError) throw existingUserError;
+        const existingExpiry = existingUser && existingUser.premium_until ? Date.parse(existingUser.premium_until) : 0;
+        if (!Number.isFinite(existingExpiry) || existingExpiry <= Date.now()) {
+          const repairedUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+          const { error: repairError } = await supabase.from('users').upsert({
+            telegram_id: chatId,
+            first_name: msg.from && msg.from.first_name ? msg.from.first_name : 'User',
+            tariff: 'premium',
+            premium_until: repairedUntil
+          }, { onConflict: 'telegram_id' });
+          if (repairError) throw repairError;
+          await sendTelegramMessage(chatId, 'Знайшли незавершену активацію платежу та відновили Premium на 30 днів. Дякуємо за підтримку OLX Checker.');
+        } else {
+          await sendTelegramMessage(chatId, 'Цей платіж уже оброблено, Premium активний. Дякуємо за підтримку OLX Checker.');
+        }
         return;
       }
 
