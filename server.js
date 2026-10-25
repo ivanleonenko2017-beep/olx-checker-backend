@@ -1,844 +1,747 @@
-<!DOCTYPE html>
-<html lang="uk">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>OLX Checker Beta 1.0 RC</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body {
-      background-color: var(--tg-theme-bg-color, #0b0f19);
-      color: var(--tg-theme-text-color, #ffffff);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      padding-bottom: 85px;
+const express = require('express');
+const axios = require('axios');
+const cheerio = require('cheerio');
+const cors = require('cors');
+const path = require('path');
+const crypto = require('crypto');
+const { createClient } = require('@supabase/supabase-js');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Защита статических ресурсов
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
+app.use(express.static(__dirname, {
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  }
+}));
+
+// Нормализация Supabase URL
+let rawUrl = (process.env.SUPABASE_URL || '').trim();
+if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
+if (rawUrl.endsWith('/rest/v1')) rawUrl = rawUrl.slice(0, -8);
+if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
+
+const SUPABASE_URL = rawUrl;
+const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
+const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
+
+const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
+  .split(',')
+  .map(id => parseInt(id.trim(), 10))
+  .filter(Boolean);
+
+let supabase = null;
+if (SUPABASE_URL && SUPABASE_KEY) {
+  supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  console.log(`✅ Supabase підключено: ${SUPABASE_URL}`);
+}
+
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept-Language': 'uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Cache-Control': 'no-cache'
+};
+
+// ==========================================
+// 1. БЕЗОПАСНОСТЬ И ВАЛИДАЦИЯ TELEGRAM INITDATA
+// ==========================================
+
+function verifyTelegramWebAppData(initDataRaw) {
+  if (!initDataRaw || !TELEGRAM_BOT_TOKEN) return null;
+  try {
+    const urlParams = new URLSearchParams(initDataRaw);
+    const hash = urlParams.get('hash');
+    if (!hash) return null;
+
+    urlParams.delete('hash');
+
+    const params = [];
+    for (const [key, value] of urlParams.entries()) {
+      params.push(`${key}=${value}`);
     }
-  </style>
-</head>
-<body class="p-4">
-  <div id="app" class="max-w-md mx-auto space-y-4">
+    params.sort();
 
-    <!-- ================= TAB 1: HOME ================= -->
-    <div id="tab-home" class="tab-content space-y-4">
-      <div class="flex items-center justify-between border-b border-gray-800/80 pb-3">
-        <div>
-          <h1 class="text-lg font-bold text-emerald-400 flex items-center gap-1.5">
-            <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-            OLX Checker <span class="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">Beta 1.0 RC</span>
-          </h1>
-          <p class="text-[11px] text-gray-400">Розумний асистент вигідних покупок</p>
-        </div>
-        <span id="userTariffBadge" class="text-[10px] bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded-full border border-emerald-800/80 font-semibold">FREE ТАРИФ</span>
-      </div>
+    const dataCheckString = params.join('\n');
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(TELEGRAM_BOT_TOKEN).digest();
+    const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
-      <!-- Main Banner -->
-      <div class="p-4 rounded-3xl bg-gradient-to-br from-emerald-950/70 via-gray-900 to-gray-900 border border-emerald-500/40 shadow-xl space-y-3">
-        <div class="flex justify-between items-start">
-          <div>
-            <div class="text-xs font-bold text-emerald-300">Авто-моніторинг 24/7</div>
-            <div class="text-[11px] text-gray-300 mt-0.5">Знаходьте вигідні пропозиції першими</div>
-          </div>
-          <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-lg border border-emerald-500/40 font-mono">PRO 60s</span>
-        </div>
-
-        <div class="relative pt-1">
-          <input type="text" id="homeSearchInput" placeholder="Введіть назву або посилання OLX..." 
-                 class="w-full p-3.5 pl-4 pr-24 rounded-2xl bg-gray-950/80 border border-gray-700/80 text-xs text-white focus:outline-none focus:border-emerald-400">
-          <button onclick="quickSearchFromHome()" class="absolute right-1.5 top-2.5 bg-emerald-400 hover:bg-emerald-300 text-black px-4 py-2 rounded-xl font-bold text-xs transition shadow-md">
-            Шукати
-          </button>
-        </div>
-      </div>
-
-      <!-- Quick Categories -->
-      <div>
-        <div class="text-xs font-semibold text-gray-400 mb-2">Швидкі категорії</div>
-        <div class="grid grid-cols-3 gap-2">
-          <button onclick="selectCategory('Авто')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 17a2 2 0 100 4 2 2 0 000-4zm8 0a2 2 0 100 4 2 2 0 000-4zM3 9l2-4h10l2 4M3 9h18v7a1 1 0 01-1 1H4a1 1 0 01-1-1V9z"/></svg>
-            <div class="text-[11px] text-gray-300 font-medium">Авто</div>
-          </button>
-          <button onclick="selectCategory('Електроніка')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-            <div class="text-[11px] text-gray-300 font-medium">Електроніка</div>
-          </button>
-          <button onclick="selectCategory('Одяг')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
-            <div class="text-[11px] text-gray-300 font-medium">Одяг</div>
-          </button>
-          <button onclick="selectCategory('Дім і сад')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-            <div class="text-[11px] text-gray-300 font-medium">Дім і сад</div>
-          </button>
-          <button onclick="selectCategory('Спорт')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-            <div class="text-[11px] text-gray-300 font-medium">Спорт</div>
-          </button>
-          <button onclick="selectCategory('Інше')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-            <div class="text-[11px] text-gray-300 font-medium">Інше</div>
-          </button>
-        </div>
-      </div>
-
-      <!-- Active Filters -->
-      <div class="space-y-2.5">
-        <div class="flex justify-between items-center">
-          <div class="text-xs font-semibold text-gray-300">Активні фільтри відстеження</div>
-          <span id="activeFiltersCounter" class="text-[11px] text-gray-400 font-medium">0 / 2 (Free)</span>
-        </div>
-
-        <div id="activeSearchesList" class="space-y-2"></div>
-
-        <button onclick="openAddFilterModal()" class="w-full py-3.5 bg-emerald-400 hover:bg-emerald-300 text-black font-bold rounded-2xl text-xs transition shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
-          Додати новий детальний фільтр
-        </button>
-      </div>
-    </div>
-
-    <!-- ================= TAB 2: SEARCH ================= -->
-    <div id="tab-search" class="tab-content hidden space-y-4">
-      <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-        <h2 class="text-base font-bold text-white">Розширений пошук OLX</h2>
-        <span class="text-xs text-gray-400">Live Parser</span>
-      </div>
-
-      <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3 shadow-lg">
-        <div>
-          <label class="block text-[11px] text-gray-400 mb-1 font-medium">Пошуковий запит або посилання OLX</label>
-          <input type="text" id="searchInput" placeholder="Наприклад: iPhone 11 або посилання" 
-                 class="w-full p-3 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-[11px] text-gray-400 mb-1 font-medium">Мін. ціна (грн)</label>
-            <input type="number" id="minPrice" placeholder="0" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
-          </div>
-          <div>
-            <label class="block text-[11px] text-gray-400 mb-1 font-medium">Макс. ціна (грн)</label>
-            <input type="number" id="maxPrice" placeholder="Без ліміту" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-[11px] text-gray-400 mb-1 font-medium">Місто / Регіон</label>
-            <input type="text" id="cityInput" placeholder="Всі міста" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
-          </div>
-          <div>
-            <label class="block text-[11px] text-gray-400 mb-1 font-medium">Стан товару</label>
-            <select id="conditionSelect" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
-              <option value="all">Всі стани</option>
-              <option value="used">Вживане (Б/У)</option>
-              <option value="new">Нове</option>
-            </select>
-          </div>
-        </div>
-
-        <button onclick="runSearch()" id="searchBtn" 
-                class="w-full bg-emerald-400 hover:bg-emerald-300 text-black font-bold py-3.5 rounded-xl transition text-xs shadow-lg shadow-emerald-950 flex items-center justify-center gap-2">
-          <span>🔍</span> Знайти та проаналізувати
-        </button>
-      </div>
-
-      <!-- Analytics Banner -->
-      <div id="analytics" class="hidden space-y-3">
-        <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-2">
-          <div class="text-xs text-gray-400">Аналітика ринку</div>
-          <div class="flex justify-between items-end">
-            <div>
-              <div class="text-2xl font-bold text-emerald-400" id="avgPrice">0 грн</div>
-              <div class="text-[10px] text-gray-400">Середня ринкова ціна</div>
-            </div>
-            <span id="itemsCount" class="text-xs bg-blue-900/50 text-blue-300 px-2.5 py-1 rounded-full border border-blue-800">0 товарів</span>
-          </div>
-        </div>
-
-        <div class="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-gray-900 border border-emerald-800/80 flex items-center justify-between">
-          <div>
-            <div class="text-xs font-bold text-emerald-300">Сподобався результат?</div>
-            <div class="text-[10px] text-gray-400">Отримуйте сповіщення у чат бота про нові позиції</div>
-          </div>
-          <button onclick="convertCurrentSearchToFilter()" class="px-3.5 py-2 bg-emerald-400 hover:bg-emerald-300 text-black font-extrabold rounded-xl text-xs transition shadow-md">
-            ➕ Відстежувати
-          </button>
-        </div>
-      </div>
-
-      <div id="results" class="space-y-3"></div>
-    </div>
-
-    <!-- ================= TAB 3: FAVORITES ================= -->
-    <div id="tab-favorites" class="tab-content hidden space-y-4">
-      <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-        <h2 class="text-base font-bold text-white">Збережені оголошення</h2>
-        <span id="favCount" class="text-xs text-gray-400">0 товарів</span>
-      </div>
-
-      <div id="favoritesList" class="space-y-3"></div>
-    </div>
-
-    <!-- ================= TAB 4: PROFILE & PAYMENT ================= -->
-    <div id="tab-profile" class="tab-content hidden space-y-4">
-      <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 flex items-center justify-between shadow-lg">
-        <div class="flex items-center gap-3">
-          <div class="w-12 h-12 bg-emerald-950 border border-emerald-800 rounded-2xl flex items-center justify-center text-lg font-bold text-emerald-400" id="avatarLetter">U</div>
-          <div>
-            <div class="text-sm font-bold text-white" id="profileName">Користувач</div>
-            <div class="text-[10px] text-gray-400 mt-0.5">ID: <span id="profileId">---</span></div>
-          </div>
-        </div>
-        <span id="profileTariffBadge" class="text-[10px] bg-gray-800 text-gray-300 px-3 py-1 rounded-full border border-gray-700 font-medium">Free Тариф</span>
-      </div>
-
-      <!-- Stats Grid -->
-      <div class="grid grid-cols-3 gap-2 text-center">
-        <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
-          <div class="text-base font-bold text-emerald-400" id="statSaved">0</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">В Обраному</div>
-        </div>
-        <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
-          <div class="text-base font-bold text-white" id="statActiveFilters">0 / 2</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">Фільтрів</div>
-        </div>
-        <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
-          <div class="text-base font-bold text-blue-400" id="statRefUsers">0</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">Рефералів</div>
-        </div>
-      </div>
-
-      <!-- PAYMENT SECTION -->
-      <div id="premiumSection" class="p-4 rounded-3xl bg-gradient-to-br from-emerald-950 via-gray-900 to-gray-900 border-2 border-emerald-500/80 space-y-3 shadow-xl">
-        <div class="flex justify-between items-start">
-          <div>
-            <div class="text-sm font-bold text-emerald-300 flex items-center gap-1.5">
-              <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
-              OLX Checker PREMIUM
-            </div>
-            <div class="text-[11px] text-gray-300 mt-0.5">Миттєві сповіщення без затримок</div>
-          </div>
-          <span class="text-xs font-extrabold bg-emerald-400 text-black px-2.5 py-1 rounded-xl">199 грн/міс</span>
-        </div>
-
-        <div class="space-y-2 pt-1 border-t border-emerald-800/60 text-xs text-gray-200">
-          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Перевірка товарів кожні 60 секунд</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Безлімітні активні відстеження</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Пріоритетні бот-сповіщення</div>
-        </div>
-
-        <div class="pt-2 space-y-2">
-          <button onclick="payViaMonobank()" class="w-full py-3 bg-emerald-400 hover:bg-emerald-300 text-black font-extrabold rounded-2xl text-xs transition shadow-lg shadow-emerald-950 flex items-center justify-center gap-2">
-            <span>💳</span> Оплатити 199 грн (Monobank)
-          </button>
-        </div>
-      </div>
-
-      <!-- Referral Banner -->
-      <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3">
-        <div>
-          <div class="text-xs font-bold text-emerald-300">🎁 Реферальна програма</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">Запрошуйте друзів та отримуйте +3 дні PRO за кожного активного користувача</div>
-        </div>
-        <div class="flex gap-2">
-          <button onclick="shareReferralLink()" class="flex-1 py-2.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold rounded-xl text-xs transition">
-            Запросити друга
-          </button>
-          <button onclick="copyRefLink()" class="px-3 py-2.5 bg-gray-800 border border-gray-700 text-white rounded-xl text-xs">
-            📋
-          </button>
-        </div>
-      </div>
-
-      <!-- Legal Links -->
-      <div class="text-center pt-2 pb-4 space-x-3 text-[11px] text-gray-400 font-medium">
-        <button onclick="openLegalDoc('terms')" class="hover:text-emerald-400 transition underline underline-offset-4">Публічна оферта</button>
-        <span>•</span>
-        <button onclick="openLegalDoc('privacy')" class="hover:text-emerald-400 transition underline underline-offset-4">Політика конфіденційності</button>
-      </div>
-    </div>
-
-    <!-- ================= TAB 5: ADMIN PANEL ================= -->
-    <div id="tab-admin" class="tab-content hidden space-y-4">
-      <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-        <h2 class="text-base font-bold text-emerald-400 flex items-center gap-2">
-          <span>🛠</span> Адміністрування
-        </h2>
-        <span class="text-[10px] bg-red-950 text-red-400 px-2.5 py-1 rounded-full border border-red-800 font-bold">ADMIN MODE</span>
-      </div>
-
-      <!-- Admin Metrics -->
-      <div class="grid grid-cols-3 gap-2 text-center">
-        <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
-          <div class="text-base font-bold text-emerald-400" id="adminTotalUsers">--</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">Користувачів</div>
-        </div>
-        <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
-          <div class="text-base font-bold text-yellow-400" id="adminTotalFilters">--</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">Фільтрів</div>
-        </div>
-        <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
-          <div class="text-base font-bold text-blue-400" id="adminTotalSeen">--</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">Знайдено</div>
-        </div>
-      </div>
-
-      <!-- User Search & Management -->
-      <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3">
-        <div class="text-xs font-bold text-white">Управління користувачем</div>
-        <div class="flex gap-2">
-          <input type="number" id="adminSearchUserId" placeholder="Введіть Telegram ID..." 
-                 class="flex-1 p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-400">
-          <button onclick="adminFindUser()" class="px-3.5 py-2.5 bg-emerald-400 text-black font-bold rounded-xl text-xs">
-            Знайти
-          </button>
-        </div>
-
-        <div id="adminUserResult" class="hidden p-3 bg-gray-950 rounded-2xl border border-gray-800/80 space-y-2 text-xs">
-          <div class="flex justify-between items-center">
-            <span class="font-bold text-white" id="admResultName">---</span>
-            <span id="admResultTariff" class="text-[10px] bg-gray-800 px-2 py-0.5 rounded text-gray-300">free</span>
-          </div>
-          <div class="text-[10px] text-gray-400">ID: <span id="admResultId" class="text-gray-200">--</span></div>
-          <div class="text-[10px] text-gray-400">Premium до: <span id="admResultUntil" class="text-emerald-400">--</span></div>
-
-          <div class="grid grid-cols-2 gap-2 pt-2 border-t border-gray-800">
-            <button onclick="adminGrantPremium(30)" class="py-2 bg-emerald-950 border border-emerald-800 text-emerald-300 rounded-xl text-[10px] font-bold">
-              +30 Днів PRO
-            </button>
-            <button onclick="adminGrantPremium(7)" class="py-2 bg-blue-950 border border-blue-800 text-blue-300 rounded-xl text-[10px] font-bold">
-              +7 Днів PRO
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Broadcast Module -->
-      <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3">
-        <div class="text-xs font-bold text-white flex items-center justify-between">
-          <span>📢 Розсилка повідомлень</span>
-          <span class="text-[10px] text-gray-400">HTML підтримка</span>
-        </div>
-        <textarea id="broadcastText" rows="3" placeholder="Введіть текст розсилки (підтримуються HTML теги: <b>, <i>, <a>)..." 
-                  class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-400"></textarea>
-        <div class="flex justify-between items-center">
-          <button onclick="adminPreviewBroadcast()" class="text-xs text-gray-400 hover:text-white">Предпросмотр</button>
-          <button id="broadcastBtn" onclick="adminStartBroadcast()" class="px-4 py-2 bg-emerald-400 hover:bg-emerald-300 text-black font-bold rounded-xl text-xs">
-            Запустити розсилку
-          </button>
-        </div>
-        <div id="broadcastStatus" class="hidden text-[10px] p-2 rounded-xl bg-gray-950 border border-gray-800 text-gray-300"></div>
-      </div>
-
-      <!-- Diagnostics -->
-      <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-2">
-        <div class="text-xs font-bold text-white flex items-center justify-between">
-          <span>Діагностика сервера</span>
-          <button onclick="adminRunDiagnostics()" class="text-[10px] text-emerald-400 hover:underline">Оновити</button>
-        </div>
-        <div class="space-y-1.5 text-[11px] text-gray-300 pt-1">
-          <div class="flex justify-between items-center">
-            <span>База даних Supabase:</span>
-            <span id="diagSupabase" class="text-emerald-400 font-bold">Перевірка...</span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span>Telegram Bot Webhook:</span>
-            <span id="diagBot" class="text-emerald-400 font-bold">Перевірка...</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ================= ADD FILTER MODAL ================= -->
-    <div id="addFilterModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
-      <div class="bg-gray-900 border border-gray-800 rounded-3xl p-4 w-full max-w-sm space-y-3 max-h-[90vh] overflow-y-auto">
-        <div class="flex justify-between items-center border-b border-gray-800 pb-2">
-          <h3 class="text-xs font-bold text-white">Детальна настройка відстеження</h3>
-          <button onclick="closeAddFilterModal()" class="text-gray-400 hover:text-white text-base">✕</button>
-        </div>
-
-        <div>
-          <label class="block text-[10px] text-gray-400 mb-1 font-medium">Пошуковий запит / Посилання OLX</label>
-          <input type="text" id="modalQuery" placeholder="Наприклад: iPhone 12 128GB" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Мін. ціна (грн)</label>
-            <input type="number" id="modalMinPrice" placeholder="0" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
-          </div>
-          <div>
-            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Макс. ціна (грн)</label>
-            <input type="number" id="modalMaxPrice" placeholder="20000" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Місто / Область</label>
-            <input type="text" id="modalCity" placeholder="Всі міста" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
-          </div>
-          <div>
-            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Стан товару</label>
-            <select id="modalCondition" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
-              <option value="all">Всі стани</option>
-              <option value="used">Тільки б/у</option>
-              <option value="new">Тільки нові</option>
-            </select>
-          </div>
-        </div>
-
-        <button id="saveFilterBtn" onclick="saveNewActiveFilter()" class="w-full py-3 bg-emerald-400 text-black font-bold rounded-xl text-xs mt-2">
-          Зберегти та запустити відстеження
-        </button>
-      </div>
-    </div>
-
-    <!-- ================= AD PREVIEW MODAL ================= -->
-    <div id="adPreviewModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4 z-50">
-      <div class="bg-gray-900 border border-gray-800 rounded-3xl p-4 w-full max-w-sm space-y-3 relative">
-        <button onclick="closeAdModal()" class="absolute right-3 top-3 bg-gray-800 text-gray-400 w-7 h-7 rounded-full flex items-center justify-center text-xs">✕</button>
-
-        <div id="modalAdImgContainer" class="w-full h-44 rounded-2xl bg-gray-800 overflow-hidden flex items-center justify-center"></div>
-
-        <div>
-          <div id="modalAdTitle" class="text-xs font-bold text-white">...</div>
-          <div id="modalAdPrice" class="text-base font-extrabold text-emerald-400 mt-1">...</div>
-          <div id="modalAdLocation" class="text-[10px] text-gray-400 mt-0.5">...</div>
-        </div>
-
-        <div class="p-3 bg-gray-950 rounded-xl border border-gray-800/80 text-[11px] text-gray-300">
-          <div class="font-semibold text-emerald-400 mb-1">Опис пропозиції:</div>
-          <div id="modalAdDesc" class="text-gray-400 text-[10px] leading-relaxed">
-            Оригінальний товар з перевіреною ціною. Перегляньте повний текст та зв'яжіться з продавцем на OLX.
-          </div>
-        </div>
-
-        <div class="flex gap-2 pt-1">
-          <button id="modalFavBtn" class="flex-1 py-2.5 bg-gray-800 border border-gray-700 text-white rounded-xl text-xs font-semibold">
-            ❤️ В Обране
-          </button>
-          <a id="modalOlxLink" href="#" target="_blank" class="flex-1 text-center py-2.5 bg-emerald-400 text-black font-bold rounded-xl text-xs">
-            👉 Відкрити на OLX
-          </a>
-        </div>
-      </div>
-    </div>
-
-    <!-- ================= LIMIT MODAL ================= -->
-    <div id="limitModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4 z-50">
-      <div class="bg-gradient-to-br from-emerald-950 via-gray-900 to-gray-900 border-2 border-emerald-400/80 rounded-3xl p-5 w-full max-w-sm space-y-4 text-center shadow-2xl">
-        <div class="text-3xl">👑</div>
-        <div>
-          <h3 class="text-sm font-bold text-emerald-300">Ліміт FREE тарифу (2 / 2)</h3>
-          <p class="text-[11px] text-gray-300 mt-1">Для створення безлімітних відстежень переходьте на PREMIUM!</p>
-        </div>
-        <button onclick="goToPremiumTab()" class="w-full py-3 bg-emerald-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-emerald-950">
-          Перейти до Оплати (199 грн)
-        </button>
-      </div>
-    </div>
-
-    <!-- ================= LEGAL MODAL ================= -->
-    <div id="legalModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4 z-50">
-      <div class="bg-gray-900 border border-gray-800 rounded-3xl p-5 w-full max-w-sm space-y-3 relative max-h-[80vh] overflow-y-auto">
-        <button onclick="closeLegalModal()" class="absolute right-3 top-3 bg-gray-800 text-gray-400 w-7 h-7 rounded-full flex items-center justify-center text-xs">✕</button>
-        <h3 id="legalTitle" class="text-sm font-bold text-emerald-400">Документ</h3>
-        <div id="legalContent" class="text-xs text-gray-300 space-y-2 leading-relaxed"></div>
-      </div>
-    </div>
-
-    <!-- ================= BOTTOM NAVIGATION ================= -->
-    <div class="fixed bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur border-t border-gray-800 p-2.5 flex justify-around items-center max-w-md mx-auto z-40">
-      <button onclick="switchTab('home')" id="nav-home" class="nav-btn flex flex-col items-center text-emerald-400">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 011 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-        <span class="text-[10px] mt-1 font-medium">Головна</span>
-      </button>
-      <button onclick="switchTab('search')" id="nav-search" class="nav-btn flex flex-col items-center text-gray-500">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-        <span class="text-[10px] mt-1 font-medium">Пошуки</span>
-      </button>
-      <button onclick="switchTab('favorites')" id="nav-favorites" class="nav-btn flex flex-col items-center text-gray-500">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.636l1.318-1.318a4.5 4.5 0 116.364 6.364L12 21.364l-7.682-7.682a4.5 4.5 0 010-6.364z"/></svg>
-        <span class="text-[10px] mt-1 font-medium">Обране</span>
-      </button>
-      <button onclick="switchTab('profile')" id="nav-profile" class="nav-btn flex flex-col items-center text-gray-500">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-        <span class="text-[10px] mt-1 font-medium">Профіль</span>
-      </button>
-      <button onclick="switchTab('admin')" id="nav-admin" class="nav-btn hidden flex-col items-center text-gray-500">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        <span class="text-[10px] mt-1 font-medium">Адмін</span>
-      </button>
-    </div>
-
-  </div>
-
-  <script>
-    const tg = window.Telegram.WebApp;
-    let userId = null;
-    let initDataRaw = '';
-    let currentSearchResults = [];
-    let userFilters = [];
-    let isAdminUser = false;
-
-    if (tg) {
-      tg.ready();
-      tg.expand();
-      initDataRaw = tg.initData || '';
-      if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-        userId = tg.initDataUnsafe.user.id;
-        const name = tg.initDataUnsafe.user.first_name || 'Користувач';
-        document.getElementById('profileName').innerText = name;
-        document.getElementById('profileId').innerText = userId;
-        document.getElementById('avatarLetter').innerText = name.charAt(0).toUpperCase();
-      }
-    }
-
-    const BACKEND_URL = window.location.origin;
-
-    async function loadUserProfile() {
-      if (!initDataRaw) return;
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/user/profile`, { headers: { 'x-telegram-init-data': initDataRaw } }); const data = await res.json(); if (data.success) { if (data.isAdmin) { isAdminUser = true; document.getElementById('nav-admin').classList.remove('hidden'); document.getElementById('nav-admin').classList.add('flex'); } if (data.user && data.user.tariff === 'premium') { document.getElementById('userTariffBadge').innerText = 'PRO ТАРИФ'; document.getElementById('profileTariffBadge').innerText = 'PRO Тариф'; } if (data.stats) { document.getElementById('statRefUsers').innerText = data.stats.totalReferrals \vert{}\vert{} 0; } } } catch (err) { console.error('Profile load error:', err); } }  function payViaMonobank() { const monoJarUrl = 'https://send.monobank.ua/'; if (tg && tg.openLink) tg.openLink(monoJarUrl); else window.open(monoJarUrl, '_blank'); }  function getFavorites() { return JSON.parse(localStorage.getItem('olx_favorites') \vert{}\vert{} '[]'); }  function saveFavorites(favs) { localStorage.setItem('olx_favorites', JSON.stringify(favs)); renderFavorites(); }  async function loadActiveFilters() { if (initDataRaw) { try { const res = await fetch(`${BACKEND_URL}/api/user/filters`, {
-            headers: { 'x-telegram-init-data': initDataRaw }
-          });
-          const data = await res.json();
-          if (data.filters) {
-            userFilters = data.filters;
-          }
-        } catch (err) {
-          userFilters = [];
-        }
-      } else {
-        userFilters = JSON.parse(localStorage.getItem('olx_active_filters') || '[]');
-      }
+    if (calculatedHash === hash) {
+      const userStr = urlParams.get('user');
+      const authDate = parseInt(urlParams.get('auth_date') || '0', 10);
       
-      const unique = [];
-      const seen = new Set();
-      for (const f of userFilters) {
-        if (!seen.has(f.query.toLowerCase())) {
-          seen.add(f.query.toLowerCase());
-          unique.push(f);
-        }
-      }
-      userFilters = unique;
-      renderActiveFilters();
-    }
-
-    async function deleteActiveFilter(id) {
-      try {
-        await fetch(`${BACKEND_URL}/api/filters/${id}`, { 
-          method: 'DELETE',
-          headers: { 'x-telegram-init-data': initDataRaw }
-        });
-      } catch (e) {}
-      userFilters = userFilters.filter(f => f.id !== id);
-      localStorage.setItem('olx_active_filters', JSON.stringify(userFilters));
-      renderActiveFilters();
-    }
-
-    function convertCurrentSearchToFilter() {
-      const query = document.getElementById('searchInput').value.trim();
-      const minPrice = document.getElementById('minPrice').value.trim();
-      const maxPrice = document.getElementById('maxPrice').value.trim();
-      const city = document.getElementById('cityInput').value.trim() || 'Всі міста';
-      const condition = document.getElementById('conditionSelect').value;
-
-      if (!query) return;
-
-      if (userFilters.length >= 2) {
-        document.getElementById('limitModal').classList.remove('hidden');
-        document.getElementById('limitModal').classList.add('flex');
-        return;
+      const now = Math.floor(Date.now() / 1000);
+      if (now - authDate > 86400) {
+        console.warn('[Auth Warning] Истёк срок действия initData');
+        return null;
       }
 
-      document.getElementById('modalQuery').value = query;
-      document.getElementById('modalMinPrice').value = minPrice;
-      document.getElementById('modalMaxPrice').value = maxPrice;
-      document.getElementById('modalCity').value = city;
-      document.getElementById('modalCondition').value = condition;
+      return userStr ? JSON.parse(userStr) : null;
+    }
+  } catch (e) {
+    console.error('[Auth Error] Ошибка проверки initData:', e.message);
+  }
+  return null;
+}
 
-      openAddFilterModal();
+async function checkIsAdmin(userId) {
+  if (!userId) return false;
+  const numericId = parseInt(userId, 10);
+  if (ADMIN_IDS.includes(numericId)) return true;
+  if (!supabase) return false;
+
+  try {
+    const { data: user } = await supabase.from('users').select('is_admin').eq('telegram_id', numericId).maybeSingle();
+    return Boolean(user && user.is_admin);
+  } catch (e) {
+    return false;
+  }
+}
+
+function userAuthMiddleware(req, res, next) {
+  const initDataRaw = req.headers['x-telegram-init-data'];
+  const user = verifyTelegramWebAppData(initDataRaw);
+
+  if (!user || !user.id) {
+    return res.status(401).json({ 
+      success: false, 
+      error: 'Unauthorized: Недійсні або застарілі дані авторизації Telegram' 
+    });
+  }
+
+  req.telegramUser = user;
+  next();
+}
+
+async function adminAuthMiddleware(req, res, next) {
+  const initDataRaw = req.headers['x-telegram-init-data'];
+  const user = verifyTelegramWebAppData(initDataRaw);
+
+  if (user && user.id && await checkIsAdmin(user.id)) {
+    req.adminUser = user;
+    return next();
+  }
+
+  return res.status(403).json({ 
+    success: false, 
+    error: 'Forbidden: Доступ заборонено (потрібні підтверджені права адміністратора)' 
+  });
+}
+
+// ==========================================
+// 2. БЕЗОПАСНАЯ ОТПРАВКА В TELEGRAM (ЗАЩИТА ОТ 429)
+// ==========================================
+
+async function sendTelegramMessage(chatId, text, replyMarkup = null) {
+  if (!TELEGRAM_BOT_TOKEN) return false;
+  try {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      chat_id: chatId,
+      text: text,
+      parse_mode: 'HTML',
+      disable_web_page_preview: false,
+      reply_markup: replyMarkup
+    }, { timeout: 5000 });
+    return true;
+  } catch (err) {
+    if (err.response?.status === 429) {
+      console.warn(`⚠️ Telegram Rate Limit (429) для чата ${chatId}. Сообщение пропущено.`);
+    } else {
+      console.error(`Помилка sendTelegramMessage (${chatId}):`, err.response?.data?.description || err.message);
+    }
+    return false;
+  }
+}
+
+async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) {
+  if (!TELEGRAM_BOT_TOKEN) return false;
+  try {
+    const fullPhotoUrl = photoUrl.startsWith('/') ? `${SERVER_URL}${photoUrl}` : photoUrl;
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+      chat_id: chatId,
+      photo: fullPhotoUrl,
+      caption: caption,
+      parse_mode: 'HTML',
+      reply_markup: replyMarkup
+    }, { timeout: 8000 });
+    return true;
+  } catch (err) {
+    if (err.response?.status === 429) {
+      console.warn(`⚠️ Telegram Rate Limit (429) на фото для чата ${chatId}.`);
+      return false;
+    }
+    return await sendTelegramMessage(chatId, caption, replyMarkup);
+  }
+}
+
+// ==========================================
+// 3. ПАРСЕР И ПРОКСИ ИЗОБРАЖЕНИЙ
+// ==========================================
+
+app.get('/api/proxy-image', async (req, res) => {
+  try {
+    const imageUrl = req.query.url;
+    if (!imageUrl || imageUrl.includes('no-photo.svg')) {
+      return res.redirect('/assets/no-photo.svg');
     }
 
-    function openAddFilterModal() {
-      if (userFilters.length >= 2 && document.getElementById('addFilterModal').classList.contains('hidden')) {
-        document.getElementById('limitModal').classList.remove('hidden');
-        document.getElementById('limitModal').classList.add('flex');
-        return;
-      }
-      document.getElementById('addFilterModal').classList.remove('hidden');
-      document.getElementById('addFilterModal').classList.add('flex');
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': HEADERS['User-Agent'],
+        'Referer': 'https://www.olx.ua/'
+      },
+      timeout: 5000
+    });
+
+    res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(response.data);
+  } catch (err) {
+    res.redirect('/assets/no-photo.svg');
+  }
+});
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
+  const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
+  const $ = cheerio.load(response.data);
+  const rawItems = [];
+
+  const stopWords = [
+    'аккумулятор', 'акумулятор', 'батарея', 'корпус', 'шлейф', 'плата', 'камера', 'динамик',
+    'стекло', 'скло', 'чехол', 'чохол', 'накладка', 'бампер', 'дисплей', 'экран', 'екран',
+    'коробка', 'кабель', 'зарядка', 'адаптер', 'ремешок', 'пленка', 'запчасти', 'разборка',
+    'icloud', 'lost', 'passcode', 'пароль', 'bypass', 'донор', 'скупка', 'ремонт', 'копия', 'реплика'
+  ];
+
+  $('[data-cy="l-card"], [data-testid="l-card"]').each((index, element) => {
+    if (rawItems.length >= 30) return;
+
+    $(element).find('style, script').remove();
+    const title = $(element).find('h6, h4, [data-testid="ad-title"]').first().text().trim();
+    if (!title) return;
+
+    const lowerTitle = title.toLowerCase();
+    const queryLower = (query || '').toLowerCase();
+
+    const hasStopWord = stopWords.some(word => lowerTitle.includes(word));
+    const queryHasStopWord = stopWords.some(word => queryLower.includes(word));
+
+    if (hasStopWord && !queryHasStopWord) return;
+
+    const priceElement = $(element).find('[data-testid="ad-price"]').first();
+    priceElement.find('style, script').remove();
+    let rawPriceText = priceElement.text().trim();
+
+    if (rawPriceText.includes('грн')) {
+      rawPriceText = rawPriceText.split('грн')[0] + ' грн';
     }
 
-    function closeAddFilterModal() {
-      document.getElementById('addFilterModal').classList.add('hidden');
-      document.getElementById('addFilterModal').classList.remove('flex');
+    const match = rawPriceText.match(/(\d[\d\s]*)/);
+    let numericPrice = 0;
+    if (match) {
+      numericPrice = parseInt(match[1].replace(/\s/g, ''), 10);
     }
 
-    function closeLimitModal() {
-      document.getElementById('limitModal').classList.add('hidden');
-      document.getElementById('limitModal').classList.remove('flex');
+    if (minPrice && numericPrice < parseInt(minPrice, 10)) return;
+    if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
+
+    const rawLink = $(element).find('a').attr('href') || '';
+    const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
+
+    let rawImgUrl = '';
+    const imgEl = $(element).find('img').first();
+    const src = imgEl.attr('src') || '';
+    const dataSrc = imgEl.attr('data-src') || '';
+    const srcset = imgEl.attr('srcset') || imgEl.attr('data-srcset') || '';
+
+    let candidate = '';
+    if (dataSrc && !dataSrc.startsWith('data:')) candidate = dataSrc;
+    else if (srcset && !srcset.startsWith('data:')) candidate = srcset.split(',')[0].trim().split(' ')[0];
+    else if (src && !src.startsWith('data:')) candidate = src;
+
+    if (candidate) {
+      candidate = candidate.replace(/\\/g, '').replace(/&amp;/g, '&');
+      if (candidate.startsWith('//')) candidate = 'https:' + candidate;
+      else if (candidate.startsWith('/')) candidate = 'https://www.olx.ua' + candidate;
+      rawImgUrl = candidate;
     }
 
-    function openAdModal(adId) {
-      const item = currentSearchResults.find(i => i.id === adId);
-      if (!item) return;
+    const locationDate = $(element).find('[data-testid="location-date"]').first().text().trim();
 
-      const favs = getFavorites();
-      const isFav = favs.some(f => f.link === item.link);
-
-      document.getElementById('modalAdTitle').innerText = item.title;
-      document.getElementById('modalAdPrice').innerText = item.priceText;
-      document.getElementById('modalAdLocation').innerText = item.locationDate || 'Україна';
-      document.getElementById('modalOlxLink').href = item.link;
-
-      const imgContainer = document.getElementById('modalAdImgContainer');
-      const imgSrc = item.proxyImg || item.img || '/assets/no-photo.svg';
-      
-      imgContainer.innerHTML = `<img src="${imgSrc}" onerror="this.onerror=null; this.src='/assets/no-photo.svg';" class="w-full h-full object-cover">`;
-
-      const favBtn = document.getElementById('modalFavBtn');
-      favBtn.innerText = isFav ? '❤️ В Обраному' : '🤍 Додати в Обране';
-      favBtn.onclick = () => {
-        toggleFavorite(item.link);
-        closeAdModal();
-      };
-
-      document.getElementById('adPreviewModal').classList.remove('hidden');
-      document.getElementById('adPreviewModal').classList.add('flex');
-    }
-
-    function closeAdModal() {
-      document.getElementById('adPreviewModal').classList.add('hidden');
-      document.getElementById('adPreviewModal').classList.remove('flex');
-    }
-
-    function goToPremiumTab() {
-      closeLimitModal();
-      switchTab('profile');
-      document.getElementById('premiumSection').scrollIntoView({ behavior: 'smooth' });
-    }
-
-    async function saveNewActiveFilter() {
-      const query = document.getElementById('modalQuery').value.trim();
-      const minPrice = document.getElementById('modalMinPrice').value.trim();
-      const maxPrice = document.getElementById('modalMaxPrice').value.trim();
-      const city = document.getElementById('modalCity').value.trim() || 'Всі міста';
-      const condition = document.getElementById('modalCondition').value;
-
-      if (!query) {
-        alert('Введіть назву товару');
-        return;
-      }
-
-      const saveBtn = document.getElementById('saveFilterBtn');
-      saveBtn.disabled = true;
-      saveBtn.innerText = 'Збереження...';
-
-      if (initDataRaw) {
-        try {
-          const res = await fetch(`${BACKEND_URL}/api/filters`, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'x-telegram-init-data': initDataRaw
-            },
-            body: JSON.stringify({ query, minPrice, maxPrice, city, condition })
-          });
-          const data = await res.json();
-          
-          if (!data.success) {
-            if (data.error === 'LIMIT_EXCEEDED') {
-              closeAddFilterModal();
-              document.getElementById('limitModal').classList.remove('hidden');
-              document.getElementById('limitModal').classList.add('flex');
-            } else {
-              alert(data.error || 'Помилка збереження');
-            }
-            saveBtn.disabled = false;
-            saveBtn.innerText = 'Зберегти та запустити відстеження';
-            return;
-          }
-        } catch (e) {
-          alert('Помилка з\'єднання з сервером');
-          saveBtn.disabled = false;
-          saveBtn.innerText = 'Зберегти та запустити відстеження';
-          return;
-        }
-      }
-
-      closeAddFilterModal();
-      saveBtn.disabled = false;
-      saveBtn.innerText = 'Зберегти та запустити відстеження';
-      
-      document.getElementById('modalQuery').value = '';
-      document.getElementById('modalMinPrice').value = '';
-      document.getElementById('modalMaxPrice').value = '';
-      document.getElementById('modalCity').value = '';
-
-      await loadActiveFilters();
-    }
-
-    function renderActiveFilters() {
-      const container = document.getElementById('activeSearchesList');
-      const countText = `${userFilters.length} / 2 (Free)`;  document.getElementById('activeFiltersCounter').innerText = countText; document.getElementById('statActiveFilters').innerText = `${userFilters.length} / 2`;
-
-      if (userFilters.length === 0) {
-        container.innerHTML = `
-          <div class="text-center text-gray-500 py-6 bg-gray-900 rounded-2xl border border-gray-800 text-xs">
-            У вас немає активних фільтрів відстеження.
-          </div>
-        `;
-        return;
-      }
-
-      container.innerHTML = userFilters.map(f => `
-        <div class="p-3 rounded-2xl bg-gray-900 border border-gray-800 flex justify-between items-center">
-          <div class="flex items-center gap-3">
-            <div class="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center text-sm">🔍</div>
-            <div>
-              <div class="text-xs font-semibold text-white">${f.query}</div>
-              <div class="text-[10px] text-gray-400">
-                ${(f.max_price \vert{}\vert{} f.maxPrice) ? 'до ' + parseInt(f.max_price \vert{}\vert{} f.maxPrice).toLocaleString('uk-UA') + ' грн' : 'Без ліміту'} • ${f.city || 'Всі міста'}
-              </div>
-            </div>
-          </div>
-          <button onclick="deleteActiveFilter(${f.id})" class="text-xs text-red-400 hover:text-red-300 p-1">✕</button>
-        </div>
-      `).join('');
-    }
-
-    function toggleFavorite(itemLink) {
-      let favs = getFavorites();
-      const index = favs.findIndex(i => i.link === itemLink);
-
-      if (index >= 0) {
-        favs.splice(index, 1);
-      } else {
-        const itemToSave = currentSearchResults.find(i => i.link === itemLink);
-        if (itemToSave) favs.push(itemToSave);
-      }
-
-      saveFavorites(favs);
-      if (!document.getElementById('tab-search').classList.contains('hidden')) {
-        renderSearchResults(currentSearchResults);
-      }
-    }
-
-    function renderFavorites() {
-      const favs = getFavorites();
-      const listDiv = document.getElementById('favoritesList');
-      document.getElementById('favCount').innerText = favs.length + ' товарів';
-      document.getElementById('statSaved').innerText = favs.length;
-
-      if (favs.length === 0) {
-        listDiv.innerHTML = `
-          <div class="text-center text-gray-500 py-12 bg-gray-900/50 rounded-2xl border border-gray-800">
-            <div class="text-2xl mb-1">🤍</div>
-            <div class="text-xs">У вас поки немає збережених оголошень</div>
-          </div>
-        `;
-        return;
-      }
-
-      listDiv.innerHTML = favs.map(item => `
-        <div class="p-3 rounded-2xl bg-gray-900 border border-gray-800 space-y-2">
-          <div class="flex gap-3 cursor-pointer" onclick="openAdModal('${item.id}')">
-            <img src="${item.proxyImg || item.img || '/assets/no-photo.svg'}" onerror="this.onerror=null; this.src='/assets/no-photo.svg';" class="w-16 h-16 object-cover rounded-xl bg-gray-800 flex-shrink-0">
-            <div class="flex-1 min-w-0">
-              <div class="text-xs font-semibold text-white truncate">${item.title}</div>
-              <div class="text-sm font-bold text-emerald-400 mt-0.5">${item.priceText}</div>
-              <div class="text-[10px] text-gray-400 mt-1 truncate">${item.locationDate || ''}</div>
-            </div>
-          </div>
-          <div class="flex gap-2 pt-1 border-t border-gray-800/60">
-            <a href="${item.link}" target="_blank" class="flex-1 text-center py-1.5 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded-xl text-[11px] font-medium">Відкрити на OLX</a>
-            <button onclick="toggleFavorite('${item.link}')" class="px-3 py-1.5 bg-red-950/60 text-red-400 border border-red-800/60 rounded-xl text-[11px]">Видалити</button>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    function switchTab(tabName) {
-      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-      document.querySelectorAll('.nav-btn').forEach(el => {
-        el.classList.remove('text-emerald-400');
-        el.classList.add('text-gray-500');
+    if (title && !isNaN(numericPrice) && numericPrice > 0 && rawLink) {
+      rawItems.push({
+        id: 'ad_' + Math.random().toString(36).substr(2, 9),
+        title,
+        price: numericPrice,
+        priceText: `${numericPrice.toLocaleString('uk-UA')} грн`,
+        link,
+        rawImgUrl,
+        proxyImg: rawImgUrl ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(rawImgUrl)}` : `${SERVER_URL}/assets/no-photo.svg`,
+        locationDate: locationDate || 'Україна',
+        description: 'Перегляньте деталі та контактуйте з продавцем за посиланням на OLX.'
       });
+    }
+  });
 
-      document.getElementById('tab-' + tabName).classList.remove('hidden');
-      document.getElementById('nav-' + tabName).classList.remove('text-gray-500');
-      document.getElementById('nav-' + tabName).classList.add('text-emerald-400');
+  const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
+  let averagePrice = 0;
 
-      if (tabName === 'favorites') {
-        renderFavorites();
-      } else if (tabName === 'home') {
-        loadActiveFilters();
-      } else if (tabName === 'admin') {
-        loadAdminStats();
-        adminRunDiagnostics();
+  if (prices.length > 0) {
+    const medianPrice = prices[Math.floor(prices.length / 2)];
+    const filteredPrices = prices.filter(p => p >= medianPrice * 0.5 && p <= medianPrice * 2.0);
+    const sum = filteredPrices.reduce((a, b) => a + b, 0);
+    averagePrice = filteredPrices.length > 0 ? Math.round(sum / filteredPrices.length) : medianPrice;
+  }
+
+  return { items: rawItems, averagePrice };
+}
+
+app.get('/api/search', async (req, res) => {
+  try {
+    const { query, categoryUrl, minPrice, maxPrice } = req.query;
+    let targetUrl = categoryUrl;
+
+    if (!targetUrl && query) {
+      const cleanQ = query.trim();
+      if (cleanQ.startsWith('http://') || cleanQ.startsWith('https://')) {
+        targetUrl = cleanQ;
+      } else if (minPrice || maxPrice) {
+        const searchMin = minPrice ? `search%5Bfilter_float_price%3Afrom%5D=${minPrice}` : '';
+        const searchMax = maxPrice ? `search%5Bfilter_float_price%3Ato%5D=${maxPrice}` : '';
+        const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
+        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/?${queryParams}`;
+      } else {
+        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/`;
       }
     }
 
-    function selectCategory(catName) {
-      switchTab('search');
-      document.getElementById('searchInput').value = catName;
-      runSearch();
-    }
+    if (!targetUrl) return res.status(400).json({ error: 'Укажіть пошуковий запит' });
 
-    function quickSearchFromHome() {
-      const val = document.getElementById('homeSearchInput').value.trim();
-      if (!val) return;
-      switchTab('search');
-      document.getElementById('searchInput').value = val;
-      runSearch();
-    }
+    const { items, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query);
+    res.json({ success: true, count: items.length, averagePrice, items });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Помилка отримання даних з OLX' });
+  }
+});
 
-    function shareReferralLink() {
-      if (!userId) {
-        alert('Відкрийте додаток у Telegram для виклику реферального посилання.');
-        return;
+// ==========================================
+// 4. ПОЛЬЗОВАТЕЛЬСКИЕ ЕНДПОИНТЫ
+// ==========================================
+
+app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
+  try {
+    const userId = req.telegramUser.id;
+    const isAdmin = await checkIsAdmin(userId);
+    let userData = { tariff: 'free' };
+
+    if (supabase) {
+      const { data } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
+      if (data) {
+        userData = data;
+      } else {
+        try {
+          await supabase.from('users').upsert({ telegram_id: userId, is_admin: isAdmin }, { onConflict: 'telegram_id' });
+        } catch (uErr) {}
       }
-      const refLink = 'https://t.me/OLXhelpler_bot?start=ref_' + userId;
-      const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(refLink) + '&text=' + encodeURIComponent('Використовуй OLX Checker для вигідного пошуку!');
-      if (tg && tg.openTelegramLink) tg.openTelegramLink(shareUrl);
-      else window.open(shareUrl, '_blank');
     }
 
-    function copyRefLink() {
-      if (!userId) {
-        alert('Відкрийте додаток всередині Telegram');
-        return;
+    if (isAdmin) {
+      userData.tariff = 'premium';
+      userData.is_admin = true;
+    }
+
+    res.json({
+      success: true,
+      isAdmin,
+      user: userData,
+      stats: { totalReferrals: 0 }
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
+  try {
+    const userId = req.telegramUser.id;
+    if (!supabase) return res.json({ success: true, filters: [] });
+
+    const { data, error } = await supabase.from('filters').select('*').eq('user_id', userId);
+    if (error) throw error;
+
+    const uniqueFilters = [];
+    const seenQueries = new Set();
+    for (const f of (data || [])) {
+      if (!seenQueries.has(f.query.toLowerCase())) {
+        seenQueries.add(f.query.toLowerCase());
+        uniqueFilters.push(f);
       }
-      const refLink = 'https://t.me/OLXhelpler_bot?start=ref_' + userId;
-      navigator.clipboard.writeText(refLink);
-      alert('Реферальне посилання скопійовано!');
     }
 
-    function renderSearchResults(items) {
-      const resultsDiv = document.getElementById('results');
-      const favs = getFavorites();
+    res.json({ success: true, filters: uniqueFilters });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
-      resultsDiv.innerHTML = items.map(item => {
-        const isCheap = item.price > 0 && window.lastAvgPrice > 0 && item.price < window.lastAvgPrice * 0.85;
-        const discount = isCheap ? Math.round((1 - item.price / window.lastAvgPrice) * 100) : 0;
-        const isFav = favs.some(f => f.link === item.link);
-        const imgSrc = item.proxyImg || item.img || '/assets/no-photo.svg';
+app.post('/api/filters', userAuthMiddleware, async (req, res) => {
+  try {
+    const userId = req.telegramUser.id;
+    const { query, minPrice, maxPrice, city, condition } = req.body;
 
-        return `
-          <div class="p-3 rounded-2xl bg-gray-900 border ${isCheap ? 'border-emerald-500/80 bg-emerald-950/10' : 'border-gray-800'} space-y-2">
-            <div onclick="openAdModal('${item.id}')" class="flex gap-3 cursor-pointer">
-              <img src="${imgSrc}" onerror="this.onerror=null; this.src='/assets/no-photo.svg';" class="w-20 h-20 object-cover rounded-xl bg-gray-800 flex-shrink-0">
-              <div class="flex-1 min-w-0">
-                <div class="text-xs font-semibold text-white truncate">${item.title}</div>
-                <div class="text-base font-bold ${isCheap ? 'text-emerald-400' : 'text-white'} mt-1">${item.priceText}</div>
-                <div class="text-[10px] text-gray-400 mt-1 truncate">${item.locationDate || ''}</div>
-              </div>
-            </div>
-            
-            <div class="flex items-center justify-between pt-2 border-t border-gray-800/80">
-              ${isCheap ? `<span class="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded-lg border border-emerald-800 font-medium">🔥 Нижче ринку на ${discount}%</span>` : '<span></span>'}
-              <button onclick="toggleFavorite('${item.link}')"
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ success: false, error: 'Введіть коректний пошуковий запит' });
+    }
+
+    const cleanQuery = query.trim();
+
+    if (supabase) {
+      try {
+        await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
+      } catch (uErr) {}
+
+      const { data: existingFilters } = await supabase
+        .from('filters')
+        .select('*')
+        .eq('user_id', userId);
+
+      const isDuplicate = (existingFilters || []).some(f => f.query.toLowerCase() === cleanQuery.toLowerCase());
+      if (isDuplicate) {
+        return res.status(400).json({ success: false, error: 'Такий фільтр вже існує у вашому списку' });
+      }
+
+      const { data: userData } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
+      const isPremium = userData && userData.tariff === 'premium' && new Date(userData.premium_until) > new Date();
+      
+      if (!isPremium && existingFilters && existingFilters.length >= 2) {
+        return res.status(403).json({ success: false, error: 'LIMIT_EXCEEDED' });
+      }
+
+      const { data, error } = await supabase.from('filters').insert([{
+        user_id: userId,
+        query: cleanQuery,
+        min_price: parseInt(minPrice, 10) || 0,
+        max_price: parseInt(maxPrice, 10) || 0,
+        city: city ? city.trim() : 'Всі міста',
+        condition: condition || 'all'
+      }]).select();
+
+      if (error) throw error;
+      const createdFilter = data[0];
+
+      // Тихий прогрев
+      try {
+        let targetUrl = cleanQuery;
+        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+          targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQuery)}/`;
+        }
+        const { items } = await parseOlx(targetUrl, minPrice, maxPrice, cleanQuery);
+        if (items && items.length > 0) {
+          const initialSeen = items.map(item => ({
+            filter_id: createdFilter.id,
+            ad_link: item.link
+          }));
+          await supabase.from('seen_ads').insert(initialSeen);
+        }
+      } catch (warmupErr) {
+        console.error('[Warmup Warning] Помилка первинного прогреву:', warmupErr.message);
+      }
+
+      return res.json({ success: true, filter: createdFilter });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/filters/:id', userAuthMiddleware, async (req, res) => {
+  try {
+    const userId = req.telegramUser.id;
+    const filterId = req.params.id;
+
+    if (supabase) {
+      const { data: filter, error: fetchErr } = await supabase
+        .from('filters')
+        .select('user_id')
+        .eq('id', filterId)
+        .maybeSingle();
+
+      if (fetchErr || !filter) {
+        return res.status(404).json({ success: false, error: 'Фільтр не знайдено' });
+      }
+
+      if (parseInt(filter.user_id, 10) !== parseInt(userId, 10)) {
+        return res.status(403).json({ success: false, error: 'Forbidden: Ви не є власником цього фільтра' });
+      }
+
+      const { error: deleteErr } = await supabase.from('filters').delete().eq('id', filterId);
+      if (deleteErr) throw deleteErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ==========================================
+// 5. ЮРИДИЧЕСКИЕ И АДМИНСКИЕ ЕНДПОИНТЫ
+// ==========================================
+
+app.get('/api/legal/terms', (req, res) => {
+  res.json({
+    title: "Публічна оферта та Умови використання OLX Checker",
+    content: "Дана Оферта є офіційною пропозицією сервісу OLX Checker для фізичних осіб щодо надання доступу до функцій автоматичного моніторингу оголошень. Оплата послуг або використання Telegram Mini App означає повне прийняття цих умов."
+  });
+});
+
+app.get('/api/legal/privacy', (req, res) => {
+  res.json({
+    title: "Політика конфіденційності",
+    content: "Сервіс OLX Checker обробляє тільки публічні дані Telegram (ID, ім'я) та збережені параметри фільтрів. Платіжні дані обробляються виключно ліцензованими провайдерами (Monobank / Telegram Stars)."
+  });
+});
+
+app.get('/api/admin/stats', adminAuthMiddleware, async (req, res) => {
+  try {
+    if (!supabase) return res.json({ success: true, stats: { totalUsers: 0, totalFilters: 0, totalSeen: 0 } });
+    const { count: uCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
+    const { count: fCount } = await supabase.from('filters').select('*', { count: 'exact', head: true });
+    const { count: sCount } = await supabase.from('seen_ads').select('*', { count: 'exact', head: true });
+
+    res.json({
+      success: true,
+      stats: { totalUsers: uCount || 0, totalFilters: fCount || 0, totalSeen: sCount || 0 }
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/admin/user-info', adminAuthMiddleware, async (req, res) => {
+  try {
+    const targetId = req.query.targetId;
+    if (!targetId || !supabase) return res.status(400).json({ error: 'No targetId' });
+
+    const { data } = await supabase.from('users').select('*').eq('telegram_id', targetId).maybeSingle();
+    res.json({ success: true, user: data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/admin/grant-premium', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { targetId, days } = req.body;
+    if (!targetId || !days || !supabase) return res.status(400).json({ error: 'Bad params' });
+
+    const now = new Date();
+    now.setDate(now.getDate() + parseInt(days, 10));
+
+    await supabase.from('users').upsert({
+      telegram_id: parseInt(targetId, 10),
+      tariff: 'premium',
+      premium_until: now.toISOString()
+    }, { onConflict: 'telegram_id' });
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/admin/diagnostics', adminAuthMiddleware, async (req, res) => {
+  res.json({ 
+    success: true, 
+    supabaseOk: Boolean(supabase), 
+    botOk: Boolean(TELEGRAM_BOT_TOKEN) 
+  });
+});
+
+app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || !supabase) return res.status(400).json({ error: 'Текст розсилки порожній' });
+
+    const { data: users, error } = await supabase.from('users').select('telegram_id');
+    if (error || !users || users.length === 0) return res.json({ success: true, sentCount: 0, total: 0 });
+
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const u of users) {
+      if (!u.telegram_id) continue;
+      const ok = await sendTelegramMessage(u.telegram_id, text);
+      if (ok) {
+        sentCount++;
+      } else {
+        failedCount++;
+      }
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    res.json({ success: true, sentCount, failedCount, total: users.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// 6. TELEGRAM WEBHOOK И ФОНОВЫЙ ВОРКЕР С ПАУЗАМИ
+// ==========================================
+
+app.post('/telegram-webhook', async (req, res) => {
+  res.sendStatus(200);
+  const update = req.body;
+  if (!update || !update.message) return;
+
+  const msg = update.message;
+  const chatId = msg.chat.id;
+  const text = msg.text || '';
+
+  if (supabase) {
+    try {
+      await supabase.from('users').upsert({ 
+        telegram_id: chatId, 
+        first_name: msg.from?.first_name || 'User' 
+      }, { onConflict: 'telegram_id' });
+    } catch (uErr) {}
+  }
+
+  if (text.startsWith('/start')) {
+    const welcomeText = 
+      `👋 <b>Ласкаво просимо до OLX Checker Beta 1.0 RC!</b>\n\n` +
+      `⚡️ <b>Твій персональний інструмент для швидкого перекупу та вигідних покупок на OLX.</b>\n\n` +
+      `🎯 <b>Що вміє бот:</b>\n` +
+      `• <b>Авто-моніторинг 24/7:</b> миттєво знаходить нові оголошення раніше за інших.\n` +
+      `• <b>Аналітика ринку:</b> розраховує середню ціну та підказує знижки від 20%.\n` +
+      `• <b>Розумні фільтри:</b> відсіює чохли, запчастини, коробки та спам.\n\n` +
+      `👑 <b>Переваги PREMIUM:</b>\n` +
+      `✓ Перевірка нових товарів кожні <b>60 секунд</b>.\n` +
+      `✓ <b>Безлімітні</b> активні відстеження.\n` +
+      `✓ Пріоритетне надсилання сповіщень.\n\n` +
+      `👇 <i>Натисніть кнопку нижче, щоб відкрити додаток та налаштувати пошук:</i>`;
+
+    const keyboard = {
+      inline_keyboard: [[{ text: '🚀 Відкрити OLX Checker', web_app: { url: SERVER_URL } }]]
+    };
+    await sendTelegramMessage(chatId, welcomeText, keyboard);
+    return;
+  }
+
+  if (text.startsWith('/admin')) {
+    const isAdmin = await checkIsAdmin(chatId);
+    if (!isAdmin) {
+      await sendTelegramMessage(chatId, `❌ У доступі відмовлено.`);
+      return;
+    }
+    const keyboard = {
+      inline_keyboard: [[{ text: '🛠 Відкрити Адмін-Панель', web_app: { url: SERVER_URL } }]]
+    };
+    await sendTelegramMessage(chatId, `⚙️ <b>Панель Адміністратора</b>`, keyboard);
+    return;
+  }
+});
+
+let isWorkerRunning = false;
+async function runBackgroundWorker() {
+  if (isWorkerRunning || !supabase || !TELEGRAM_BOT_TOKEN) return;
+
+  try {
+    isWorkerRunning = true;
+    const { data: filters } = await supabase.from('filters').select('*');
+    if (!filters || filters.length === 0) return;
+
+    for (const filter of filters) {
+      try {
+        let targetUrl = filter.query ? filter.query.trim() : '';
+
+        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+          if (filter.min_price || filter.max_price) {
+            const searchMin = filter.min_price ? `search%5Bfilter_float_price%3Afrom%5D=${filter.min_price}` : '';
+            const searchMax = filter.max_price ? `search%5Bfilter_float_price%3Ato%5D=${filter.max_price}` : '';
+            const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
+            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/?${queryParams}`;
+          } else {
+            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/`;
+          }
+        }
+
+        const { items, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
+
+        if (!items || items.length === 0) continue;
+
+        for (const item of items) {
+          let inserted = null;
+          try {
+            const res = await supabase
+              .from('seen_ads')
+              .insert([{ filter_id: filter.id, ad_link: item.link }])
+              .select();
+            inserted = res.data;
+          } catch (iErr) {}
+
+          if (!inserted || inserted.length === 0) continue;
+
+          const isCheap = averagePrice > 0 && item.price < averagePrice * 0.85;
+          const discount = isCheap ? Math.round((1 - item.price / averagePrice) * 100) : 0;
+
+          const notificationText = 
+            `🔎 <b>Знайдено нове оголошення для фільтра “${filter.query}”</b>\n\n` +
+            `📌 <b>${item.title}</b>\n` +
+            `💰 <b>Ціна:</b> ${item.priceText} ${isCheap ? `🔥 (Нижче ринку на ${discount}%)` : ''}\n` +
+            `📍 <b>Місто:</b> ${item.locationDate}\n\n` +
+            `<a href="${item.link}">👉 Відкрити оголошення на OLX</a>`;
+
+          const keyboard = {
+            inline_keyboard: [
+              [{ text: '👉 Переглянути оголошення', url: item.link }],
+              [{ text: '🚀 Відкрити OLX Checker', web_app: { url: SERVER_URL } }]
+            ]
+          };
+
+          const photoToSend = item.rawImgUrl || `${SERVER_URL}/assets/no-photo.svg`;
+          
+          // Отправка с задержкой 1.5 сек для защиты от бана Telegram 429
+          await sendTelegramPhoto(filter.user_id, photoToSend, notificationText, keyboard);
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      } catch (fErr) {
+        console.error(`Помилка воркера для фільтра ${filter.id}:`, fErr.message);
+      }
+    }
+  } catch (err) {
+    console.error('Помилка воркера:', err.message);
+  } finally {
+    isWorkerRunning = false;
+  }
+}
+
+setInterval(runBackgroundWorker, 60000);
+
+async function registerWebhook() {
+  if (!TELEGRAM_BOT_TOKEN || !SERVER_URL) return;
+  try {
+    const targetWebhookUrl = `${SERVER_URL}/telegram-webhook`;
+    await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${encodeURIComponent(targetWebhookUrl)}`);
+    console.log(`✅ Telegram Webhook встановлено: ${targetWebhookUrl}`);
+  } catch (err) {
+    console.error('Помилка встановлення Webhook:', err.message);
+  }
+}
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, async () => {
+  console.log(`Server running on port ${PORT}`);
+  await registerWebhook();
+});
