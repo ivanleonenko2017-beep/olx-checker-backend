@@ -662,7 +662,6 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
     const recipientIds = [...recipients];
     let sentCount = 0;
     let failedCount = 0;
-    let blockedCount = 0;
     const failures = [];
 
     for (const id of recipientIds) {
@@ -680,7 +679,6 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
       success: true,
       sentCount,
       failedCount,
-      blockedCount,
       total: recipientIds.length,
       failureSamples: failures
     });
