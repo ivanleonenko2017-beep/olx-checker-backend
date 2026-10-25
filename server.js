@@ -565,12 +565,15 @@ app.post('/telegram-webhook', async (req, res) => {
   const text = msg.text || '';
 
   if (supabase) {
+  try {
     await supabase.from('users').upsert({ 
       telegram_id: chatId, 
       first_name: msg.from?.first_name || 'User' 
-    }, { onConflict: 'telegram_id' }).catch(() => {});
+    }, { onConflict: 'telegram_id' });
+  } catch (err) {
+    console.error('Ошибка записи пользователя в Supabase:', err.message);
   }
-
+}
   if (text.startsWith('/start')) {
     const welcomeText = 
       `👋 <b>Ласкаво просимо до OLX Checker Beta 1.0 RC!</b>\n\n` +
