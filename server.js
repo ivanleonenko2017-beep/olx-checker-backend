@@ -490,7 +490,7 @@ app.get('/api/ad-details', async (req, res) => {
     const host = parsedUrl.hostname.toLowerCase();
     if (parsedUrl.protocol !== 'https:' || !(host === 'olx.ua' || host.endsWith('.olx.ua')) ||
         parsedUrl.username || parsedUrl.password ||
-        !(/\\/d\\//.test(parsedUrl.pathname) || /\\/obyavlenie\\//.test(parsedUrl.pathname))) {
+        !(/\/d\//.test(parsedUrl.pathname) || /\/obyavlenie\//.test(parsedUrl.pathname))) {
       return res.status(400).json({ success: false, error: 'Посилання має вести на оголошення OLX' });
     }
     const response = await axios.get(parsedUrl.toString(), {
