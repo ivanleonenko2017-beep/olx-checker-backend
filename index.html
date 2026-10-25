@@ -252,12 +252,6 @@
         </div>
       </div>
 
-      <!-- Legal Links -->
-      <div class="text-center pt-2 pb-4 space-x-3 text-[11px] text-gray-400 font-medium">
-        <button onclick="openLegalDoc('terms')" class="hover:text-emerald-400 transition underline underline-offset-4">Публічна оферта</button>
-        <span>•</span>
-        <button onclick="openLegalDoc('privacy')" class="hover:text-emerald-400 transition underline underline-offset-4">Політика конфіденційності</button>
-      </div>
     </div>
 
     <!-- ================= TAB 5: ADMIN PANEL ================= -->
@@ -448,6 +442,13 @@
         <h3 id="legalTitle" class="text-sm font-bold text-emerald-400">Документ</h3>
         <div id="legalContent" class="text-xs text-gray-300 space-y-2 leading-relaxed"></div>
       </div>
+    </div>
+
+    <!-- Always-visible legal links: outside tab panels so users can find them from any screen. -->
+    <div class="fixed bottom-[66px] left-0 right-0 z-30 flex justify-center gap-3 py-1.5 bg-gray-950/95 text-[10px] text-gray-400">
+      <button type="button" onclick="openLegalDoc('terms')" class="underline underline-offset-2 hover:text-emerald-400">Публічна оферта</button>
+      <span>•</span>
+      <button type="button" onclick="openLegalDoc('privacy')" class="underline underline-offset-2 hover:text-emerald-400">Політика конфіденційності</button>
     </div>
 
     <!-- ================= BOTTOM NAVIGATION ================= -->
@@ -957,8 +958,14 @@
         const res = await fetch(apiUrl);
         const data = await res.json();
 
-        if (!data.success || !data.items || data.items.length === 0) {
-          resultsDiv.innerHTML = '<div class="text-center text-red-400 py-6 bg-gray-900 rounded-2xl border border-gray-800">Оголошень за даним запитом не знайдено.</div>';
+        if (!res.ok || data.success === false) {
+          resultsDiv.innerHTML = '<div class="text-center text-red-400 py-6 bg-gray-900 rounded-2xl border border-gray-800">' +
+            (data.error || 'Не вдалося виконати пошук. Спробуйте ще раз.') + '</div>';
+          analyticsDiv.classList.add('hidden');
+          return;
+        }
+        if (!Array.isArray(data.items) || data.items.length === 0) {
+          resultsDiv.innerHTML = '<div class="text-center text-gray-300 py-6 bg-gray-900 rounded-2xl border border-gray-800">OLX не повернув оголошень для цього запиту. Спробуйте інше ключове слово або перевірте доступність OLX.</div>';
           analyticsDiv.classList.add('hidden');
           return;
         }
