@@ -709,9 +709,9 @@ async function runBackgroundWorker() {
           console.error(`Не вдалося перевірити seen_ads для фільтра ${filter.id}:`, knownError.message);
           continue;
         }
-        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\\/$/, '')));
+        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
         for (const item of items) {
-          const canonicalLink = String(item.link || '').trim().replace(/\\/$/, '');
+          const canonicalLink = String(item.link || '').trim().replace(/\/$/, '');
           if (!canonicalLink || knownLinks.has(canonicalLink)) continue;
 
           const { data: inserted, error: insertError } = await supabase
