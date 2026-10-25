@@ -1096,7 +1096,7 @@
         });
         const data = await res.json();
         if (data.success) {
-          statusDiv.innerText = `✅ Розсилку завершено! Доставлено: ${data.sentCount} з ${data.total} (Пропущено: ${data.failedCount})`;
+          statusDiv.innerText = `✅ Розсилку завершено! Доставлено: ${data.sentCount} з ${data.total}. Не доставлено: ${data.failedCount}${data.failureSamples?.length ? ' • Перевірте журнал сервера для деталей' : ''}`;
         } else {
           statusDiv.innerText = `❌ Помилка розсилки: ${data.error}`;
         }
