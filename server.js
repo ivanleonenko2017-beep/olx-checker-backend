@@ -466,10 +466,7 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
             filter_id: createdFilter.id,
             ad_link: item.link
           }));
-          const { error: warmupInsertError } = await supabase.from('seen_ads').upsert(initialSeen, {
-            onConflict: 'filter_id,ad_link',
-            ignoreDuplicates: true
-          });
+          const { error: warmupInsertError } = await supabase.from('seen_ads').insert(initialSeen);
           if (warmupInsertError) console.error('[Warmup Warning] Не вдалося позначити початкові оголошення:', warmupInsertError.message);
         }
       } catch (warmupErr) {
@@ -712,7 +709,7 @@ async function runBackgroundWorker() {
           console.error(`Не вдалося перевірити seen_ads для фільтра ${filter.id}:`, knownError.message);
           continue;
         }
-        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim()));
+        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\\/$/, '')));
         for (const item of items) {
           const canonicalLink = String(item.link || '').trim().replace(/\\/$/, '');
           if (!canonicalLink || knownLinks.has(canonicalLink)) continue;
