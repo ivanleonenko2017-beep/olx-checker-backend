@@ -947,18 +947,6 @@ async function runBackgroundWorker() {
           const canonicalLink = String(item.link || '').trim().replace(/\/$/, '');
           if (!canonicalLink || knownLinks.has(canonicalLink)) continue;
 
-          const { data: inserted, error: insertError } = await supabase
-            .from('seen_ads')
-            .insert([{ filter_id: filter.id, ad_link: canonicalLink }])
-            .select('ad_link');
-          if (insertError || !inserted || inserted.length === 0) {
-            if (insertError && !/duplicate key|unique constraint/i.test(insertError.message || '')) {
-              console.error(`Не вдалося позначити оголошення як переглянуте для фільтра ${filter.id}:`, insertError.message);
-            }
-            continue;
-          }
-          knownLinks.add(canonicalLink);
-
           const isCheap = averagePrice > 0 && item.price < averagePrice * 0.85;
           const discount = isCheap ? Math.round((1 - item.price / averagePrice) * 100) : 0;
 
@@ -980,7 +968,24 @@ async function runBackgroundWorker() {
             ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(item.rawImgUrl)}`
             : `${SERVER_URL}/assets/no-photo.svg`;
           
-          await sendTelegramPhoto(filter.user_id, photoToSend, notificationText, keyboard);
+          const delivered = await sendTelegramPhoto(filter.user_id, photoToSend, notificationText, keyboard);
+          if (delivered) {
+            // Mark as seen only after Telegram confirms delivery; otherwise the
+            // next scan can retry instead of silently losing the notification.
+            const { data: inserted, error: insertError } = await supabase
+              .from('seen_ads')
+              .insert([{ filter_id: filter.id, ad_link: canonicalLink }])
+              .select('ad_link');
+            if (insertError || !inserted || inserted.length === 0) {
+              if (insertError && !/duplicate key|unique constraint/i.test(insertError.message || '')) {
+                console.error(`Не вдалося зберегти доставлене оголошення для фільтра ${filter.id}:`, insertError.message);
+              }
+            } else {
+              knownLinks.add(canonicalLink);
+            }
+          } else {
+            console.warn(`[Notifications] Не доставлено оголошення для фільтра ${filter.id}; буде повторна спроба під час наступного сканування.`);
+          }
           await new Promise(r => setTimeout(r, 1500));
         }
       } catch (fErr) {
