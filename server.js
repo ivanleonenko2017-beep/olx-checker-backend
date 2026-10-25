@@ -247,11 +247,25 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     'icloud', 'lost', 'passcode', 'пароль', 'bypass', 'донор', 'скупка', 'ремонт', 'копия', 'реплика'
   ];
 
-  $('[data-cy="l-card"], [data-testid="l-card"]').each((index, element) => {
+  // OLX periodically changes card attributes. Support both current and older
+  // card markup, and only use article fallback when it contains an ad link.
+  let cards = $('[data-cy="l-card"], [data-testid="l-card"]');
+  if (!cards.length) {
+    cards = $('article').filter((_, el) =>
+      $(el).find('a[href*="/d/"], a[href*="/obyavlenie/"]').length > 0
+    );
+  }
+  if (!cards.length) {
+    cards = $('[data-testid="listing-grid"] > div, [data-cy="listing-grid"] > div').filter((_, el) =>
+      $(el).find('a[href*="/d/"], a[href*="/obyavlenie/"]').length > 0
+    );
+  }
+
+  cards.each((index, element) => {
     if (rawItems.length >= 30) return;
 
     $(element).find('style, script').remove();
-    const title = $(element).find('h6, h4, [data-testid="ad-title"]').first().text().trim();
+    const title = $(element).find('h6, h4, [data-testid="ad-title"], [data-cy="ad-title"], h3').first().text().trim();
     if (!title) return;
 
     const lowerTitle = title.toLowerCase();
@@ -262,7 +276,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
 
     if (hasStopWord && !queryHasStopWord) return;
 
-    const priceElement = $(element).find('[data-testid="ad-price"]').first();
+    const priceElement = $(element).find('[data-testid="ad-price"], [data-testid="ad-price-container"], [data-cy="ad-price"], [class*="price"]').first();
     priceElement.find('style, script').remove();
     let rawPriceText = priceElement.text().trim();
 
@@ -279,7 +293,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     if (minPrice && numericPrice < parseInt(minPrice, 10)) return;
     if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
 
-    const rawLink = $(element).find('a').attr('href') || '';
+    const rawLink = $(element).find('a[href*="/d/"], a[href*="/obyavlenie/"], a').first().attr('href') || '';
     const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
 
     let rawImgUrl = '';
@@ -300,7 +314,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
       rawImgUrl = candidate;
     }
 
-    const locationDate = $(element).find('[data-testid="location-date"]').first().text().trim();
+    const locationDate = $(element).find('[data-testid="location-date"], [data-cy="location-date"], [class*="location"], [class*="date"]').first().text().trim();
     const descriptionCandidate = $(element).find(
       '[data-testid="ad-description"], [data-cy="ad-description"], [class*="description"], p'
     ).first().text().replace(/\\s+/g, ' ').trim();
