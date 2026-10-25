@@ -251,10 +251,21 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   }
   const html = String(response.data || '');
   const pageText = html.toLowerCase();
-  if (
-    response.status === 403 || response.status === 429 ||
-    /captcha|verify you are human|access denied|too many requests|robot check|підтверд.{0,20}що ви людина|забагато запитів/i.test(pageText)
-  ) {
+  // OLX may mention captcha libraries in scripts even on normal result pages.
+  // Only classify explicit HTTP blocks or clear human-verification interstitial text.
+  const blockPatterns = [
+    /verify you are human/i,
+    /access denied/i,
+    /too many requests/i,
+    /robot check/i,
+    /підтверд.{0,20}що ви людина/i,
+    /забагато запитів/i,
+    /ваш доступ тимчасово обмежено/i,
+    /доступ до сайту обмежено/i
+  ];
+  const matchedBlockPattern = blockPatterns.find(pattern => pattern.test(pageText));
+  if (response.status === 403 || response.status === 429 || matchedBlockPattern) {
+    console.warn(`[OLX search] Block detected: status=${response.status}, reason=${response.status === 403 || response.status === 429 ? 'http-status' : matchedBlockPattern?.source || 'unknown'}`);
     const error = new Error('OLX тимчасово обмежив доступ до пошуку. Спробуйте пізніше.');
     error.code = 'OLX_BLOCKED';
     throw error;
