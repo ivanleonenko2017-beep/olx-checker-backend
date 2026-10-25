@@ -176,7 +176,7 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
 app.get('/api/proxy-image', async (req, res) => {
   // Only proxy HTTPS images from OLX-owned domains. Never accept arbitrary URLs:
   // this endpoint is public and must not be usable to reach internal services.
-  const fallback = () => res.redirect('/assets/no-photo.svg');
+  const fallback = () => res.redirect(`${SERVER_URL}/assets/no-photo.svg`);
   try {
     const imageUrl = typeof req.query.url === 'string' ? req.query.url : '';
     if (!imageUrl || imageUrl.length > 2048) return fallback();
@@ -763,12 +763,11 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 
   if (supabase) {
-    try {
-      await supabase.from('users').upsert({ 
-        telegram_id: chatId, 
-        first_name: msg.from?.first_name || 'User' 
-      }, { onConflict: 'telegram_id' });
-    } catch (uErr) {}
+    const { error: userUpsertError } = await supabase.from('users').upsert({
+      telegram_id: chatId,
+      first_name: msg.from?.first_name || 'User'
+    }, { onConflict: 'telegram_id' });
+    if (userUpsertError) console.error('[Telegram] Не вдалося зберегти користувача для розсилок:', userUpsertError.message);
   }
 
   if (text.startsWith('/start')) {
