@@ -65,7 +65,8 @@ test('applies price range and photo requirement', () => {
 test('parses common natural-language budget and exclusions', () => {
   const parsed = parseNaturalLanguageQuery('Ігровий ноутбук до 20 000 грн, не показувати зламаний');
   assert.equal(parsed.criteria.maxPrice, 20000);
-  assert.deepEqual(parsed.criteria.excludeTerms, ['зламаний']);
+  assert.ok(parsed.criteria.excludeTerms.includes('зламаний'));
+  assert.ok(parsed.criteria.excludeTerms.includes('неисправный'));
   assert.match(parsed.query, /Ігровий ноутбук/i);
 });
 
@@ -78,7 +79,8 @@ test('parses Ukrainian condition and photo phrases and exclusions without commas
 
   const excluded = parseNaturalLanguageQuery('Ігровий ноутбук до 20 000 грн не показувати зламаний');
   assert.equal(excluded.criteria.maxPrice, 20000);
-  assert.deepEqual(excluded.criteria.excludeTerms, ['зламаний']);
+  assert.ok(excluded.criteria.excludeTerms.includes('зламаний'));
+  assert.ok(excluded.criteria.excludeTerms.includes('неисправный'));
   assert.equal(excluded.query, 'Ігровий ноутбук');
 });
 
