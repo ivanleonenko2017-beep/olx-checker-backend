@@ -1032,7 +1032,7 @@
         if (city) apiUrl += '&city=' + encodeURIComponent(city);
         if (condition && condition !== 'all') apiUrl += '&condition=' + encodeURIComponent(condition);
 
-        const res = await fetch(apiUrl);
+        const res = await fetch(apiUrl, { headers: { 'x-telegram-init-data': initDataRaw } });
         const data = await res.json();
 
         if (!res.ok || data.success === false) {
