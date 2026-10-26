@@ -34,6 +34,17 @@ test('rejects a listing missing a required term', () => {
   assert.equal(result.reason, 'missing_required_term');
 });
 
+test('keeps the user-facing exclusion list concise while matching defect synonyms', () => {
+  const parsed = parseNaturalLanguageQuery('iPhone 11 не предлагать неисправную батарею');
+  assert.deepEqual(parsed.criteria.excludeTerms, ['неисправную батарею']);
+  const result = applyCriteriaToListing(
+    { title: 'iPhone 11, батарея не держит заряд', price: 7000 },
+    parsed.criteria
+  );
+  assert.equal(result.matches, false);
+  assert.equal(result.reason, 'excluded_term');
+});
+
 test('rejects a listing containing an excluded term', () => {
   const result = applyCriteriaToListing(
     { title: 'Ноутбук RTX 3060, несправний', price: 18000 },
