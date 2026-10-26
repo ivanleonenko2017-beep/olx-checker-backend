@@ -433,10 +433,62 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   return { items: rawItems, averagePrice };
 }
 
-app.get('/api/search', async (req, res) => {
+app.get('/api/search', userAuthMiddleware, async (req, res) => {
   const startedAt = Date.now();
   console.log(`[API search] Request received: queryProvided=${Boolean(req.query.query)}, categoryUrlProvided=${Boolean(req.query.categoryUrl)}, filters=${Boolean(req.query.minPrice || req.query.maxPrice || req.query.city || req.query.condition)}`);
   try {
+    // Enforce trial/Premium access server-side for every search request.
+    // Fail closed if the database is unavailable: do not allow a bypass.
+    if (!supabase) {
+      return res.status(503).json({ success: false, error: 'Перевірка доступу тимчасово недоступна. Спробуйте пізніше.' });
+    }
+    const userId = req.telegramUser.id;
+    const isAdmin = await checkIsAdmin(userId);
+    let { data: accessUser, error: accessError } = await supabase.from('users')
+      .select('tariff,premium_until,trial_started_at').eq('telegram_id', userId).maybeSingle();
+    if (accessError) throw accessError;
+
+    if (!accessUser) {
+      const startedAtIso = new Date().toISOString();
+      const { error: createUserError } = await supabase.from('users').upsert({
+        telegram_id: userId, first_name: req.telegramUser.first_name || 'User',
+        is_admin: isAdmin, trial_started_at: startedAtIso
+      }, { onConflict: 'telegram_id' });
+      if (createUserError) throw createUserError;
+      accessUser = { tariff: 'free', premium_until: null, trial_started_at: startedAtIso };
+    } else if (!accessUser.trial_started_at) {
+      const startedAtIso = new Date().toISOString();
+      const { data: initializedUser, error: initTrialError } = await supabase.from('users')
+        .update({ trial_started_at: startedAtIso }).eq('telegram_id', userId)
+        .is('trial_started_at', null).select('tariff,premium_until,trial_started_at').maybeSingle();
+      if (initTrialError) throw initTrialError;
+      if (initializedUser) accessUser = initializedUser;
+      else {
+        const { data: refreshedUser, error: refreshError } = await supabase.from('users')
+          .select('tariff,premium_until,trial_started_at').eq('telegram_id', userId).maybeSingle();
+        if (refreshError) throw refreshError;
+        accessUser = refreshedUser || accessUser;
+      }
+    }
+
+    const hasActivePremium = isAdmin || (
+      accessUser?.tariff === 'premium' &&
+      Boolean(accessUser.premium_until) &&
+      Number.isFinite(Date.parse(accessUser.premium_until)) &&
+      Date.parse(accessUser.premium_until) > Date.now()
+    );
+    const trialStartedMs = accessUser?.trial_started_at ? Date.parse(accessUser.trial_started_at) : 0;
+    const trialEndsMs = trialStartedMs > 0 ? trialStartedMs + 5 * 24 * 60 * 60 * 1000 : 0;
+    const hasActiveTrial = trialEndsMs > Date.now();
+
+    if (!hasActivePremium && !hasActiveTrial) {
+      return res.status(403).json({
+        success: false,
+        error: 'Пробний період завершився. Для продовження користування потрібен Premium.',
+        code: 'TRIAL_EXPIRED'
+      });
+    }
+
     const { query, categoryUrl, minPrice, maxPrice, city, condition } = req.query;
     let targetUrl = categoryUrl;
 
