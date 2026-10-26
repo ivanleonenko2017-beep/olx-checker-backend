@@ -144,7 +144,7 @@ function parseNaturalLanguageQuery(input) {
   const exclusionMatch = remaining.match(/(?:^|[\s,;])(?:не показувати|не пропонувати|не пропоновать|не предлагать|не показывать|без|виключити|исключить)\s+([^.!?;]+)/i);
   if (exclusionMatch) {
     let exclusionText = exclusionMatch[1].trim();
-    exclusionText = exclusionText.replace(/\s+(?=(?:поломан\w*|слом\w*|зламан\w*|неисправ\w*|несправ\w*|заблок\w*|розбит\w*|разбит\w*|тріснут\w*|треснут\w*|трещин\w*|скол\w*|icloud|айклауд|на запчаст\w*|не працю\w*|не работа\w*|не включ\w*))/giu, ', ');
+    exclusionText = exclusionText.replace(/\s+(?<!с )(?=(?:поломан\w*|слом\w*|зламан\w*|неисправ\w*|несправ\w*|заблок\w*|розбит\w*|разбит\w*|тріснут\w*|треснут\w*|трещин\w*|скол\w*|icloud|айклауд|на запчаст\w*|не працю\w*|не работа\w*|не включ\w*))/giu, ', ');
     criteria.excludeTerms = normalizeTermList(exclusionText
       .split(/[,;]|\s+(?:та|і|й|або|и|или|and|or)\s+/iu)
       .map(term => term.trim().replace(/^(?:з|із|с|со)\s+/iu, ''))
