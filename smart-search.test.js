@@ -95,7 +95,7 @@ test('parses multiple Ukrainian and Russian defect exclusions', () => {
   assert.equal(parsed.criteria.minPrice, 5000);
   assert.equal(parsed.criteria.maxPrice, 9000);
   assert.equal(parsed.criteria.condition, 'used');
-  assert.deepEqual(parsed.criteria.excludeTerms, ['поломанные', 'заблокированные', 'неисправную батарею']);
+  assert.deepEqual(parsed.criteria.excludeTerms, ['поломанные', 'заблокированные', 'неисправной батареей']);
   assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
 });
 
