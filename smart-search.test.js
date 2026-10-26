@@ -69,6 +69,19 @@ test('parses common natural-language budget and exclusions', () => {
   assert.match(parsed.query, /Ігровий ноутбук/i);
 });
 
+test('parses Ukrainian condition and photo phrases and exclusions without commas', () => {
+  const parsed = parseNaturalLanguageQuery('iPhone 13 новий тільки з фото до 20 000 грн');
+  assert.equal(parsed.criteria.condition, 'new');
+  assert.equal(parsed.criteria.photosOnly, true);
+  assert.equal(parsed.criteria.maxPrice, 20000);
+  assert.equal(parsed.query, 'iPhone 13');
+
+  const excluded = parseNaturalLanguageQuery('Ігровий ноутбук до 20 000 грн не показувати зламаний');
+  assert.equal(excluded.criteria.maxPrice, 20000);
+  assert.deepEqual(excluded.criteria.excludeTerms, ['зламаний']);
+  assert.equal(excluded.query, 'Ігровий ноутбук');
+});
+
 test('calculates median robustly', () => {
   assert.equal(median([100, 500, 200, 300, 10000]), 300);
   assert.equal(median([100, 200, 300, 400]), 250);
