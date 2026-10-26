@@ -84,6 +84,13 @@ test('parses Ukrainian condition and photo phrases and exclusions without commas
   assert.equal(excluded.query, 'Ігровий ноутбук');
 });
 
+test('matches Cyrillic used/new condition labels without ASCII word-boundary bugs', () => {
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 11, б/у', price: 7000 }, { condition: 'used' }).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 11, вживаний', price: 7000 }, { condition: 'used' }).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 11, новий', price: 7000 }, { condition: 'new' }).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 11', price: 7000 }, { condition: 'used' }).matches, false);
+});
+
 test('parses natural-language price ranges in thousands and used condition', () => {
   const parsed = parseNaturalLanguageQuery('Хочу купить айфон 11 от 5 до 9 тысяч б/у');
   assert.equal(parsed.criteria.minPrice, 5000);
