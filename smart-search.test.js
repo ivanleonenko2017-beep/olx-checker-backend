@@ -101,7 +101,7 @@ test('parses multiple Ukrainian and Russian defect exclusions', () => {
 
 test('parses common broken-glass and activation-lock exclusions', () => {
   const parsed = parseNaturalLanguageQuery('iPhone 11 за 7000 не показывать разбитое стекло, заблокирован, iCloud');
-  assert.deepEqual(parsed.criteria.excludeTerms, ['разбитое стекло', 'заблокирован', 'icloud']);
+  assert.deepEqual(parsed.criteria.excludeTerms, ['разбитое стекло', 'заблокирован', 'iCloud']);
 });
 
 test('calculates median robustly', () => {
