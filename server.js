@@ -1278,16 +1278,14 @@ async function runBackgroundWorker() {
           condition: filter.condition
         });
         const requestedLocation = String(filter.city || '').trim();
-        // For advanced term filters, fetch the real listing description when the
-        // search-result card only contains our placeholder. Cache results to avoid
-        // requesting the same OLX page on every worker pass.
+        // Advanced term filters need the listing page, not just the often-incomplete
+        // search card. Cache successful descriptions and short-lived misses.
         const needsFullDescription = criteria.includeTerms.length > 0 || criteria.excludeTerms.length > 0;
         if (needsFullDescription) {
           for (const item of parsedItems) {
-            if (!item.description || item.description === EMPTY_CARD_DESCRIPTION) {
-              const fullDescription = await fetchListingDescription(item.link);
-              if (fullDescription) item.description = fullDescription;
-            }
+            const fullDescription = await fetchListingDescription(item.link);
+            item.detailsLoaded = Boolean(fullDescription);
+            if (fullDescription) item.description = fullDescription;
           }
         }
         // Only notify about listings OLX explicitly labels as published today.
@@ -1295,9 +1293,9 @@ async function runBackgroundWorker() {
         const items = todaysItems
           .filter(item => locationMatches(item.locationDate, requestedLocation))
           .filter(item => {
-            // If the user explicitly excludes/requires description terms and OLX
-            // did not provide a real description, don't guess that the listing fits.
-            if (needsFullDescription && item.description === EMPTY_CARD_DESCRIPTION) return false;
+            // If the detail page could not be read, don't claim the item passed
+            // explicit required/excluded-word rules using incomplete card text.
+            if (needsFullDescription && !item.detailsLoaded) return false;
             return applyCriteriaToListing(item, criteria).matches;
           });
         if (requestedLocation && !['всі міста', 'вся україна', 'уся україна'].includes(requestedLocation.toLocaleLowerCase('uk-UA')) && parsedItems.length > 0 && items.length === 0) {
