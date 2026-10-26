@@ -52,6 +52,14 @@ test('applies price range and photo requirement', () => {
     { title: 'iPhone 13', price: 9000 },
     { photosOnly: true }
   ).reason, 'photos_required');
+  assert.equal(applyCriteriaToListing(
+    { title: 'iPhone 13', price: 9000, proxyImg: 'https://example.com/assets/no-photo.svg' },
+    { photosOnly: true }
+  ).reason, 'photos_required');
+  assert.equal(applyCriteriaToListing(
+    { title: 'iPhone 13', price: 9000, rawImgUrl: 'https://img.example/photo.jpg', proxyImg: 'https://example.com/proxy' },
+    { photosOnly: true }
+  ).matches, true);
 });
 
 test('parses common natural-language budget and exclusions', () => {
