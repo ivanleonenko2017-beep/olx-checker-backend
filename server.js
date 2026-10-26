@@ -437,6 +437,64 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   return { items: rawItems, averagePrice };
 }
 
+
+const listingDescriptionCache = new Map();
+const EMPTY_CARD_DESCRIPTION = 'Відкрийте оголошення на OLX, щоб переглянути повний опис продавця.';
+
+async function fetchListingDescription(inputUrl) {
+  let parsedUrl;
+  try { parsedUrl = new URL(inputUrl); } catch { return ''; }
+  const host = parsedUrl.hostname.toLowerCase();
+  if (parsedUrl.protocol !== 'https:' || !(host === 'olx.ua' || host.endsWith('.olx.ua')) ||
+      parsedUrl.username || parsedUrl.password ||
+      !(/\/d\//.test(parsedUrl.pathname) || /\/obyavlenie\//.test(parsedUrl.pathname))) return '';
+
+  const key = parsedUrl.toString().replace(/\/$/, '');
+  const cached = listingDescriptionCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.description;
+  if (cached) listingDescriptionCache.delete(key);
+
+  try {
+    const response = await axios.get(key, {
+      headers: { ...HEADERS, Referer: 'https://www.olx.ua/' },
+      timeout: 8000,
+      maxRedirects: 0,
+      validateStatus: status => status >= 200 && status < 300
+    });
+    const $ = cheerio.load(String(response.data || ''));
+    let description = $('[data-testid="ad-description"], [data-cy="ad-description"], [data-testid*="description"], [class*="description"]').first().text().trim();
+
+    if (!description) {
+      $('script[type="application/ld+json"]').each((_, el) => {
+        if (description) return;
+        try {
+          const json = JSON.parse($(el).contents().text());
+          const candidates = Array.isArray(json) ? json : [json];
+          for (const item of candidates) {
+            if (item && typeof item.description === 'string' && item.description.trim()) {
+              description = item.description.trim();
+              break;
+            }
+          }
+        } catch (_) {}
+      });
+    }
+    if (!description) description = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '';
+    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
+    if (description && !/verify you are human|access denied|robot check|підтверд.{0,20}що ви людина/i.test(description)) {
+      listingDescriptionCache.set(key, { description, expiresAt: Date.now() + 10 * 60 * 1000 });
+      if (listingDescriptionCache.size > 500) {
+        const oldestKey = listingDescriptionCache.keys().next().value;
+        listingDescriptionCache.delete(oldestKey);
+      }
+      return description;
+    }
+  } catch (error) {
+    console.warn('[Smart Search details] Не вдалося отримати опис:', error.response?.status || error.code || 'request-failed');
+  }
+  return '';
+}
+
 app.get('/api/search', userAuthMiddleware, async (req, res) => {
   const startedAt = Date.now();
   console.log(`[API search] Request received: queryProvided=${Boolean(req.query.query)}, categoryUrlProvided=${Boolean(req.query.categoryUrl)}, filters=${Boolean(req.query.minPrice || req.query.maxPrice || req.query.city || req.query.condition)}`);
@@ -1215,11 +1273,29 @@ async function runBackgroundWorker() {
           condition: filter.condition
         });
         const requestedLocation = String(filter.city || '').trim();
+        // For advanced term filters, fetch the real listing description when the
+        // search-result card only contains our placeholder. Cache results to avoid
+        // requesting the same OLX page on every worker pass.
+        const needsFullDescription = criteria.includeTerms.length > 0 || criteria.excludeTerms.length > 0;
+        if (needsFullDescription) {
+          for (const item of parsedItems) {
+            if (!item.description || item.description === EMPTY_CARD_DESCRIPTION) {
+              const fullDescription = await fetchListingDescription(item.link);
+              if (fullDescription) item.description = fullDescription;
+              await new Promise(resolve => setTimeout(resolve, 250));
+            }
+          }
+        }
         // Only notify about listings OLX explicitly labels as published today.
         const todaysItems = parsedItems.filter(item => isPublishedToday(item.locationDate));
         const items = todaysItems
           .filter(item => locationMatches(item.locationDate, requestedLocation))
-          .filter(item => applyCriteriaToListing(item, criteria).matches);
+          .filter(item => {
+            // If the user explicitly excludes/requires description terms and OLX
+            // did not provide a real description, don't guess that the listing fits.
+            if (needsFullDescription && item.description === EMPTY_CARD_DESCRIPTION) return false;
+            return applyCriteriaToListing(item, criteria).matches;
+          });
         if (requestedLocation && !['всі міста', 'вся україна', 'уся україна'].includes(requestedLocation.toLocaleLowerCase('uk-UA')) && parsedItems.length > 0 && items.length === 0) {
           console.log(`[Location Filter] Для фільтра ${filter.id} не знайдено карток із локацією "${requestedLocation}" серед ${parsedItems.length} результатів OLX.`);
         }
