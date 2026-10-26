@@ -531,7 +531,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
   try {
     const userId = req.telegramUser.id;
     const isAdmin = await checkIsAdmin(userId);
-    let userData = { tariff: 'free', premium_until: null };
+    let userData = { tariff: 'free', premium_until: null, trial_started_at: null };
 
     if (supabase) {
       const { data, error } = await supabase.from('users').select('*').eq('telegram_id', userId).maybeSingle();
@@ -540,9 +540,26 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
         userData = data;
       } else {
         const { error: upsertError } = await supabase.from('users').upsert({
-          telegram_id: userId, first_name: req.telegramUser.first_name || 'User', is_admin: isAdmin
+          telegram_id: userId, first_name: req.telegramUser.first_name || 'User', is_admin: isAdmin,
+          trial_started_at: new Date().toISOString()
         }, { onConflict: 'telegram_id' });
         if (upsertError) throw upsertError;
+        userData.trial_started_at = new Date().toISOString();
+      }
+      // Start the one-time 5-day trial on the first Mini App profile request.
+      if (!userData.trial_started_at) {
+        const trialStartedAt = new Date().toISOString();
+        const { data: initializedUser, error: trialInitError } = await supabase.from('users')
+          .update({ trial_started_at: trialStartedAt }).eq('telegram_id', userId).is('trial_started_at', null)
+          .select('*').maybeSingle();
+        if (trialInitError) throw trialInitError;
+        if (initializedUser) userData = initializedUser;
+        else {
+          const { data: refreshedUser, error: refreshError } = await supabase.from('users')
+            .select('*').eq('telegram_id', userId).maybeSingle();
+          if (refreshError) throw refreshError;
+          if (refreshedUser) userData = refreshedUser;
+        }
       }
     }
 
@@ -552,6 +569,9 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       Number.isFinite(Date.parse(userData.premium_until)) &&
       Date.parse(userData.premium_until) > Date.now()
     );
+    const trialStartedMs = userData.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
+    const trialEndsAt = trialStartedMs > 0 ? new Date(trialStartedMs + 5 * 24 * 60 * 60 * 1000).toISOString() : null;
+    const hasActiveTrial = Boolean(trialEndsAt && Date.parse(trialEndsAt) > Date.now());
     if (isAdmin) {
       userData.tariff = 'premium';
       userData.is_admin = true;
@@ -577,6 +597,8 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       success: true,
       isAdmin,
       hasActivePremium,
+      hasActiveTrial,
+      trialEndsAt,
       user: userData,
       stats: { totalReferrals }
     });
@@ -638,12 +660,16 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
       }
 
       const isAdmin = await checkIsAdmin(userId);
-      const { data: userData, error: userError } = await supabase.from('users').select('tariff,premium_until').eq('telegram_id', userId).maybeSingle();
+      const { data: userData, error: userError } = await supabase.from('users')
+        .select('tariff,premium_until,trial_started_at').eq('telegram_id', userId).maybeSingle();
       if (userError) throw userError;
+      const premiumExpiry = userData?.premium_until ? Date.parse(userData.premium_until) : 0;
       const isPremium = isAdmin || Boolean(userData && userData.tariff === 'premium' &&
-        userData.premium_until && Date.parse(userData.premium_until) > Date.now());
-      if (!isPremium && uniqueQueries.size >= 1) {
-        return res.status(403).json({ success: false, error: 'LIMIT_EXCEEDED' });
+        Number.isFinite(premiumExpiry) && premiumExpiry > Date.now());
+      const trialStart = userData?.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
+      const hasActiveTrial = trialStart > 0 && Date.now() < trialStart + 5 * 24 * 60 * 60 * 1000;
+      if (!isAdmin && !isPremium && !hasActiveTrial) {
+        return res.status(403).json({ success: false, error: 'TRIAL_EXPIRED' });
       }
 
       const { data, error } = await supabase.from('filters').insert([{
@@ -1072,7 +1098,7 @@ async function runBackgroundWorker() {
     for (const filter of filters) {
       try {
         const { data: filterOwner, error: ownerError } = await supabase
-          .from('users').select('tariff,premium_until,is_admin').eq('telegram_id', filter.user_id).maybeSingle();
+          .from('users').select('tariff,premium_until,is_admin,trial_started_at').eq('telegram_id', filter.user_id).maybeSingle();
         if (ownerError) {
           console.error(`Не вдалося перевірити тариф користувача для фільтра ${filter.id}:`, ownerError.message);
           continue;
@@ -1082,7 +1108,10 @@ async function runBackgroundWorker() {
           (filterOwner.tariff === 'premium' && filterOwner.premium_until &&
             Number.isFinite(Date.parse(filterOwner.premium_until)) && Date.parse(filterOwner.premium_until) > Date.now())
         ));
-        const intervalMs = (ownerPremium ? 2 : 15) * 60 * 1000;
+        const trialStart = filterOwner?.trial_started_at ? Date.parse(filterOwner.trial_started_at) : 0;
+        const ownerTrial = trialStart > 0 && Date.now() < trialStart + 5 * 24 * 60 * 60 * 1000;
+        if (!ownerPremium && !ownerTrial && filterOwner?.is_admin !== true) continue;
+        const intervalMs = (ownerPremium || ownerTrial ? 2 : 15) * 60 * 1000;
         const lastCheckedAt = filter.last_checked_at ? Date.parse(filter.last_checked_at) : 0;
         if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0 && Date.now() - lastCheckedAt < intervalMs) continue;
 
