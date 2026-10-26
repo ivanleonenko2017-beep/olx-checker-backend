@@ -116,20 +116,26 @@ function parseNaturalLanguageQuery(input) {
     }
   }
 
-  if (/\b(не показувати|без|виключити)\s+[^,;]+/i.test(remaining)) {
-    const match = remaining.match(/\b(?:не показувати|без|виключити)\s+([^,;]+)/i);
-    if (match) {
-      criteria.excludeTerms = normalizeTermList(match[1].split(/\s+та\s+|\s+і\s+|\s+або\s+/i));
-      remaining = remaining.replace(match[0], ' ').trim();
-    }
+  const exclusionMatch = remaining.match(/(?:^|[\\s,;])(?:не показувати|без|виключити)\\s+([^,;]+)/i);
+  if (exclusionMatch) {
+    criteria.excludeTerms = normalizeTermList(exclusionMatch[1].split(/\\s+та\\s+|\\s+і\\s+|\\s+або\\s+/i));
+    remaining = remaining.replace(exclusionMatch[0], ' ').trim();
   }
 
-  if (/\b(новий|нова|нове|нові|новый|новая|новое|новые)\b/i.test(remaining)) criteria.condition = 'new';
-  else if (/\b(б\/у|бу|вживаний|вживана|уживаний|used)\b/i.test(remaining)) criteria.condition = 'used';
+  const newConditionMatch = remaining.match(/(?:^|[\\s,;])(новий|нова|нове|нові|новый|новая|новое|новые)(?=$|[\\s,;])/i);
+  const usedConditionMatch = remaining.match(/(?:^|[\\s,;])(б\\/у|бу|вживаний|вживана|вживане|вживані|уживаний|уживана|used)(?=$|[\\s,;])/i);
+  if (newConditionMatch) {
+    criteria.condition = 'new';
+    remaining = remaining.replace(newConditionMatch[0], ' ').trim();
+  } else if (usedConditionMatch) {
+    criteria.condition = 'used';
+    remaining = remaining.replace(usedConditionMatch[0], ' ').trim();
+  }
 
-  if (/\b(з фото|тільки з фото|лише з фото|с фото)\b/i.test(remaining)) {
+  const photoMatch = remaining.match(/(?:^|[\\s,;])(тільки з фото|лише з фото|з фото|с фото)(?=$|[\\s,;])/i);
+  if (photoMatch) {
     criteria.photosOnly = true;
-    remaining = remaining.replace(/\b(з фото|тільки з фото|лише з фото|с фото)\b/ig, ' ').trim();
+    remaining = remaining.replace(photoMatch[0], ' ').trim();
   }
 
   criteria.query = remaining.replace(/[;,]+/g, ' ').replace(/\s+/g, ' ').trim() || original;
