@@ -83,7 +83,7 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     .filter(value => typeof value === 'string' && value.trim())
     .map(value => value.trim());
   const hasPhoto = imageCandidates.some(value =>
-    !/(?:no-photo|noimage|placeholder|blank\\.gif)(?:[?#]|$)/i.test(value)
+    !/(?:no-photo|noimage|placeholder|blank\.gif)(?:[?#]|$)/i.test(value)
   );
   if (criteria.photosOnly && !hasPhoto) {
     return { matches: false, reason: 'photos_required', criteria };
