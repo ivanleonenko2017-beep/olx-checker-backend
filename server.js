@@ -455,6 +455,8 @@ async function fetchListingDescription(inputUrl) {
   if (cached) listingDescriptionCache.delete(key);
 
   try {
+    // Throttle only real upstream requests; cache hits return immediately.
+    await new Promise(resolve => setTimeout(resolve, 200));
     const response = await axios.get(key, {
       headers: { ...HEADERS, Referer: 'https://www.olx.ua/' },
       timeout: 8000,
@@ -492,6 +494,9 @@ async function fetchListingDescription(inputUrl) {
   } catch (error) {
     console.warn('[Smart Search details] Не вдалося отримати опис:', error.response?.status || error.code || 'request-failed');
   }
+  // Cache misses briefly too, so a blocked or unavailable ad is not requested
+  // again for every filter scan in the next minute.
+  listingDescriptionCache.set(key, { description: '', expiresAt: Date.now() + 60 * 1000 });
   return '';
 }
 
@@ -1282,7 +1287,6 @@ async function runBackgroundWorker() {
             if (!item.description || item.description === EMPTY_CARD_DESCRIPTION) {
               const fullDescription = await fetchListingDescription(item.link);
               if (fullDescription) item.description = fullDescription;
-              await new Promise(resolve => setTimeout(resolve, 250));
             }
           }
         }
