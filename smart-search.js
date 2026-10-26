@@ -24,6 +24,33 @@ function normalizeTermList(value) {
   return unique;
 }
 
+function expandDefectExclusions(terms) {
+  const output = [...normalizeTermList(terms)];
+  const lower = output.join(' ').toLocaleLowerCase('uk-UA');
+  const groups = [
+    {
+      pattern: /поломан|слом|зламан|несправ|неисправ|не работает|не працює|не включ|не вмикається/i,
+      terms: ['поломаний', 'поломанный', 'зламаний', 'сломанный', 'несправний', 'неисправный', 'не работает', 'не працює', 'не включается', 'не вмикається']
+    },
+    {
+      pattern: /заблок|icloud|айклауд|activation lock|блокуван.{0,15}активац/i,
+      terms: ['заблокований', 'заблокирован', 'icloud', 'айклауд', 'activation lock', 'блокування активації', 'активаційне блокування']
+    },
+    {
+      pattern: /(?:розбит|разбит|тріс|трес|трещин|тріщин|скол|бит(?:ий|ое|ый)).{0,20}(?:скло|стекл|екран|экран)?|(?:скло|стекл|екран|экран).{0,20}(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд)/i,
+      terms: ['розбите скло', 'разбитое стекло', 'тріснуте скло', 'треснутое стекло', 'тріщина', 'трещина', 'битий екран', 'битый экран', 'скол']
+    },
+    {
+      pattern: /(?:(?:несправ|неисправ|не держит|не тримає|не трима|слабк|умира|degraded|faulty|bad).{0,24}(?:батар|акумулятор|battery)|(?:батар|акумулятор|battery).{0,24}(?:не держит|не тримає|не трима|несправ|неисправ|слабк|умира|faulty|bad))/i,
+      terms: ['несправна батарея', 'неисправная батарея', 'батарея не держит заряд', 'акумулятор не тримає заряд', 'не тримає заряд', 'не держит заряд', 'battery faulty', 'battery health issue']
+    }
+  ];
+  for (const group of groups) {
+    if (group.pattern.test(lower)) output.push(...group.terms);
+  }
+  return normalizeTermList(output);
+}
+
 function toPositiveInteger(value, fallback = 0) {
   if (value === '' || value === null || value === undefined) return fallback;
   const number = Number(value);
@@ -38,7 +65,7 @@ function normalizeCriteria(input = {}) {
 
   return {
     includeTerms: normalizeTermList(source.includeTerms ?? source.include_terms),
-    excludeTerms: normalizeTermList(source.excludeTerms ?? source.exclude_terms),
+    excludeTerms: expandDefectExclusions(source.excludeTerms ?? source.exclude_terms),
     condition: ['all', 'new', 'used'].includes(String(source.condition || 'all').toLowerCase())
       ? String(source.condition || 'all').toLowerCase()
       : 'all',
