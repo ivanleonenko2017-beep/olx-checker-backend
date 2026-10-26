@@ -124,8 +124,9 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     return { matches: false, reason: 'photos_required', criteria };
   }
   if (criteria.condition !== 'all') {
-    const isNew = /\b(нове|новий|нова|нові|новый|новая|новое|новые)\b/i.test(text);
-    const isUsed = /\b(б\/у|бу|вживан|уживан|used|після використання)\b/i.test(text);
+    // JavaScript's \b is ASCII-oriented and does not reliably delimit Cyrillic words.
+    const isNew = /(?:^|[^\p{L}])(?:нове|новий|нова|нові|новый|новая|новое|новые|new)(?=$|[^\p{L}])/iu.test(text);
+    const isUsed = /б\/у|(?:^|[^\p{L}])бу(?=$|[^\p{L}])|вживан|уживан|used|після використання/iu.test(text);
     if (criteria.condition === 'new' && !isNew) return { matches: false, reason: 'condition_mismatch', criteria };
     if (criteria.condition === 'used' && !isUsed) return { matches: false, reason: 'condition_mismatch', criteria };
   }
