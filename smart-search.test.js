@@ -95,13 +95,20 @@ test('parses multiple Ukrainian and Russian defect exclusions', () => {
   assert.equal(parsed.criteria.minPrice, 5000);
   assert.equal(parsed.criteria.maxPrice, 9000);
   assert.equal(parsed.criteria.condition, 'used');
-  assert.deepEqual(parsed.criteria.excludeTerms, ['поломанные', 'заблокированные', 'неисправной батареей']);
+  assert.ok(parsed.criteria.excludeTerms.includes('поломанные'));
+  assert.ok(parsed.criteria.excludeTerms.includes('заблокированные'));
+  assert.ok(parsed.criteria.excludeTerms.includes('неисправной батареей'));
+  assert.ok(parsed.criteria.excludeTerms.includes('activation lock'));
+  assert.ok(parsed.criteria.excludeTerms.includes('battery faulty'));
   assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
 });
 
 test('parses common broken-glass and activation-lock exclusions', () => {
   const parsed = parseNaturalLanguageQuery('iPhone 11 за 7000 не показывать разбитое стекло, заблокирован, iCloud');
-  assert.deepEqual(parsed.criteria.excludeTerms, ['разбитое стекло', 'заблокирован', 'iCloud']);
+  assert.ok(parsed.criteria.excludeTerms.includes('разбитое стекло'));
+  assert.ok(parsed.criteria.excludeTerms.includes('битый экран'));
+  assert.ok(parsed.criteria.excludeTerms.includes('activation lock'));
+  assert.ok(parsed.criteria.excludeTerms.includes('iCloud'));
 });
 
 test('calculates median robustly', () => {
