@@ -77,7 +77,15 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   if (criteria.maxPrice && (!price || price > criteria.maxPrice)) {
     return { matches: false, reason: 'above_max_price', criteria };
   }
-  if (criteria.photosOnly && !Boolean(listing?.rawImgUrl || listing?.img || listing?.proxyImg)) {
+  // parseOlx always supplies proxyImg, including the no-photo fallback.
+  // Treat only real image URLs as photos so photosOnly does not match every card.
+  const imageCandidates = [listing?.rawImgUrl, listing?.img, listing?.imageUrl, listing?.proxyImg]
+    .filter(value => typeof value === 'string' && value.trim())
+    .map(value => value.trim());
+  const hasPhoto = imageCandidates.some(value =>
+    !/(?:no-photo|noimage|placeholder|blank\\.gif)(?:[?#]|$)/i.test(value)
+  );
+  if (criteria.photosOnly && !hasPhoto) {
     return { matches: false, reason: 'photos_required', criteria };
   }
   if (criteria.condition !== 'all') {
