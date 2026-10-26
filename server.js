@@ -816,15 +816,15 @@ app.delete('/api/filters/:id', userAuthMiddleware, async (req, res) => {
 
 app.get('/api/legal/terms', (req, res) => {
   res.json({
-    title: "Публічна оферта та Умови використання OLX Checker",
-    content: "Дана Оферта є офіційною пропозицією сервісу OLX Checker для фізичних осіб щодо надання доступу до функцій автоматичного моніторингу оголошень. Оплата послуг або використання Telegram Mini App означає повне прийняття цих умов."
+    title: "Публічна оферта та Умови використання ЗНАЙДЕНО",
+    content: "Дана Оферта є офіційною пропозицією сервісу ЗНАЙДЕНО для фізичних осіб щодо надання доступу до функцій автоматичного моніторингу оголошень. Оплата послуг або використання Telegram Mini App означає повне прийняття цих умов."
   });
 });
 
 app.get('/api/legal/privacy', (req, res) => {
   res.json({
     title: "Політика конфіденційності",
-    content: "Сервіс OLX Checker обробляє тільки публічні дані Telegram (ID, ім'я) та збережені параметри фільтрів. Платіжні дані обробляються виключно ліцензованими провайдерами (Monobank / Telegram Stars)."
+    content: "Сервіс ЗНАЙДЕНО обробляє тільки публічні дані Telegram (ID, ім'я) та збережені параметри фільтрів. Платіжні дані обробляються виключно ліцензованими провайдерами (Telegram Stars)."
   });
 });
 
@@ -1001,9 +1001,9 @@ app.post('/telegram-webhook', async (req, res) => {
             premium_until: repairedUntil
           }, { onConflict: 'telegram_id' });
           if (repairError) throw repairError;
-          await sendTelegramMessage(chatId, 'Знайшли незавершену активацію платежу та відновили Premium на 30 днів. Дякуємо за підтримку OLX Checker.');
+          await sendTelegramMessage(chatId, 'Знайшли незавершену активацію платежу та відновили Premium на 30 днів. Дякуємо за підтримку ЗНАЙДЕНО.');
         } else {
-          await sendTelegramMessage(chatId, 'Цей платіж уже оброблено, Premium активний. Дякуємо за підтримку OLX Checker.');
+          await sendTelegramMessage(chatId, 'Цей платіж уже оброблено, Premium активний. Дякуємо за підтримку ЗНАЙДЕНО.');
         }
         return;
       }
@@ -1032,7 +1032,7 @@ app.post('/telegram-webhook', async (req, res) => {
         premium_until: premiumUntil
       }, { onConflict: 'telegram_id' });
       if (grantError) throw grantError;
-      await sendTelegramMessage(chatId, 'Оплату Telegram Stars підтверджено! Premium активовано на 30 днів. Дякуємо за підтримку OLX Checker.');
+      await sendTelegramMessage(chatId, 'Оплату Telegram Stars підтверджено! Premium активовано на 30 днів. Дякуємо за підтримку ЗНАЙДЕНО.');
     } catch (err) {
       console.error('Помилка обробки Telegram Stars платежу:', err.message);
       await sendTelegramMessage(chatId, 'Платіж отримано, але не вдалося завершити активацію автоматично. Напишіть на ivanleonenko2016@gmail.com.');
@@ -1055,7 +1055,7 @@ app.post('/telegram-webhook', async (req, res) => {
       try {
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendInvoice`, {
           chat_id: chatId,
-          title: 'OLX Checker Premium — 30 днів',
+          title: 'ЗНАЙДЕНО Premium — 30 днів',
           description: '30 днів Premium: до 1 перевірки кожні 2 хвилини та безлімітні фільтри.',
           payload: 'olx_checker_premium_30d_v1',
           provider_token: '',
@@ -1104,7 +1104,7 @@ app.post('/telegram-webhook', async (req, res) => {
     }
 
     const welcomeText = 
-      `👋 <b>Ласкаво просимо до OLX Checker 1.0.0!</b>\n\n` +
+      `👋 <b>Ласкаво просимо до ЗНАЙДЕНО 1.0.0!</b>\n\n` +
       `⚡️ <b>Твій персональний інструмент для швидкого перекупу та вигідних покупок на OLX.</b>\n\n` +
       `🎯 <b>Що вміє бот:</b>\n` +
       `• <b>Авто-моніторинг:</b> перевіряє нові оголошення за розкладом тарифу.\n` +
@@ -1117,7 +1117,7 @@ app.post('/telegram-webhook', async (req, res) => {
       `👇 <i>Натисніть кнопку нижче, щоб відкрити додаток та налаштувати пошук:</i>`;
 
     const keyboard = {
-      inline_keyboard: [[{ text: '🚀 Відкрити OLX Checker', web_app: { url: SERVER_URL } }]]
+      inline_keyboard: [[{ text: 'Відкрити ЗНАЙДЕНО', web_app: { url: SERVER_URL } }]]
     };
     await sendTelegramMessage(chatId, welcomeText, keyboard);
     return;
@@ -1125,13 +1125,13 @@ app.post('/telegram-webhook', async (req, res) => {
 
   if (text.startsWith('/paysupport') || text.startsWith('/support')) {
     await sendTelegramMessage(chatId,
-      'Підтримка платежів OLX Checker. Опишіть проблему та, якщо є, дату платежу. Контакт: ivanleonenko2016@gmail.com. Не надсилайте дані банківської картки чи паролі.');
+      'Підтримка платежів ЗНАЙДЕНО. Опишіть проблему та, якщо є, дату платежу. Контакт: ivanleonenko2016@gmail.com. Не надсилайте дані банківської картки чи паролі.');
     return;
   }
 
   if (text.startsWith('/terms')) {
     await sendTelegramMessage(chatId,
-      'Умови OLX Checker: Premium надає доступ до додаткових функцій моніторингу на 30 днів після підтвердження платежу. Сервіс незалежний від OLX і не гарантує безперервну роботу стороннього сайту. Питання щодо платежів: ivanleonenko2016@gmail.com. Повні юридичні дані постачальника та остаточні умови потрібно опублікувати до публічного запуску.');
+      'Умови ЗНАЙДЕНО: Premium надає доступ до додаткових функцій моніторингу на 30 днів після підтвердження платежу. Сервіс незалежний від OLX і не гарантує безперервну роботу стороннього сайту. Питання щодо платежів: ivanleonenko2016@gmail.com. Повні юридичні дані постачальника та остаточні умови потрібно опублікувати до публічного запуску.');
     return;
   }
 
@@ -1142,7 +1142,7 @@ app.post('/telegram-webhook', async (req, res) => {
       return;
     }
     const keyboard = {
-      inline_keyboard: [[{ text: '🛠 Відкрити Адмін-Панель', web_app: { url: SERVER_URL } }]]
+      inline_keyboard: [[{ text: 'Відкрити адмінпанель', web_app: { url: SERVER_URL } }]]
     };
     await sendTelegramMessage(chatId, `⚙️ <b>Панель Адміністратора</b>`, keyboard);
     return;
@@ -1233,7 +1233,7 @@ async function runBackgroundWorker() {
           const keyboard = {
             inline_keyboard: [
               [{ text: '👉 Переглянути оголошення', url: item.link }],
-              [{ text: '🚀 Відкрити OLX Checker', web_app: { url: SERVER_URL } }]
+              [{ text: '🚀 Відкрити ЗНАЙДЕНО', web_app: { url: SERVER_URL } }]
             ]
           };
 

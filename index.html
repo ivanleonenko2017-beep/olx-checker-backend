@@ -3,16 +3,67 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>OLX Checker 1.0.0</title>
+  <title>ЗНАЙДЕНО — розумний пошук</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d0c">
+  <meta name="description" content="ЗНАЙДЕНО — розумний моніторинг оголошень і вигідних знахідок.">
   <style>
-    :root { color-scheme: dark; background: #0b0f19; }
-    html, body { min-height: 100%; background: #0b0f19 !important; }
-    body { background-color: #0b0f19 !important; color: #f9fafb !important; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding-bottom: 92px; }
-    #app { background: #0b0f19; min-height: 100vh; }
-    input, select, textarea { color-scheme: dark; }
+    :root { color-scheme: dark; background: #0b0d0c; --zd-bg:#0b0d0c; --zd-panel:#121614; --zd-panel-2:#171d19; --zd-line:rgba(202,255,82,.13); --zd-lime:#caff52; --zd-muted:#9ca69d; }
+    html, body { min-height:100%; background:var(--zd-bg)!important; }
+    body { background:radial-gradient(ellipse at 50% -10%, rgba(202,255,82,.08), transparent 42%),var(--zd-bg)!important; color:#f5f7f3!important; font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding-bottom:100px; letter-spacing:-.01em; }
+    #app { background:transparent; min-height:100vh; max-width:460px; }
+    input,select,textarea { color-scheme:dark; }
+    button { -webkit-tap-highlight-color:transparent; }
+    button:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid var(--zd-lime); outline-offset:2px; }
+    .tab-content > div:first-child { border-color:var(--zd-line)!important; }
+    .bg-gray-900,.bg-gray-900\/90,.bg-gray-950\/80,.bg-gray-800 { background-color:var(--zd-panel)!important; }
+    .border-gray-800,.border-gray-700,.border-gray-800\/80 { border-color:rgba(255,255,255,.075)!important; }
+    .text-gray-400 { color:var(--zd-muted)!important; }
+    .text-gray-300 { color:#c5cec6!important; }
+    .text-white { color:#f5f7f3!important; }
+    .text-lime-400,.text-lime-300 { color:var(--zd-lime)!important; }
+    .bg-lime-400 { background-color:var(--zd-lime)!important; }
+    [class~="hover:bg-lime-300"]:hover { background-color:#d8ff85!important; }
+    .border-lime-500\/40,.border-lime-800,.border-lime-500\/50 { border-color:var(--zd-line)!important; }
+    .bg-lime-950,.bg-lime-950\/70 { background-color:#182016!important; }
+    .rounded-3xl { border-radius:26px!important; }
+    .rounded-2xl { border-radius:18px!important; }
+    input,select,textarea { border-radius:14px!important; border-color:rgba(255,255,255,.1)!important; }
+    input:focus,select:focus,textarea:focus { border-color:var(--zd-lime)!important; box-shadow:0 0 0 3px rgba(202,255,82,.08); }
+    button { transition:transform .16s ease,background-color .16s ease,border-color .16s ease,opacity .16s ease; }
+    button:active { transform:scale(.985); }
+    #tab-home > .border-b { padding-top:6px; padding-bottom:16px; }
+    #tab-home h1 { font-size:21px!important; letter-spacing:-.055em; color:var(--zd-lime)!important; }
+    #tab-home h1 svg { background:var(--zd-lime); color:#10140b!important; border-radius:9px; width:29px;height:29px;padding:5px; }
+    #tab-home .bg-gradient-to-br { background:linear-gradient(135deg,rgba(202,255,82,.13),rgba(18,22,20,.98) 56%)!important; border:1px solid rgba(202,255,82,.2)!important; box-shadow:0 18px 48px rgba(0,0,0,.22)!important; }
+    #tab-home .bg-gradient-to-br > .flex:first-child { gap:12px; }
+    #tab-home .bg-gradient-to-br .text-xs.font-bold { font-size:13px; letter-spacing:-.02em; }
+    #tab-home .grid button { min-height:94px; background:rgba(18,22,20,.86)!important; border-color:rgba(255,255,255,.07)!important; }
+    #tab-home .grid button:hover { border-color:rgba(202,255,82,.45)!important; background:#171d19!important; }
+    #tab-home button.bg-lime-400, #tab-search button.bg-lime-400 { box-shadow:0 8px 24px rgba(202,255,82,.09)!important; font-size:13px!important; }
+    .shadow-xl,.shadow-lg { box-shadow:0 16px 38px rgba(0,0,0,.2)!important; }
+    ::placeholder { color:#778178!important; opacity:1; }
+
+    /* ZNAIDENO component polish */
+    .fixed.bottom-0 { background:rgba(15,19,16,.94)!important; border-top-color:rgba(202,255,82,.12)!important; box-shadow:0 -12px 34px rgba(0,0,0,.28); backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); }
+    .nav-btn { min-width:52px; min-height:48px; border-radius:14px; padding:5px 8px; gap:1px; justify-content:center; transition:color .16s ease,background .16s ease; }
+    .nav-btn.text-lime-400 { background:rgba(202,255,82,.09); color:var(--zd-lime)!important; }
+    .nav-btn svg { width:20px;height:20px; }
+    .tab-content h2 { letter-spacing:-.035em; }
+    #tab-profile .grid > div { background:linear-gradient(145deg,rgba(23,29,25,.95),rgba(18,22,20,.92))!important; }
+    #premiumSection { border-width:1px!important; border-color:rgba(202,255,82,.3)!important; }
+    #premiumSection > .flex:first-child { align-items:center; }
+    #premiumSection button[disabled] { opacity:.78; }
+    #activeSearchesList > div, #favoritesList > div, #results > div { border-color:rgba(255,255,255,.08)!important; }
+    #addFilterModal > div, #adPreviewModal > div, #legalModal > div, #limitModal > div { box-shadow:0 24px 80px rgba(0,0,0,.45); }
+    #addFilterModal input, #addFilterModal select, #tab-search input, #tab-search select { min-height:42px; }
+    #tab-documents button { transition:border-color .16s ease,background .16s ease; }
+    #tab-documents button:hover { border-color:rgba(202,255,82,.35)!important; background:#171d19!important; }
+    @media (max-width:380px) { body { padding-left:12px!important;padding-right:12px!important; } .nav-btn { min-width:46px;padding-left:5px;padding-right:5px; } }
+
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; animation:none!important; scroll-behavior:auto!important; } }
   </style>
 </head>
 <body class="p-4">
@@ -22,29 +73,29 @@
     <div id="tab-home" class="tab-content space-y-4">
       <div class="flex items-center justify-between border-b border-gray-800/80 pb-3">
         <div>
-          <h1 class="text-lg font-bold text-emerald-400 flex items-center gap-1.5">
-            <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-            OLX Checker <span class="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">1.0.0</span>
+          <h1 class="text-lg font-bold text-lime-400 flex items-center gap-1.5">
+            <svg class="w-5 h-5 text-lime-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+            ЗНАЙДЕНО <span class="text-[10px] bg-lime-950 text-lime-300 px-2 py-0.5 rounded border border-lime-800">1.0.0</span>
           </h1>
-          <p class="text-[11px] text-gray-400">Розумний асистент вигідних покупок</p>
+          <p class="text-[11px] text-gray-400">Знаходь потрібне. Не пропускай вигідне.</p>
         </div>
-        <span id="userTariffBadge" class="text-[10px] bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded-full border border-emerald-800/80 font-semibold">FREE ТАРИФ</span>
+        <span id="userTariffBadge" class="text-[10px] bg-lime-950 text-lime-300 px-2.5 py-1 rounded-full border border-lime-800/80 font-semibold">FREE ТАРИФ</span>
       </div>
 
       <!-- Main Banner -->
-      <div class="p-4 rounded-3xl bg-gradient-to-br from-emerald-950/70 via-gray-900 to-gray-900 border border-emerald-500/40 shadow-xl space-y-3">
+      <div class="p-4 rounded-3xl bg-gradient-to-br from-lime-950/70 via-gray-900 to-gray-900 border border-lime-500/40 shadow-xl space-y-3">
         <div class="flex justify-between items-start">
           <div>
-            <div class="text-xs font-bold text-emerald-300">Авто-моніторинг 24/7</div>
-            <div class="text-[11px] text-gray-300 mt-0.5">Знаходьте вигідні пропозиції першими</div>
+            <div class="text-xs font-bold text-lime-300">Пошук працює за тебе</div>
+            <div class="text-[11px] text-gray-300 mt-0.5">Вигідні знахідки починаються тут</div>
           </div>
-          <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-lg border border-emerald-500/40 font-mono">PRO 60s</span>
+          <span class="text-[10px] bg-lime-500/20 text-lime-300 px-2 py-0.5 rounded-lg border border-lime-500/40 font-mono">PRO 60s</span>
         </div>
 
         <div class="relative pt-1">
           <input type="text" id="homeSearchInput" placeholder="Введіть назву або посилання OLX..." 
-                 class="w-full p-3.5 pl-4 pr-24 rounded-2xl bg-gray-950/80 border border-gray-700/80 text-xs text-white focus:outline-none focus:border-emerald-400">
-          <button onclick="quickSearchFromHome()" class="absolute right-1.5 top-2.5 bg-emerald-400 hover:bg-emerald-300 text-black px-4 py-2 rounded-xl font-bold text-xs transition shadow-md">
+                 class="w-full p-3.5 pl-4 pr-24 rounded-2xl bg-gray-950/80 border border-gray-700/80 text-xs text-white focus:outline-none focus:border-lime-400">
+          <button onclick="quickSearchFromHome()" class="absolute right-1.5 top-2.5 bg-lime-400 hover:bg-lime-300 text-black px-4 py-2 rounded-xl font-bold text-xs transition shadow-md">
             Шукати
           </button>
         </div>
@@ -54,28 +105,28 @@
       <div>
         <div class="text-xs font-semibold text-gray-400 mb-2">Швидкі категорії</div>
         <div class="grid grid-cols-3 gap-2">
-          <button onclick="selectCategory('Авто')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 17a2 2 0 100 4 2 2 0 000-4zm8 0a2 2 0 100 4 2 2 0 000-4zM3 9l2-4h10l2 4M3 9h18v7a1 1 0 01-1 1H4a1 1 0 01-1-1V9z"/></svg>
+          <button onclick="selectCategory('Авто')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-lime-500/50 transition">
+            <svg class="w-6 h-6 text-lime-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 17a2 2 0 100 4 2 2 0 000-4zm8 0a2 2 0 100 4 2 2 0 000-4zM3 9l2-4h10l2 4M3 9h18v7a1 1 0 01-1 1H4a1 1 0 01-1-1V9z"/></svg>
             <div class="text-[11px] text-gray-300 font-medium">Авто</div>
           </button>
-          <button onclick="selectCategory('Електроніка')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          <button onclick="selectCategory('Електроніка')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-lime-500/50 transition">
+            <svg class="w-6 h-6 text-lime-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
             <div class="text-[11px] text-gray-300 font-medium">Електроніка</div>
           </button>
-          <button onclick="selectCategory('Одяг')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+          <button onclick="selectCategory('Одяг')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-lime-500/50 transition">
+            <svg class="w-6 h-6 text-lime-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
             <div class="text-[11px] text-gray-300 font-medium">Одяг</div>
           </button>
-          <button onclick="selectCategory('Дім і сад')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+          <button onclick="selectCategory('Дім і сад')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-lime-500/50 transition">
+            <svg class="w-6 h-6 text-lime-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
             <div class="text-[11px] text-gray-300 font-medium">Дім і сад</div>
           </button>
-          <button onclick="selectCategory('Спорт')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <button onclick="selectCategory('Спорт')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-lime-500/50 transition">
+            <svg class="w-6 h-6 text-lime-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
             <div class="text-[11px] text-gray-300 font-medium">Спорт</div>
           </button>
-          <button onclick="selectCategory('Інше')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-emerald-500/50 transition">
-            <svg class="w-6 h-6 text-emerald-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+          <button onclick="selectCategory('Інше')" class="p-3 bg-gray-900/90 border border-gray-800 rounded-2xl flex flex-col items-center justify-center hover:border-lime-500/50 transition">
+            <svg class="w-6 h-6 text-lime-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
             <div class="text-[11px] text-gray-300 font-medium">Інше</div>
           </button>
         </div>
@@ -84,15 +135,15 @@
       <!-- Active Filters -->
       <div class="space-y-2.5">
         <div class="flex justify-between items-center">
-          <div class="text-xs font-semibold text-gray-300">Активні фільтри відстеження</div>
+          <div class="text-xs font-semibold text-gray-300">Твої пошуки</div>
           <span id="activeFiltersCounter" class="text-[11px] text-gray-400 font-medium">0 / 1 (Free)</span>
         </div>
 
         <div id="activeSearchesList" class="space-y-2"></div>
 
-        <button onclick="openAddFilterModal()" class="w-full py-3.5 bg-emerald-400 hover:bg-emerald-300 text-black font-bold rounded-2xl text-xs transition shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-1.5">
+        <button onclick="openAddFilterModal()" class="w-full py-3.5 bg-lime-400 hover:bg-lime-300 text-black font-bold rounded-2xl text-xs transition shadow-lg shadow-lime-950/40 flex items-center justify-center gap-1.5">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
-          Додати новий детальний фільтр
+          Створити новий пошук
         </button>
       </div>
     </div>
@@ -100,7 +151,7 @@
     <!-- ================= TAB 2: SEARCH ================= -->
     <div id="tab-search" class="tab-content hidden space-y-4">
       <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-        <h2 class="text-base font-bold text-white">Розширений пошук OLX</h2>
+        <h2 class="text-base font-bold text-white">Новий пошук</h2>
         <span class="text-xs text-gray-400">Live Parser</span>
       </div>
 
@@ -108,29 +159,29 @@
         <div>
           <label class="block text-[11px] text-gray-400 mb-1 font-medium">Пошуковий запит або посилання OLX</label>
           <input type="text" id="searchInput" placeholder="Наприклад: iPhone 11 або посилання" 
-                 class="w-full p-3 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
+                 class="w-full p-3 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-lime-400">
         </div>
 
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-[11px] text-gray-400 mb-1 font-medium">Мін. ціна (грн)</label>
-            <input type="number" id="minPrice" placeholder="0" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
+            <input type="number" id="minPrice" placeholder="0" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-lime-400">
           </div>
           <div>
             <label class="block text-[11px] text-gray-400 mb-1 font-medium">Макс. ціна (грн)</label>
-            <input type="number" id="maxPrice" placeholder="Без ліміту" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
+            <input type="number" id="maxPrice" placeholder="Без ліміту" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-lime-400">
           </div>
         </div>
 
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-[11px] text-gray-400 mb-1 font-medium">Місто / Регіон</label>
-            <input type="text" id="cityInput" list="ukraineLocations" placeholder="Уся Україна — оберіть місто або область" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
+            <input type="text" id="cityInput" list="ukraineLocations" placeholder="Уся Україна — оберіть місто або область" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-lime-400">
             <datalist id="ukraineLocations"></datalist>
           </div>
           <div>
             <label class="block text-[11px] text-gray-400 mb-1 font-medium">Стан товару</label>
-            <select id="conditionSelect" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-emerald-400">
+            <select id="conditionSelect" class="w-full p-2.5 rounded-xl bg-gray-800 border border-gray-700 text-xs text-white focus:outline-none focus:border-lime-400">
               <option value="all">Всі стани</option>
               <option value="used">Вживане (Б/У)</option>
               <option value="new">Нове</option>
@@ -139,8 +190,8 @@
         </div>
 
         <button onclick="runSearch()" id="searchBtn" 
-                class="w-full bg-emerald-400 hover:bg-emerald-300 text-black font-bold py-3.5 rounded-xl transition text-xs shadow-lg shadow-emerald-950 flex items-center justify-center gap-2">
-          <span>🔍</span> Знайти та проаналізувати
+                class="w-full bg-lime-400 hover:bg-lime-300 text-black font-bold py-3.5 rounded-xl transition text-xs shadow-lg shadow-lime-950 flex items-center justify-center gap-2">
+          <span>🔍</span> Знайти пропозиції
         </button>
       </div>
 
@@ -150,19 +201,19 @@
           <div class="text-xs text-gray-400">Аналітика ринку</div>
           <div class="flex justify-between items-end">
             <div>
-              <div class="text-2xl font-bold text-emerald-400" id="avgPrice">0 грн</div>
+              <div class="text-2xl font-bold text-lime-400" id="avgPrice">0 грн</div>
               <div class="text-[10px] text-gray-400">Середня ринкова ціна</div>
             </div>
             <span id="itemsCount" class="text-xs bg-blue-900/50 text-blue-300 px-2.5 py-1 rounded-full border border-blue-800">0 товарів</span>
           </div>
         </div>
 
-        <div class="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-gray-900 border border-emerald-800/80 flex items-center justify-between">
+        <div class="p-3.5 rounded-2xl bg-gradient-to-r from-lime-950/80 to-gray-900 border border-lime-800/80 flex items-center justify-between">
           <div>
-            <div class="text-xs font-bold text-emerald-300">Сподобався результат?</div>
+            <div class="text-xs font-bold text-lime-300">Сподобався результат?</div>
             <div class="text-[10px] text-gray-400">Отримуйте сповіщення у чат бота про нові позиції</div>
           </div>
-          <button onclick="convertCurrentSearchToFilter()" class="px-3.5 py-2 bg-emerald-400 hover:bg-emerald-300 text-black font-extrabold rounded-xl text-xs transition shadow-md">
+          <button onclick="convertCurrentSearchToFilter()" class="px-3.5 py-2 bg-lime-400 hover:bg-lime-300 text-black font-extrabold rounded-xl text-xs transition shadow-md">
             ➕ Відстежувати
           </button>
         </div>
@@ -174,7 +225,7 @@
     <!-- ================= TAB 3: FAVORITES ================= -->
     <div id="tab-favorites" class="tab-content hidden space-y-4">
       <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-        <h2 class="text-base font-bold text-white">Збережені оголошення</h2>
+        <h2 class="text-base font-bold text-white">Обране</h2>
         <span id="favCount" class="text-xs text-gray-400">0 товарів</span>
       </div>
 
@@ -185,7 +236,7 @@
     <div id="tab-profile" class="tab-content hidden space-y-4">
       <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 flex items-center justify-between shadow-lg">
         <div class="flex items-center gap-3">
-          <div class="w-12 h-12 bg-emerald-950 border border-emerald-800 rounded-2xl flex items-center justify-center text-lg font-bold text-emerald-400" id="avatarLetter">U</div>
+          <div class="w-12 h-12 bg-lime-950 border border-lime-800 rounded-2xl flex items-center justify-center text-lg font-bold text-lime-400" id="avatarLetter">U</div>
           <div>
             <div class="text-sm font-bold text-white" id="profileName">Користувач</div>
             <div class="text-[10px] text-gray-400 mt-0.5">ID: <span id="profileId">---</span></div>
@@ -197,8 +248,8 @@
       <!-- Stats Grid -->
       <div class="grid grid-cols-3 gap-2 text-center">
         <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
-          <div class="text-base font-bold text-emerald-400" id="statSaved">0</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">В Обраному</div>
+          <div class="text-base font-bold text-lime-400" id="statSaved">0</div>
+          <div class="text-[10px] text-gray-400 mt-0.5">В обраному</div>
         </div>
         <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
           <div class="text-base font-bold text-white" id="statActiveFilters">0 / 1</div>
@@ -228,27 +279,27 @@
       </div>
 
       <!-- PAYMENT SECTION -->
-      <div id="premiumSection" class="p-4 rounded-3xl bg-gradient-to-br from-emerald-950 via-gray-900 to-gray-900 border-2 border-emerald-500/80 space-y-3 shadow-xl">
+      <div id="premiumSection" class="p-4 rounded-3xl bg-gradient-to-br from-lime-950 via-gray-900 to-gray-900 border-2 border-lime-500/80 space-y-3 shadow-xl">
         <div class="flex justify-between items-start">
           <div>
-            <div class="text-sm font-bold text-emerald-300 flex items-center gap-1.5">
-              <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
-              OLX Checker PREMIUM
+            <div class="text-sm font-bold text-lime-300 flex items-center gap-1.5">
+              <svg class="w-4 h-4 text-lime-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+              ЗНАЙДЕНО PREMIUM
             </div>
             <div class="text-[11px] text-gray-300 mt-0.5">Миттєві сповіщення без затримок</div>
           </div>
           <span class="text-xs font-extrabold bg-amber-400 text-black px-2.5 py-1 rounded-xl">ТЕСТ · оплата вимкнена</span>
         </div>
 
-        <div class="space-y-2 pt-1 border-t border-emerald-800/60 text-xs text-gray-200">
-          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Перевірка товарів кожні 2 хвилини</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Безлімітні активні відстеження</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Пріоритетні бот-сповіщення</div>
+        <div class="space-y-2 pt-1 border-t border-lime-800/60 text-xs text-gray-200">
+          <div class="flex items-center gap-2"><span class="text-lime-400 font-bold">✓</span> Перевірка товарів кожні 2 хвилини</div>
+          <div class="flex items-center gap-2"><span class="text-lime-400 font-bold">✓</span> Безлімітні активні відстеження</div>
+          <div class="flex items-center gap-2"><span class="text-lime-400 font-bold">✓</span> Пріоритетні бот-сповіщення</div>
         </div>
 
         <div class="pt-2 space-y-2">
           <button type="button" disabled class="w-full py-3 bg-gray-700 text-gray-400 font-extrabold rounded-2xl text-xs cursor-not-allowed flex items-center justify-center gap-2">
-            <span>🧪</span> Оплата вимкнена на час тестування
+            <span></span> Оплата вимкнена на час тестування
           </button>
           <p class="text-[10px] text-gray-400 text-center">Реальні платежі не приймаються. Суму та спосіб оплати буде відкрито після окремого запуску.</p>
         </div>
@@ -257,15 +308,15 @@
       <!-- Referral Banner -->
       <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3">
         <div>
-          <div class="text-xs font-bold text-emerald-300">🎁 Реферальна програма</div>
+          <div class="text-xs font-bold text-lime-300">Реферальна програма</div>
           <div class="text-[10px] text-gray-400 mt-0.5">Запрошуйте друзів та отримуйте +1 день Premium за нового користувача</div>
         </div>
         <div class="flex gap-2">
-          <button onclick="shareReferralLink()" class="flex-1 py-2.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold rounded-xl text-xs transition">
+          <button onclick="shareReferralLink()" class="flex-1 py-2.5 bg-lime-500/20 text-lime-300 border border-lime-500/40 font-bold rounded-xl text-xs transition">
             Запросити друга
           </button>
           <button onclick="copyRefLink()" class="px-3 py-2.5 bg-gray-800 border border-gray-700 text-white rounded-xl text-xs">
-            📋
+            Копіювати
           </button>
         </div>
       </div>
@@ -275,8 +326,8 @@
     <!-- ================= TAB 5: ADMIN PANEL ================= -->
     <div id="tab-admin" class="tab-content hidden space-y-4">
       <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-        <h2 class="text-base font-bold text-emerald-400 flex items-center gap-2">
-          <span>🛠</span> Адміністрування
+        <h2 class="text-base font-bold text-lime-400 flex items-center gap-2">
+          <span></span> Адміністрування
         </h2>
         <span class="text-[10px] bg-red-950 text-red-400 px-2.5 py-1 rounded-full border border-red-800 font-bold">ADMIN MODE</span>
       </div>
@@ -284,7 +335,7 @@
       <!-- Admin Metrics -->
       <div class="grid grid-cols-3 gap-2 text-center">
         <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
-          <div class="text-base font-bold text-emerald-400" id="adminTotalUsers">--</div>
+          <div class="text-base font-bold text-lime-400" id="adminTotalUsers">--</div>
           <div class="text-[10px] text-gray-400 mt-0.5">Користувачів</div>
         </div>
         <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
@@ -302,8 +353,8 @@
         <div class="text-xs font-bold text-white">Управління користувачем</div>
         <div class="flex gap-2">
           <input type="number" id="adminSearchUserId" placeholder="Введіть Telegram ID..." 
-                 class="flex-1 p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-400">
-          <button onclick="adminFindUser()" class="px-3.5 py-2.5 bg-emerald-400 text-black font-bold rounded-xl text-xs">
+                 class="flex-1 p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-lime-400">
+          <button onclick="adminFindUser()" class="px-3.5 py-2.5 bg-lime-400 text-black font-bold rounded-xl text-xs">
             Знайти
           </button>
         </div>
@@ -314,10 +365,10 @@
             <span id="admResultTariff" class="text-[10px] bg-gray-800 px-2 py-0.5 rounded text-gray-300">free</span>
           </div>
           <div class="text-[10px] text-gray-400">ID: <span id="admResultId" class="text-gray-200">--</span></div>
-          <div class="text-[10px] text-gray-400">Premium до: <span id="admResultUntil" class="text-emerald-400">--</span></div>
+          <div class="text-[10px] text-gray-400">Premium до: <span id="admResultUntil" class="text-lime-400">--</span></div>
 
           <div class="grid grid-cols-2 gap-2 pt-2 border-t border-gray-800">
-            <button onclick="adminGrantPremium(30)" class="py-2 bg-emerald-950 border border-emerald-800 text-emerald-300 rounded-xl text-[10px] font-bold">
+            <button onclick="adminGrantPremium(30)" class="py-2 bg-lime-950 border border-lime-800 text-lime-300 rounded-xl text-[10px] font-bold">
               +30 Днів PRO
             </button>
             <button onclick="adminGrantPremium(7)" class="py-2 bg-blue-950 border border-blue-800 text-blue-300 rounded-xl text-[10px] font-bold">
@@ -330,14 +381,14 @@
       <!-- Broadcast Module -->
       <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3">
         <div class="text-xs font-bold text-white flex items-center justify-between">
-          <span>📢 Розсилка повідомлень</span>
+          <span>Розсилка повідомлень</span>
           <span class="text-[10px] text-gray-400">HTML підтримка</span>
         </div>
         <textarea id="broadcastText" rows="3" placeholder="Введіть текст розсилки (підтримуються HTML теги: <b>, <i>, <a>)..." 
-                  class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-400"></textarea>
+                  class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-lime-400"></textarea>
         <div class="flex justify-between items-center">
-          <button onclick="adminPreviewBroadcast()" class="text-xs text-gray-400 hover:text-white">Предпросмотр</button>
-          <button id="broadcastBtn" onclick="adminStartBroadcast()" class="px-4 py-2 bg-emerald-400 hover:bg-emerald-300 text-black font-bold rounded-xl text-xs">
+          <button onclick="adminPreviewBroadcast()" class="text-xs text-gray-400 hover:text-white">Попередній перегляд</button>
+          <button id="broadcastBtn" onclick="adminStartBroadcast()" class="px-4 py-2 bg-lime-400 hover:bg-lime-300 text-black font-bold rounded-xl text-xs">
             Запустити розсилку
           </button>
         </div>
@@ -348,16 +399,16 @@
       <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-2">
         <div class="text-xs font-bold text-white flex items-center justify-between">
           <span>Діагностика сервера</span>
-          <button onclick="adminRunDiagnostics()" class="text-[10px] text-emerald-400 hover:underline">Оновити</button>
+          <button onclick="adminRunDiagnostics()" class="text-[10px] text-lime-400 hover:underline">Оновити</button>
         </div>
         <div class="space-y-1.5 text-[11px] text-gray-300 pt-1">
           <div class="flex justify-between items-center">
             <span>База даних Supabase:</span>
-            <span id="diagSupabase" class="text-emerald-400 font-bold">Перевірка...</span>
+            <span id="diagSupabase" class="text-lime-400 font-bold">Перевірка...</span>
           </div>
           <div class="flex justify-between items-center">
             <span>Telegram Bot Webhook:</span>
-            <span id="diagBot" class="text-emerald-400 font-bold">Перевірка...</span>
+            <span id="diagBot" class="text-lime-400 font-bold">Перевірка...</span>
           </div>
         </div>
       </div>
@@ -402,7 +453,7 @@
           </div>
         </div>
 
-        <button id="saveFilterBtn" onclick="saveNewActiveFilter()" class="w-full py-3 bg-emerald-400 text-black font-bold rounded-xl text-xs mt-2">
+        <button id="saveFilterBtn" onclick="saveNewActiveFilter()" class="w-full py-3 bg-lime-400 text-black font-bold rounded-xl text-xs mt-2">
           Зберегти та запустити відстеження
         </button>
       </div>
@@ -417,12 +468,12 @@
 
         <div>
           <div id="modalAdTitle" class="text-xs font-bold text-white">...</div>
-          <div id="modalAdPrice" class="text-base font-extrabold text-emerald-400 mt-1">...</div>
+          <div id="modalAdPrice" class="text-base font-extrabold text-lime-400 mt-1">...</div>
           <div id="modalAdLocation" class="text-[10px] text-gray-400 mt-0.5">...</div>
         </div>
 
         <div class="p-3 bg-gray-950 rounded-xl border border-gray-800/80 text-[11px] text-gray-300">
-          <div class="font-semibold text-emerald-400 mb-1">Опис пропозиції:</div>
+          <div class="font-semibold text-lime-400 mb-1">Опис пропозиції:</div>
           <div id="modalAdDesc" class="text-gray-400 text-[10px] leading-relaxed">
             Оригінальний товар з перевіреною ціною. Перегляньте повний текст та зв'яжіться з продавцем на OLX.
           </div>
@@ -430,10 +481,10 @@
 
         <div class="flex gap-2 pt-1">
           <button id="modalFavBtn" class="flex-1 py-2.5 bg-gray-800 border border-gray-700 text-white rounded-xl text-xs font-semibold">
-            ❤️ В Обране
+            Додати в обране
           </button>
-          <a id="modalOlxLink" href="#" target="_blank" class="flex-1 text-center py-2.5 bg-emerald-400 text-black font-bold rounded-xl text-xs">
-            👉 Відкрити на OLX
+          <a id="modalOlxLink" href="#" target="_blank" class="flex-1 text-center py-2.5 bg-lime-400 text-black font-bold rounded-xl text-xs">
+            Відкрити оголошення
           </a>
         </div>
       </div>
@@ -441,14 +492,14 @@
 
     <!-- ================= LIMIT MODAL ================= -->
     <div id="limitModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4 z-50">
-      <div class="bg-gradient-to-br from-emerald-950 via-gray-900 to-gray-900 border-2 border-emerald-400/80 rounded-3xl p-5 w-full max-w-sm space-y-4 text-center shadow-2xl">
-        <div class="text-3xl">👑</div>
+      <div class="bg-gradient-to-br from-lime-950 via-gray-900 to-gray-900 border-2 border-lime-400/80 rounded-3xl p-5 w-full max-w-sm space-y-4 text-center shadow-2xl">
+        <div class="text-3xl"></div>
         <div>
-          <h3 class="text-sm font-bold text-emerald-300">Ліміт FREE тарифу (1 / 1)</h3>
+          <h3 class="text-sm font-bold text-lime-300">Ліміт FREE тарифу (1 / 1)</h3>
           <p class="text-[11px] text-gray-300 mt-1">Для створення безлімітних відстежень переходьте на PREMIUM!</p>
         </div>
-        <button onclick="goToPremiumTab()" class="w-full py-3 bg-emerald-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-emerald-950">
-          Перейти до Оплати (149 грн)
+        <button onclick="goToPremiumTab()" class="w-full py-3 bg-lime-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-lime-950">
+          Premium — скоро
         </button>
       </div>
     </div>
@@ -457,7 +508,7 @@
     <div id="legalModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4 z-50">
       <div class="bg-gray-900 border border-gray-800 rounded-3xl p-5 w-full max-w-sm space-y-3 relative max-h-[80vh] overflow-y-auto">
         <button onclick="closeLegalModal()" class="absolute right-3 top-3 bg-gray-800 text-gray-400 w-7 h-7 rounded-full flex items-center justify-center text-xs">✕</button>
-        <h3 id="legalTitle" class="text-sm font-bold text-emerald-400">Документ</h3>
+        <h3 id="legalTitle" class="text-sm font-bold text-lime-400">Документ</h3>
         <div id="legalContent" class="text-xs text-gray-300 space-y-2 leading-relaxed"></div>
       </div>
     </div>
@@ -465,16 +516,16 @@
     <!-- Dedicated documents tab: legal links no longer overlap every screen. -->
     <div id="tab-documents" class="tab-content hidden space-y-4">
       <div class="border-b border-gray-800 pb-3">
-        <h2 class="text-base font-bold text-emerald-400">Документи</h2>
-        <p class="text-[11px] text-gray-400 mt-1">Юридична інформація та правила користування OLX Checker.</p>
+        <h2 class="text-base font-bold text-lime-400">Документи</h2>
+        <p class="text-[11px] text-gray-400 mt-1">Юридична інформація та правила користування ЗНАЙДЕНО.</p>
       </div>
-      <button type="button" onclick="openLegalDoc('terms')" class="w-full text-left p-4 rounded-2xl bg-gray-900 border border-gray-800 text-sm font-semibold">Публічна оферта <span class="float-right text-emerald-400">›</span></button>
-      <button type="button" onclick="openLegalDoc('privacy')" class="w-full text-left p-4 rounded-2xl bg-gray-900 border border-gray-800 text-sm font-semibold">Політика конфіденційності <span class="float-right text-emerald-400">›</span></button>
+      <button type="button" onclick="openLegalDoc('terms')" class="w-full text-left p-4 rounded-2xl bg-gray-900 border border-gray-800 text-sm font-semibold">Публічна оферта <span class="float-right text-lime-400">›</span></button>
+      <button type="button" onclick="openLegalDoc('privacy')" class="w-full text-left p-4 rounded-2xl bg-gray-900 border border-gray-800 text-sm font-semibold">Політика конфіденційності <span class="float-right text-lime-400">›</span></button>
     </div>
 
     <!-- ================= BOTTOM NAVIGATION ================= -->
     <div class="fixed bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur border-t border-gray-800 p-2.5 flex justify-around items-center max-w-md mx-auto z-40">
-      <button onclick="switchTab('home')" id="nav-home" class="nav-btn flex flex-col items-center text-emerald-400">
+      <button onclick="switchTab('home')" id="nav-home" class="nav-btn flex flex-col items-center text-lime-400">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 011 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
         <span class="text-[10px] mt-1 font-medium">Головна</span>
       </button>
@@ -608,7 +659,7 @@
     }
 
     function payViaTelegramStars() {
-      alert('Оплата вимкнена на час тестування OLX Checker. Реальні платежі не приймаються.');
+      alert('Оплата вимкнена на час тестування ЗНАЙДЕНО. Реальні платежі не приймаються.');
       return;
     }
 
@@ -762,7 +813,7 @@
       imgContainer.innerHTML = `<img src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-full h-full object-cover">`;
 
       const favBtn = document.getElementById('modalFavBtn');
-      favBtn.innerText = isFav ? '❤️ В Обраному' : '🤍 Додати в Обране';
+      favBtn.innerText = isFav ? '❤️ В Обраному' : 'Додати в обране';
       favBtn.onclick = () => {
         toggleFavorite(item.link);
         closeAdModal();
@@ -940,12 +991,12 @@
             <img src="${item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-16 h-16 object-cover rounded-xl bg-gray-800 flex-shrink-0">
             <div class="flex-1 min-w-0">
               <div class="text-xs font-semibold text-white truncate">${item.title}</div>
-              <div class="text-sm font-bold text-emerald-400 mt-0.5">${item.priceText}</div>
+              <div class="text-sm font-bold text-lime-400 mt-0.5">${item.priceText}</div>
               <div class="text-[10px] text-gray-400 mt-1 truncate">${item.locationDate || ''}</div>
             </div>
           </div>
           <div class="flex gap-2 pt-1 border-t border-gray-800/60">
-            <a href="${item.link}" target="_blank" class="flex-1 text-center py-1.5 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded-xl text-[11px] font-medium">Відкрити на OLX</a>
+            <a href="${item.link}" target="_blank" class="flex-1 text-center py-1.5 bg-lime-950 text-lime-300 border border-lime-800 rounded-xl text-[11px] font-medium">Відкрити на OLX</a>
             <button onclick="toggleFavorite('${item.link}')" class="px-3 py-1.5 bg-red-950/60 text-red-400 border border-red-800/60 rounded-xl text-[11px]">Видалити</button>
           </div>
         </div>
@@ -955,13 +1006,13 @@
     function switchTab(tabName) {
       document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
       document.querySelectorAll('.nav-btn').forEach(el => {
-        el.classList.remove('text-emerald-400');
+        el.classList.remove('text-lime-400');
         el.classList.add('text-gray-500');
       });
 
       document.getElementById('tab-' + tabName).classList.remove('hidden');
       document.getElementById('nav-' + tabName).classList.remove('text-gray-500');
-      document.getElementById('nav-' + tabName).classList.add('text-emerald-400');
+      document.getElementById('nav-' + tabName).classList.add('text-lime-400');
 
       if (tabName === 'favorites') {
         renderFavorites();
@@ -993,7 +1044,7 @@
         return;
       }
       const refLink = 'https://t.me/OLXhelpler_bot?start=ref_' + userId;
-      const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(refLink) + '&text=' + encodeURIComponent('Використовуй OLX Checker для вигідного пошуку!');
+      const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(refLink) + '&text=' + encodeURIComponent('Використовуй ЗНАЙДЕНО для вигідного пошуку!');
       if (tg && tg.openTelegramLink) tg.openTelegramLink(shareUrl);
       else window.open(shareUrl, '_blank');
     }
@@ -1019,18 +1070,18 @@
         const imgSrc = item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`;
 
         return `
-          <div class="p-3 rounded-2xl bg-gray-900 border ${isCheap ? 'border-emerald-500/80 bg-emerald-950/10' : 'border-gray-800'} space-y-2">
+          <div class="p-3 rounded-2xl bg-gray-900 border ${isCheap ? 'border-lime-500/80 bg-lime-950/10' : 'border-gray-800'} space-y-2">
             <div onclick="openAdModal('${item.id}')" class="flex gap-3 cursor-pointer">
               <img src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-20 h-20 object-cover rounded-xl bg-gray-800 flex-shrink-0">
               <div class="flex-1 min-w-0">
                 <div class="text-xs font-semibold text-white truncate">${item.title}</div>
-                <div class="text-base font-bold ${isCheap ? 'text-emerald-400' : 'text-white'} mt-1">${item.priceText}</div>
+                <div class="text-base font-bold ${isCheap ? 'text-lime-400' : 'text-white'} mt-1">${item.priceText}</div>
                 <div class="text-[10px] text-gray-400 mt-1 truncate">${item.locationDate || ''}</div>
               </div>
             </div>
             
             <div class="flex items-center justify-between pt-2 border-t border-gray-800/80">
-              ${isCheap ? `<span class="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded-lg border border-emerald-800 font-medium">🔥 Нижче ринку на ${discount}%</span>` : '<span></span>'}
+              ${isCheap ? `<span class="text-[10px] bg-lime-950 text-lime-300 px-2 py-0.5 rounded-lg border border-lime-800 font-medium">🔥 Нижче ринку на ${discount}%</span>` : '<span></span>'}
               <button onclick="toggleFavorite('${item.link}')" class="text-xs px-2.5 py-1 rounded-xl bg-gray-800 border ${isFav ? 'border-red-500 text-red-400' : 'border-gray-700 text-gray-300'} font-medium">
                 ${isFav ? '❤️ В Обраному' : '🤍 Додати в Обране'}
               </button>
@@ -1107,16 +1158,16 @@
     function openLegalDoc(type) {
       const docs = {
         terms: {
-          title: "Публічна оферта та Умови використання OLX Checker",
+          title: "Публічна оферта та Умови використання ЗНАЙДЕНО",
           content: [
-            "ПУБЛІЧНА ОФЕРТА OLX CHECKER",
+            "ПУБЛІЧНА ОФЕРТА ЗНАЙДЕНО",
             "Версія: 1.0. Статус: тестова редакція для закритого тестування без приймання реальних оплат. Перед комерційним запуском потрібна юридична та податкова перевірка.",
             "",
             "1. Дані постачальника",
             "Заявлене ім’я власника проєкту: Іван Леоненко. Контакт для підтримки: Telegram @esqide. Адреса для офіційних звернень не надана. Ім’я та Telegram-контакт самі по собі не підтверджують юридичний статус постачальника або його реєстраційні дані.",
             "",
             "2. Предмет послуги",
-            "OLX Checker — незалежний сервіс пошуку та моніторингу оголошень, який може надсилати сповіщення про знайдені оголошення та надавати додаткові функції за тарифом. Сервіс не належить OLX і не має заявленого партнерства з OLX. Результати залежать від доступності та змін сторонніх платформ; повнота, актуальність і безперервність результатів не гарантуються.",
+            "ЗНАЙДЕНО — незалежний сервіс пошуку та моніторингу оголошень, який може надсилати сповіщення про знайдені оголошення та надавати додаткові функції за тарифом. Сервіс не належить OLX і не має заявленого партнерства з OLX. Результати залежать від доступності та змін сторонніх платформ; повнота, актуальність і безперервність результатів не гарантуються.",
             "",
             "3. Реєстрація та правила використання",
             "Користувач взаємодіє із сервісом через Telegram. Користувач відповідає за збереження доступу до свого акаунта, законність запитів і дотримання правил Telegram та сторонніх платформ. Заборонено використовувати сервіс для спаму, шахрайства, незаконного збору даних, втручання в роботу сервісу або обходу технічних обмежень.",
@@ -1139,7 +1190,7 @@
         privacy: {
           title: "Політика конфіденційності",
           content: [
-            "ПОЛІТИКА КОНФІДЕНЦІЙНОСТІ OLX CHECKER",
+            "ПОЛІТИКА КОНФІДЕНЦІЙНОСТІ ЗНАЙДЕНО",
             "Версія: 1.0. Статус: тестова редакція для закритого тестування. Опис даних і постачальників потрібно звірити з фактичною конфігурацією перед публічним запуском.",
             "",
             "1. Хто відповідає за дані",
