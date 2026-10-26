@@ -1238,11 +1238,34 @@ async function runBackgroundWorker() {
           continue;
         }
         const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
+        const { data: priceRows, error: priceRowsError } = await supabase
+          .from('ad_price_history').select('ad_link,last_price').eq('filter_id', String(filter.id));
+        if (priceRowsError) {
+          console.error(`Не вдалося прочитати історію цін для фільтра ${filter.id}:`, priceRowsError.message);
+          continue;
+        }
+        const previousPrices = new Map((priceRows || []).map(row => [
+          String(row.ad_link || '').trim().replace(/\/$/, ''),
+          Number(row.last_price)
+        ]));
         for (const item of items) {
           const canonicalLink = String(item.link || '').trim().replace(/\/$/, '');
-          if (!canonicalLink || knownLinks.has(canonicalLink)) continue;
+          if (!canonicalLink) continue;
+          const previousPrice = previousPrices.get(canonicalLink);
+          const isPreviouslySeen = knownLinks.has(canonicalLink);
+          const hasPriceDrop = isPreviouslySeen && Number.isFinite(previousPrice) && previousPrice > Number(item.price) && Number(item.price) > 0;
+          if (isPreviouslySeen && !hasPriceDrop) {
+            if (!previousPrices.has(canonicalLink) && Number(item.price) > 0) {
+              const { error: baselineError } = await supabase.from('ad_price_history').upsert({
+                filter_id: String(filter.id), ad_link: canonicalLink, last_price: Number(item.price), updated_at: new Date().toISOString()
+              }, { onConflict: 'filter_id,ad_link' });
+              if (!baselineError) previousPrices.set(canonicalLink, Number(item.price));
+              else console.error('[Price History] Не вдалося зберегти початкову ціну:', baselineError.message);
+            }
+            continue;
+          }
 
-          const comparablePrices = parsedItems
+          const comparablePrices
             .filter(other => String(other.link || '').trim().replace(/\/$/, '') !== canonicalLink)
             .map(other => Number(other.price))
             .filter(price => Number.isFinite(price) && price > 0);
@@ -1256,7 +1279,9 @@ async function runBackgroundWorker() {
           const discount = isCheap ? (bargain.discountPercent ?? 0) : 0;
 
           const notificationText = 
-            `🔎 <b>Знайдено нове оголошення для фільтра “${filter.query}”</b>\n\n` +
+            (hasPriceDrop
+              ? `📉 <b>Ціна знизилася для оголошення у фільтрі “${filter.query}”</b>\n\n<b>Було:</b> ${previousPrice.toLocaleString('uk-UA')} грн → <b>Стало:</b> ${Number(item.price).toLocaleString('uk-UA')} грн\n\n`
+              : `🔎 <b>Знайдено нове оголошення для фільтра “${filter.query}”</b>\n\n`) +
             `📌 <b>${item.title}</b>\n` +
             `💰 <b>Ціна:</b> ${item.priceText} ${isCheap ? `🔥 (Нижче ринку на ${discount}%)` : ''}\n` +
             `📍 <b>Місто:</b> ${item.locationDate}\n\n` +
@@ -1287,6 +1312,16 @@ async function runBackgroundWorker() {
               }
             } else {
               knownLinks.add(canonicalLink);
+              if (Number(item.price) > 0) {
+                const { error: historyError } = await supabase.from('ad_price_history').upsert({
+                  filter_id: String(filter.id),
+                  ad_link: canonicalLink,
+                  last_price: Number(item.price),
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'filter_id,ad_link' });
+                if (historyError) console.error('[Price History] Не вдалося оновити ціну:', historyError.message);
+                else previousPrices.set(canonicalLink, Number(item.price));
+              }
             }
           } else {
             console.warn(`[Notifications] Не доставлено оголошення для фільтра ${filter.id}; буде повторна спроба під час наступного сканування.`);
