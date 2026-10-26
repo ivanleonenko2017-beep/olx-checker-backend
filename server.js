@@ -5,6 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const { normalizeCriteria, applyCriteriaToListing, parseNaturalLanguageQuery, estimateBargainPrice } = require('./smart-search');
 
 const app = express();
 app.use(cors());
@@ -697,6 +698,7 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
     }
     const userId = req.telegramUser.id;
     const { query, minPrice, maxPrice, city, condition } = req.body;
+    const criteria = normalizeCriteria({ ...(req.body.criteria || {}), condition, city, minPrice, maxPrice });
 
     if (!query || typeof query !== 'string') {
       return res.status(400).json({ success: false, error: 'Введіть коректний пошуковий запит' });
@@ -741,7 +743,8 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
         min_price: parseInt(minPrice, 10) || 0,
         max_price: parseInt(maxPrice, 10) || 0,
         city: city ? city.trim() : 'Всі міста',
-        condition: condition || 'all'
+        condition: condition || 'all',
+        criteria
       }]).select();
 
       if (error) throw error;
@@ -770,6 +773,16 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/parse-query', userAuthMiddleware, async (req, res) => {
+  try {
+    const text = typeof req.body?.query === 'string' ? req.body.query.slice(0, 500) : '';
+    if (!text.trim()) return res.status(400).json({ success: false, error: 'Введіть пошуковий запит' });
+    return res.json({ success: true, ...parseNaturalLanguageQuery(text) });
+  } catch (err) {
+    return res.status(400).json({ success: false, error: 'Не вдалося розібрати запит' });
   }
 });
 
@@ -1193,10 +1206,19 @@ async function runBackgroundWorker() {
         }
 
         const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
+        const criteria = normalizeCriteria({
+          ...(filter.criteria || {}),
+          minPrice: filter.min_price,
+          maxPrice: filter.max_price,
+          city: filter.city,
+          condition: filter.condition
+        });
         const requestedLocation = String(filter.city || '').trim();
         // Only notify about listings OLX explicitly labels as published today.
         const todaysItems = parsedItems.filter(item => isPublishedToday(item.locationDate));
-        const items = todaysItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+        const items = todaysItems
+          .filter(item => locationMatches(item.locationDate, requestedLocation))
+          .filter(item => applyCriteriaToListing(item, criteria).matches);
         if (requestedLocation && !['всі міста', 'вся україна', 'уся україна'].includes(requestedLocation.toLocaleLowerCase('uk-UA')) && parsedItems.length > 0 && items.length === 0) {
           console.log(`[Location Filter] Для фільтра ${filter.id} не знайдено карток із локацією "${requestedLocation}" серед ${parsedItems.length} результатів OLX.`);
         }
@@ -1220,8 +1242,18 @@ async function runBackgroundWorker() {
           const canonicalLink = String(item.link || '').trim().replace(/\/$/, '');
           if (!canonicalLink || knownLinks.has(canonicalLink)) continue;
 
-          const isCheap = averagePrice > 0 && item.price < averagePrice * 0.85;
-          const discount = isCheap ? Math.round((1 - item.price / averagePrice) * 100) : 0;
+          const comparablePrices = parsedItems
+            .filter(other => String(other.link || '').trim().replace(/\/$/, '') !== canonicalLink)
+            .map(other => Number(other.price))
+            .filter(price => Number.isFinite(price) && price > 0);
+          const bargain = criteria.bargainHunter
+            ? estimateBargainPrice(item.price, comparablePrices, {
+                minComparableListings: criteria.minComparableListings,
+                discountPercent: criteria.maxDiscountPercent
+              })
+            : { isBargain: averagePrice > 0 && item.price < averagePrice * 0.85, discountPercent: averagePrice > 0 ? Math.round((1 - item.price / averagePrice) * 100) : 0, referencePrice: averagePrice, comparableCount: comparablePrices.length, reliable: averagePrice > 0 };
+          const isCheap = bargain.isBargain;
+          const discount = isCheap ? (bargain.discountPercent ?? 0) : 0;
 
           const notificationText = 
             `🔎 <b>Знайдено нове оголошення для фільтра “${filter.query}”</b>\n\n` +
