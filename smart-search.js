@@ -26,7 +26,6 @@ function normalizeTermList(value) {
 
 function expandDefectExclusions(terms) {
   const output = [...normalizeTermList(terms)];
-  const lower = output.join(' ').toLocaleLowerCase('uk-UA');
   const groups = [
     {
       pattern: /поломан|слом|зламан|несправ|неисправ|не работает|не працює|не включ|не вмикається/i,
@@ -46,7 +45,9 @@ function expandDefectExclusions(terms) {
     }
   ];
   for (const group of groups) {
-    if (group.pattern.test(lower)) output.push(...group.terms);
+    if (output.some(term => group.pattern.test(term.toLocaleLowerCase('uk-UA')))) {
+      output.push(...group.terms);
+    }
   }
   return normalizeTermList(output);
 }
