@@ -24,6 +24,7 @@ if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 
 const SUPABASE_URL = rawUrl;
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
 
@@ -33,9 +34,16 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
   .filter(Boolean);
 
 let supabase = null;
+let supabaseAdmin = null;
 if (SUPABASE_URL && SUPABASE_KEY) {
   supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
   console.log(`✅ Supabase підключено: ${SUPABASE_URL}`);
+}
+if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+  supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
+  console.log('✅ Supabase server-side admin client налаштовано');
 }
 
 const HEADERS = {
@@ -1062,12 +1070,13 @@ app.post('/telegram-webhook', async (req, res) => {
     }
     // Accept one referral attribution per Telegram account; never count self-referrals.
     const referralMatch = /^ref_(\d{1,20})$/.exec(startPayload);
-    if (referralMatch && supabase) {
+    if (referralMatch && (supabaseAdmin || supabase)) {
       const inviterId = Number(referralMatch[1]);
       const inviteeId = Number(chatId);
       if (Number.isSafeInteger(inviterId) && inviterId > 0 &&
           Number.isSafeInteger(inviteeId) && inviteeId > 0 && inviterId !== inviteeId) {
-        const { data: newReferral, error: referralError } = await supabase.from('referrals').upsert({
+        const referralDb = supabaseAdmin || supabase;
+        const { data: newReferral, error: referralError } = await referralDb.from('referrals').upsert({
           inviter_telegram_id: inviterId,
           invitee_telegram_id: inviteeId
         }, { onConflict: 'invitee_telegram_id', ignoreDuplicates: true }).select('id');
