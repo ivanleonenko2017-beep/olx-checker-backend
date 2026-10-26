@@ -1265,7 +1265,7 @@ async function runBackgroundWorker() {
             continue;
           }
 
-          const comparablePrices
+          const comparablePrices = parsedItems
             .filter(other => String(other.link || '').trim().replace(/\/$/, '') !== canonicalLink)
             .map(other => Number(other.price))
             .filter(price => Number.isFinite(price) && price > 0);
