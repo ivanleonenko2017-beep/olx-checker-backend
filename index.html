@@ -202,7 +202,7 @@
           <div class="flex justify-between items-end">
             <div>
               <div class="text-2xl font-bold text-emerald-400" id="avgPrice">0 грн</div>
-              <div class="text-[10px] text-gray-400">Середня ринкова ціна</div>
+              <div class="text-[10px] text-gray-400">Медіанна ринкова ціна · від 5 оголошень</div>
             </div>
             <span id="itemsCount" class="text-xs bg-blue-900/50 text-blue-300 px-2.5 py-1 rounded-full border border-blue-800">0 товарів</span>
           </div>
@@ -879,6 +879,10 @@
       const input = document.getElementById('modalQuery');
       const query = input.value.trim();
       if (!query) { alert('Спочатку введіть пошуковий запит'); return; }
+      if (/^https?:\/\//i.test(query)) {
+        alert('Для посилання OLX розбір не потрібен. Збережіть посилання як пошуковий фільтр.');
+        return;
+      }
       if (!initDataRaw) {
         alert('Автоматичний розбір доступний після відкриття Mini App у Telegram');
         return;
@@ -1248,7 +1252,7 @@
         window.lastAvgPrice = data.averagePrice;
         currentSearchResults = data.items;
 
-        document.getElementById('avgPrice').innerText = data.averagePrice.toLocaleString('uk-UA') + ' грн';
+        document.getElementById('avgPrice').innerText = data.averagePrice > 0 ? data.averagePrice.toLocaleString('uk-UA') + ' грн' : 'Недостатньо даних';
         document.getElementById('itemsCount').innerText = 'Аналіз ' + data.count + ' товарів';
         analyticsDiv.classList.remove('hidden');
 
