@@ -532,6 +532,8 @@
         const data = await res.json();
         if (data.success) {
           window.hasActivePremium = data.hasActivePremium === true || data.isAdmin === true;
+          window.hasActiveTrial = data.hasActiveTrial === true || data.isAdmin === true;
+          window.trialEndsAt = data.trialEndsAt || null;
           if (data.isAdmin) {
             isAdminUser = true;
             document.getElementById('nav-admin').classList.remove('hidden');
@@ -546,10 +548,14 @@
               premiumInfo = `PRO (залишилось ${daysLeft} дн.)`;
             }
             document.getElementById('profileTariffBadge').innerText = premiumInfo;
+          } else if (window.hasActiveTrial) {
+            const remaining = Math.max(0, Math.ceil((Date.parse(window.trialEndsAt) - Date.now()) / (1000 * 60 * 60 * 24)));
+            document.getElementById('userTariffBadge').innerText = 'TRIAL PRO';
+            document.getElementById('profileTariffBadge').innerText = `Пробний PRO · ${remaining} дн.`;
           } else {
-            document.getElementById('userTariffBadge').innerText = 'FREE ТАРИФ';
+            document.getElementById('userTariffBadge').innerText = 'TRIAL ЗАВЕРШЕНО';
             document.getElementById('profileTariffBadge').innerText =
-              data.user && data.user.tariff === 'premium' ? 'Free Тариф (закінчився)' : 'Free Тариф';
+              data.user && data.user.tariff === 'premium' ? 'Premium закінчився' : 'Пробний період завершився';
           }
           if (data.stats) {
             document.getElementById('statRefUsers').innerText = data.stats.totalReferrals || 0;
@@ -637,7 +643,12 @@
 
       if (!query) return;
 
-      if (userFilters.length >= 1 && !isAdminUser && window.hasActivePremium !== true) {
+      if (window.hasActiveTrial !== true && window.hasActivePremium !== true && !isAdminUser) {
+        goToPremiumTab();
+        alert('Пробний період завершився. Оформлення підписки буде доступне після запуску оплати.');
+        return;
+      }
+      if (userFilters.length >= 1 && !isAdminUser && window.hasActivePremium !== true && window.hasActiveTrial !== true) {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -653,7 +664,12 @@
     }
 
     function openAddFilterModal() {
-      if (userFilters.length >= 1 && !isAdminUser && window.hasActivePremium !== true && document.getElementById('addFilterModal').classList.contains('hidden')) {
+      if (window.hasActiveTrial !== true && window.hasActivePremium !== true && !isAdminUser) {
+        goToPremiumTab();
+        alert('Пробний період завершився. Оформлення підписки буде доступне після запуску оплати.');
+        return;
+      }
+      if (userFilters.length >= 1 && !isAdminUser && window.hasActivePremium !== true && window.hasActiveTrial !== true && document.getElementById('addFilterModal').classList.contains('hidden')) {
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -757,7 +773,11 @@
           const data = await res.json();
           
           if (!data.success) {
-            if (data.error === 'LIMIT_EXCEEDED') {
+            if (data.error === 'TRIAL_EXPIRED') {
+              closeAddFilterModal();
+              goToPremiumTab();
+              alert('Пробний період завершився. Оформлення підписки буде доступне після запуску оплати.');
+            } else if (data.error === 'LIMIT_EXCEEDED') {
               closeAddFilterModal();
               document.getElementById('limitModal').classList.remove('hidden');
               document.getElementById('limitModal').classList.add('flex');
@@ -807,7 +827,7 @@
 
     function renderActiveFilters() {
       const container = document.getElementById('activeSearchesList');
-      const hasPremiumAccess = isAdminUser || window.hasActivePremium === true;
+      const hasPremiumAccess = isAdminUser || window.hasActivePremium === true || window.hasActiveTrial === true;
       const countText = hasPremiumAccess
         ? `${userFilters.length} / Безліміт`
         : `${userFilters.length} / 1 (Free)`;
