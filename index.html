@@ -210,6 +210,23 @@
         </div>
       </div>
 
+      <!-- Trial urgency banner -->
+      <div id="trialUrgencyBanner" class="hidden p-4 rounded-2xl bg-gradient-to-r from-amber-950/90 to-gray-900 border border-amber-400/70 shadow-lg space-y-2">
+        <div class="flex items-start gap-3">
+          <div class="w-9 h-9 rounded-xl bg-amber-400/15 border border-amber-400/40 flex items-center justify-center text-amber-300 flex-shrink-0">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M10.3 3.86L1.82 18.5A2 2 0 003.55 21h16.9a2 2 0 001.73-2.5L13.7 3.86a2 2 0 00-3.4 0z"/></svg>
+          </div>
+          <div class="min-w-0">
+            <div id="trialUrgencyTitle" class="text-sm font-extrabold text-amber-200">Пробний Premium скоро завершиться</div>
+            <div id="trialUrgencyText" class="text-xs text-gray-200 mt-1 leading-relaxed">Скористайтеся пробним доступом, поки він активний.</div>
+          </div>
+        </div>
+        <div class="rounded-xl bg-black/30 p-3">
+          <div class="text-xs font-bold text-white">Не втрачайте переваги Premium</div>
+          <div class="text-[11px] text-gray-300 mt-1">Після завершення пробного періоду доступ до пошуку та активного моніторингу буде обмежено. Підписка стане доступною після запуску платежів.</div>
+        </div>
+      </div>
+
       <!-- PAYMENT SECTION -->
       <div id="premiumSection" class="p-4 rounded-3xl bg-gradient-to-br from-emerald-950 via-gray-900 to-gray-900 border-2 border-emerald-500/80 space-y-3 shadow-xl">
         <div class="flex justify-between items-start">
@@ -534,6 +551,28 @@
           window.hasActivePremium = data.hasActivePremium === true || data.isAdmin === true;
           window.hasActiveTrial = data.hasActiveTrial === true || data.isAdmin === true;
           window.trialEndsAt = data.trialEndsAt || null;
+          const trialBanner = document.getElementById('trialUrgencyBanner');
+          if (trialBanner) {
+            if (window.hasActiveTrial && !window.hasActivePremium && window.trialEndsAt) {
+              const remainingMs = Date.parse(window.trialEndsAt) - Date.now();
+              const remainingDays = Math.max(0, Math.ceil(remainingMs / (1000 * 60 * 60 * 24)));
+              trialBanner.classList.remove('hidden');
+              if (remainingDays <= 1) {
+                document.getElementById('trialUrgencyTitle').innerText = 'Пробний Premium завершується сьогодні';
+                document.getElementById('trialUrgencyText').innerText = 'Це останній день повного доступу. Після завершення пробного періоду пошук і моніторинг будуть обмежені.';
+                trialBanner.classList.remove('border-amber-400/70', 'from-amber-950/90');
+                trialBanner.classList.add('border-red-500/80', 'from-red-950/90');
+              } else if (remainingDays <= 2) {
+                document.getElementById('trialUrgencyTitle').innerText = 'Залишилося менше двох днів пробного Premium';
+                document.getElementById('trialUrgencyText').innerText = 'Завершіть налаштування фільтрів зараз, щоб встигнути скористатися всіма можливостями.';
+              } else {
+                document.getElementById('trialUrgencyTitle').innerText = 'Ваш пробний Premium має обмежений термін';
+                document.getElementById('trialUrgencyText').innerText = 'Безлімітні фільтри та швидкий моніторинг доступні ще ' + remainingDays + ' дн.';
+              }
+            } else {
+              trialBanner.classList.add('hidden');
+            }
+          }
           if (data.isAdmin) {
             isAdminUser = true;
             document.getElementById('nav-admin').classList.remove('hidden');
