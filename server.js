@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const { normalizeCriteria, applyCriteriaToListing, parseNaturalLanguageQuery, estimateBargainPrice } = require('./smart-search');
+const { normalizeCriteria, applyCriteriaToListing, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
 
 const app = express();
 app.use(cors());
@@ -423,15 +423,10 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     }
   });
 
-  const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
-  let averagePrice = 0;
-
-  if (prices.length > 0) {
-    const medianPrice = prices[Math.floor(prices.length / 2)];
-    const filteredPrices = prices.filter(p => p >= medianPrice * 0.5 && p <= medianPrice * 2.0);
-    const sum = filteredPrices.reduce((a, b) => a + b, 0);
-    averagePrice = filteredPrices.length > 0 ? Math.round(sum / filteredPrices.length) : medianPrice;
-  }
+  const prices = rawItems.map(i => i.price).filter(price => Number.isFinite(price) && price > 0);
+  // Keep the legacy API field name for compatibility, but use a robust median.
+  // No market-price estimate is returned with fewer than five listings.
+  const averagePrice = prices.length >= 5 ? median(prices) : 0;
 
   if (!rawItems.length && /olx/i.test(targetUrl) && !/search|listing|og:/.test(pageText)) {
     const error = new Error('Не вдалося розпізнати сторінку OLX. Сайт міг змінити розмітку або тимчасово обмежити доступ.');
