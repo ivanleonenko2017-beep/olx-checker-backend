@@ -453,6 +453,43 @@
           </div>
         </div>
 
+        <div class="border-t border-gray-800 pt-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-[11px] font-bold text-white">Точні умови</div>
+              <div class="text-[10px] text-gray-500">Додаткові правила пошуку</div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Обов’язкові слова (через кому)</label>
+            <input type="text" id="modalIncludeTerms" placeholder="RTX 3060, 16 GB" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+          </div>
+          <div>
+            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Не показувати слова</label>
+            <input type="text" id="modalExcludeTerms" placeholder="зламаний, на запчастини" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+          </div>
+          <label class="flex items-center gap-2 text-[11px] text-gray-300">
+            <input type="checkbox" id="modalPhotosOnly" class="accent-emerald-400">
+            Лише оголошення з фото
+          </label>
+          <label class="flex items-center gap-2 text-[11px] text-gray-300">
+            <input type="checkbox" id="modalBargainHunter" class="accent-emerald-400">
+            <span>Шукати вигідні пропозиції нижче ринку</span>
+          </label>
+          <div id="bargainOptions" class="hidden grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] text-gray-400 mb-1">Знижка від ринку, %</label>
+              <input type="number" id="modalDiscountPercent" min="5" max="90" value="15" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+            </div>
+            <div>
+              <label class="block text-[10px] text-gray-400 mb-1">Мін. аналогів</label>
+              <input type="number" id="modalComparableListings" min="3" max="30" value="5" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+            </div>
+          </div>
+          <button type="button" onclick="parseSmartQuery()" class="w-full py-2 border border-emerald-400/40 text-emerald-300 rounded-xl text-[11px] font-semibold">Розібрати запит автоматично</button>
+          <p class="text-[9px] text-gray-500">Наприклад: «ігровий ноутбук до 20 000 грн, не показувати зламаний».</p>
+        </div>
+
         <button id="saveFilterBtn" onclick="saveNewActiveFilter()" class="w-full py-3 bg-emerald-400 text-black font-bold rounded-xl text-xs mt-2">
           Зберегти та запустити відстеження
         </button>
@@ -834,12 +871,54 @@
       document.getElementById('premiumSection').scrollIntoView({ behavior: 'smooth' });
     }
 
+    document.getElementById('modalBargainHunter')?.addEventListener('change', (event) => {
+      document.getElementById('bargainOptions').classList.toggle('hidden', !event.target.checked);
+    });
+
+    async function parseSmartQuery() {
+      const input = document.getElementById('modalQuery');
+      const query = input.value.trim();
+      if (!query) { alert('Спочатку введіть пошуковий запит'); return; }
+      if (!initDataRaw) {
+        alert('Автоматичний розбір доступний після відкриття Mini App у Telegram');
+        return;
+      }
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/parse-query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': initDataRaw },
+          body: JSON.stringify({ query })
+        });
+        const data = await response.json();
+        if (!data.success) { alert(data.error || 'Не вдалося розібрати запит'); return; }
+        const criteria = data.criteria || {};
+        input.value = data.query || query;
+        if (criteria.maxPrice) document.getElementById('modalMaxPrice').value = criteria.maxPrice;
+        if (criteria.minPrice) document.getElementById('modalMinPrice').value = criteria.minPrice;
+        if (criteria.condition) document.getElementById('modalCondition').value = criteria.condition;
+        if (criteria.photosOnly) document.getElementById('modalPhotosOnly').checked = true;
+        if (criteria.excludeTerms?.length) document.getElementById('modalExcludeTerms').value = criteria.excludeTerms.join(', ');
+        alert('Запит розібрано. Перевірте умови та збережіть фільтр.');
+      } catch (error) {
+        alert('Не вдалося зв’язатися із сервером');
+      }
+    }
+
     async function saveNewActiveFilter() {
       const query = document.getElementById('modalQuery').value.trim();
       const minPrice = document.getElementById('modalMinPrice').value.trim();
       const maxPrice = document.getElementById('modalMaxPrice').value.trim();
       const city = document.getElementById('modalCity').value.trim() || 'Всі міста';
       const condition = document.getElementById('modalCondition').value;
+      const criteria = {
+        includeTerms: document.getElementById('modalIncludeTerms').value,
+        excludeTerms: document.getElementById('modalExcludeTerms').value,
+        photosOnly: document.getElementById('modalPhotosOnly').checked,
+        bargainHunter: document.getElementById('modalBargainHunter').checked,
+        maxDiscountPercent: Number(document.getElementById('modalDiscountPercent').value) || 15,
+        minComparableListings: Number(document.getElementById('modalComparableListings').value) || 5,
+        condition, city, minPrice: Number(minPrice) || 0, maxPrice: Number(maxPrice) || 0
+      };
 
       if (!query) {
         alert('Введіть назву товару');
@@ -858,7 +937,7 @@
               'Content-Type': 'application/json',
               'x-telegram-init-data': initDataRaw
             },
-            body: JSON.stringify({ query, minPrice, maxPrice, city, condition })
+            body: JSON.stringify({ query, minPrice, maxPrice, city, condition, criteria })
           });
           const data = await res.json();
           
@@ -898,7 +977,7 @@
           id: 'local_' + Date.now(), query,
           min_price: Number(minPrice) || 0, max_price: Number(maxPrice) || 0,
           minPrice: Number(minPrice) || 0, maxPrice: Number(maxPrice) || 0,
-          city, condition
+          city, condition, criteria
         });
         localStorage.setItem('olx_active_filters', JSON.stringify(localFilters));
       }
@@ -911,6 +990,11 @@
       document.getElementById('modalMinPrice').value = '';
       document.getElementById('modalMaxPrice').value = '';
       document.getElementById('modalCity').value = '';
+      document.getElementById('modalIncludeTerms').value = '';
+      document.getElementById('modalExcludeTerms').value = '';
+      document.getElementById('modalPhotosOnly').checked = false;
+      document.getElementById('modalBargainHunter').checked = false;
+      document.getElementById('bargainOptions').classList.add('hidden');
 
       await loadActiveFilters();
     }
