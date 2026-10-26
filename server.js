@@ -1306,18 +1306,20 @@ async function runBackgroundWorker() {
               if (insertError && !/duplicate key|unique constraint/i.test(insertError.message || '')) {
                 console.error(`Не вдалося зберегти доставлене оголошення для фільтра ${filter.id}:`, insertError.message);
               }
-            } else {
-              knownLinks.add(canonicalLink);
-              if (Number(item.price) > 0) {
-                const { error: historyError } = await supabase.from('ad_price_history').upsert({
-                  filter_id: String(filter.id),
-                  ad_link: canonicalLink,
-                  last_price: Number(item.price),
-                  updated_at: new Date().toISOString()
-                }, { onConflict: 'filter_id,ad_link' });
-                if (historyError) console.error('[Price History] Не вдалося оновити ціну:', historyError.message);
-                else previousPrices.set(canonicalLink, Number(item.price));
-              }
+            }
+            // A price-drop alert is for an already-seen ad, so inserting seen_ads
+            // normally hits the unique key. Update the price snapshot after every
+            // confirmed delivery, not only after a new seen_ads row was inserted.
+            knownLinks.add(canonicalLink);
+            if (Number(item.price) > 0) {
+              const { error: historyError } = await supabase.from('ad_price_history').upsert({
+                filter_id: String(filter.id),
+                ad_link: canonicalLink,
+                last_price: Number(item.price),
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'filter_id,ad_link' });
+              if (historyError) console.error('[Price History] Не вдалося оновити ціну:', historyError.message);
+              else previousPrices.set(canonicalLink, Number(item.price));
             }
           } else {
             console.warn(`[Notifications] Не доставлено оголошення для фільтра ${filter.id}; буде повторна спроба під час наступного сканування.`);
