@@ -516,10 +516,11 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const requestedLocation = String(city || '').trim();
     let items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
+    const conditionText = item => String(item.title || '') + ' ' + String(item.description || '');
     if (requestedCondition === 'new') {
-      items = items.filter(item => /\b(нове|новый|новая|новое|нові|новые|новая річ|новий товар)\b/i.test(`${item.title} ${item.description || ''}`));
+      items = items.filter(item => /(?:^|[^\p{L}])(?:нове|новий|нова|нові|новый|новая|новое|новые|new)(?=$|[^\p{L}])/iu.test(conditionText(item)));
     } else if (requestedCondition === 'used') {
-      items = items.filter(item => /\b(б\/у|бу|вживан|уживан|після використання|used)\b/i.test(`${item.title} ${item.description || ''}`));
+      items = items.filter(item => /б\/у|(?:^|[^\p{L}])бу(?=$|[^\p{L}])|вживан|уживан|після використання|used/iu.test(conditionText(item)));
     }
     console.log(`[API search] Completed: parsed=${parsedItems.length}, returned=${items.length}, durationMs=${Date.now() - startedAt}`);
     res.json({ success: true, count: items.length, averagePrice, items });
@@ -693,7 +694,12 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
     }
     const userId = req.telegramUser.id;
     const { query, minPrice, maxPrice, city, condition } = req.body;
-    const criteria = normalizeCriteria({ ...(req.body.criteria || {}), condition, city, minPrice, maxPrice });
+    const criteriaInput = { ...(req.body.criteria && typeof req.body.criteria === 'object' ? req.body.criteria : {}) };
+    if (condition !== undefined && condition !== null && condition !== '') criteriaInput.condition = condition;
+    if (city !== undefined && city !== null && city !== '') criteriaInput.city = city;
+    if (minPrice !== undefined && minPrice !== null && minPrice !== '') criteriaInput.minPrice = minPrice;
+    if (maxPrice !== undefined && maxPrice !== null && maxPrice !== '') criteriaInput.maxPrice = maxPrice;
+    const criteria = normalizeCriteria(criteriaInput);
 
     if (!query || typeof query !== 'string') {
       return res.status(400).json({ success: false, error: 'Введіть коректний пошуковий запит' });
