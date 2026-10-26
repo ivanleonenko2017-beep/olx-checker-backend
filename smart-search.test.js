@@ -77,7 +77,7 @@ test('parses common natural-language budget and exclusions', () => {
   const parsed = parseNaturalLanguageQuery('Ігровий ноутбук до 20 000 грн, не показувати зламаний');
   assert.equal(parsed.criteria.maxPrice, 20000);
   assert.ok(parsed.criteria.excludeTerms.includes('зламаний'));
-  assert.ok(parsed.criteria.excludeTerms.includes('неисправный'));
+  assert.equal(parsed.criteria.excludeTerms.length, 1);
   assert.match(parsed.query, /Ігровий ноутбук/i);
 });
 
@@ -91,7 +91,7 @@ test('parses Ukrainian condition and photo phrases and exclusions without commas
   const excluded = parseNaturalLanguageQuery('Ігровий ноутбук до 20 000 грн не показувати зламаний');
   assert.equal(excluded.criteria.maxPrice, 20000);
   assert.ok(excluded.criteria.excludeTerms.includes('зламаний'));
-  assert.ok(excluded.criteria.excludeTerms.includes('неисправный'));
+  assert.equal(excluded.criteria.excludeTerms.length, 1);
   assert.equal(excluded.query, 'Ігровий ноутбук');
 });
 
@@ -118,16 +118,15 @@ test('parses multiple Ukrainian and Russian defect exclusions', () => {
   assert.ok(parsed.criteria.excludeTerms.includes('поломанные'));
   assert.ok(parsed.criteria.excludeTerms.includes('заблокированные'));
   assert.ok(parsed.criteria.excludeTerms.includes('неисправной батареей'));
-  assert.ok(parsed.criteria.excludeTerms.includes('activation lock'));
-  assert.ok(parsed.criteria.excludeTerms.includes('battery faulty'));
+  assert.equal(parsed.criteria.excludeTerms.length, 3);
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 11, activation lock, battery faulty', price: 7000 }, parsed.criteria).matches, false);
   assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
 });
 
 test('parses common broken-glass and activation-lock exclusions', () => {
   const parsed = parseNaturalLanguageQuery('iPhone 11 за 7000 не показывать разбитое стекло, заблокирован, iCloud');
   assert.ok(parsed.criteria.excludeTerms.includes('разбитое стекло'));
-  assert.ok(parsed.criteria.excludeTerms.includes('битый экран'));
-  assert.ok(parsed.criteria.excludeTerms.includes('activation lock'));
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 11, битый экран', price: 7000 }, parsed.criteria).matches, false);
   assert.ok(parsed.criteria.excludeTerms.includes('iCloud'));
 });
 
