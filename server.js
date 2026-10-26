@@ -1251,12 +1251,14 @@ async function runBackgroundWorker() {
           const isPreviouslySeen = knownLinks.has(canonicalLink);
           const hasPriceDrop = isPreviouslySeen && Number.isFinite(previousPrice) && previousPrice > Number(item.price) && Number(item.price) > 0;
           if (isPreviouslySeen && !hasPriceDrop) {
-            if (!previousPrices.has(canonicalLink) && Number(item.price) > 0) {
+            // Keep the latest observed price as the baseline even after increases;
+            // otherwise a later drop could be compared with a stale historical value.
+            if (Number(item.price) > 0 && previousPrice !== Number(item.price)) {
               const { error: baselineError } = await supabase.from('ad_price_history').upsert({
                 filter_id: String(filter.id), ad_link: canonicalLink, last_price: Number(item.price), updated_at: new Date().toISOString()
               }, { onConflict: 'filter_id,ad_link' });
               if (!baselineError) previousPrices.set(canonicalLink, Number(item.price));
-              else console.error('[Price History] Не вдалося зберегти початкову ціну:', baselineError.message);
+              else console.error('[Price History] Не вдалося оновити базову ціну:', baselineError.message);
             }
             continue;
           }
