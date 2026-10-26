@@ -1,4 +1,4 @@
-const MAX_TERMS = 20;
+const MAX_TERMS = 50;
 const MAX_TERM_LENGTH = 80;
 
 function normalizeTermList(value) {
