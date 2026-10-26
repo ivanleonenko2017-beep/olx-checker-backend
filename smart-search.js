@@ -73,7 +73,7 @@ function normalizeCriteria(input = {}) {
 
   return {
     includeTerms: normalizeTermList(source.includeTerms ?? source.include_terms),
-    excludeTerms: expandDefectExclusions(source.excludeTerms ?? source.exclude_terms),
+    excludeTerms: normalizeTermList(source.excludeTerms ?? source.exclude_terms),
     condition: ['all', 'new', 'used'].includes(String(source.condition || 'all').toLowerCase())
       ? String(source.condition || 'all').toLowerCase()
       : 'all',
@@ -103,7 +103,7 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   if (criteria.includeTerms.length && !matchesTerms(lowerText, criteria.includeTerms, 'all')) {
     return { matches: false, reason: 'missing_required_term', criteria };
   }
-  if (criteria.excludeTerms.some(term => lowerText.includes(term.toLocaleLowerCase('uk-UA')))) {
+  if (expandDefectExclusions(criteria.excludeTerms).some(term => lowerText.includes(term.toLocaleLowerCase('uk-UA')))) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
   if (criteria.minPrice && (!price || price < criteria.minPrice)) {
