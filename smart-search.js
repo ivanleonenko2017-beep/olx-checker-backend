@@ -49,6 +49,13 @@ function expandDefectExclusions(terms) {
       output.push(...group.terms);
     }
   }
+  const hasBatteryDefect = output.some(term =>
+    /батар|акумулятор|battery/i.test(term) &&
+    /несправ|неисправ|не держ|не трима|слабк|умира|faulty|bad/i.test(term)
+  );
+  if (hasBatteryDefect) {
+    output.push('несправна батарея', 'неисправная батарея', 'батарея не держит заряд', 'акумулятор не тримає заряд', 'не тримає заряд', 'не держит заряд', 'battery faulty', 'battery health issue');
+  }
   return normalizeTermList(output);
 }
 
