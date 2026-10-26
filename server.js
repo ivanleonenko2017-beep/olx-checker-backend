@@ -1240,9 +1240,10 @@ async function runBackgroundWorker() {
         const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
         const { data: priceRows, error: priceRowsError } = await supabase
           .from('ad_price_history').select('ad_link,last_price').eq('filter_id', String(filter.id));
+        // Price history is an optional feature until its Supabase migration is applied.
+        // Never disable new-listing notifications just because that table is not ready.
         if (priceRowsError) {
-          console.error(`Не вдалося прочитати історію цін для фільтра ${filter.id}:`, priceRowsError.message);
-          continue;
+          console.warn(`[Price History] Історія цін недоступна для фільтра ${filter.id}; звичайні сповіщення продовжуються:`, priceRowsError.message);
         }
         const previousPrices = new Map((priceRows || []).map(row => [
           String(row.ad_link || '').trim().replace(/\/$/, ''),
