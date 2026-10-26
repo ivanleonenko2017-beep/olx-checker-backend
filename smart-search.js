@@ -105,7 +105,7 @@ function parseNaturalLanguageQuery(input) {
 
   const parseAmount = (raw, inheritedThousands = false) => {
     const normalized = String(raw || '').trim().replace(/\s/g, '').replace(',', '.');
-    const match = normalized.match(/^(\d+(?:\.\d+)?)(к|k|тис\.?|тисяч(?:а|і|у)?|тыс\.?|тысяч(?:а|и)?|грн|₴)?$/i);
+    const match = normalized.match(/^(\d+(?:\.\d+)?)(к|k|тисяч(?:а|і|у)?|тысяч(?:а|и)?|тис\.?|тыс\.?|грн|₴)?$/i);
     if (!match) return null;
     let amount = Number(match[1]);
     const unit = String(match[2] || '').toLocaleLowerCase('uk-UA').replace(/\.$/, '');
