@@ -45,6 +45,24 @@
     #tab-home button.bg-lime-400, #tab-search button.bg-lime-400 { box-shadow:0 8px 24px rgba(202,255,82,.09)!important; font-size:13px!important; }
     .shadow-xl,.shadow-lg { box-shadow:0 16px 38px rgba(0,0,0,.2)!important; }
     ::placeholder { color:#778178!important; opacity:1; }
+
+    /* ZNAIDENO component polish */
+    .fixed.bottom-0 { background:rgba(15,19,16,.94)!important; border-top-color:rgba(202,255,82,.12)!important; box-shadow:0 -12px 34px rgba(0,0,0,.28); backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); }
+    .nav-btn { min-width:52px; min-height:48px; border-radius:14px; padding:5px 8px; gap:1px; justify-content:center; transition:color .16s ease,background .16s ease; }
+    .nav-btn.text-lime-400 { background:rgba(202,255,82,.09); color:var(--zd-lime)!important; }
+    .nav-btn svg { width:20px;height:20px; }
+    .tab-content h2 { letter-spacing:-.035em; }
+    #tab-profile .grid > div { background:linear-gradient(145deg,rgba(23,29,25,.95),rgba(18,22,20,.92))!important; }
+    #premiumSection { border-width:1px!important; border-color:rgba(202,255,82,.3)!important; }
+    #premiumSection > .flex:first-child { align-items:center; }
+    #premiumSection button[disabled] { opacity:.78; }
+    #activeSearchesList > div, #favoritesList > div, #results > div { border-color:rgba(255,255,255,.08)!important; }
+    #addFilterModal > div, #adPreviewModal > div, #legalModal > div, #limitModal > div { box-shadow:0 24px 80px rgba(0,0,0,.45); }
+    #addFilterModal input, #addFilterModal select, #tab-search input, #tab-search select { min-height:42px; }
+    #tab-documents button { transition:border-color .16s ease,background .16s ease; }
+    #tab-documents button:hover { border-color:rgba(202,255,82,.35)!important; background:#171d19!important; }
+    @media (max-width:380px) { body { padding-left:12px!important;padding-right:12px!important; } .nav-btn { min-width:46px;padding-left:5px;padding-right:5px; } }
+
     @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; animation:none!important; scroll-behavior:auto!important; } }
   </style>
 </head>
@@ -207,7 +225,7 @@
     <!-- ================= TAB 3: FAVORITES ================= -->
     <div id="tab-favorites" class="tab-content hidden space-y-4">
       <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-        <h2 class="text-base font-bold text-white">Збережені оголошення</h2>
+        <h2 class="text-base font-bold text-white">Обране</h2>
         <span id="favCount" class="text-xs text-gray-400">0 товарів</span>
       </div>
 
@@ -231,7 +249,7 @@
       <div class="grid grid-cols-3 gap-2 text-center">
         <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
           <div class="text-base font-bold text-lime-400" id="statSaved">0</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">В Обраному</div>
+          <div class="text-[10px] text-gray-400 mt-0.5">В обраному</div>
         </div>
         <div class="p-3 bg-gray-900 rounded-2xl border border-gray-800">
           <div class="text-base font-bold text-white" id="statActiveFilters">0 / 1</div>
@@ -281,7 +299,7 @@
 
         <div class="pt-2 space-y-2">
           <button type="button" disabled class="w-full py-3 bg-gray-700 text-gray-400 font-extrabold rounded-2xl text-xs cursor-not-allowed flex items-center justify-center gap-2">
-            <span>🧪</span> Оплата вимкнена на час тестування
+            <span></span> Оплата вимкнена на час тестування
           </button>
           <p class="text-[10px] text-gray-400 text-center">Реальні платежі не приймаються. Суму та спосіб оплати буде відкрито після окремого запуску.</p>
         </div>
@@ -290,7 +308,7 @@
       <!-- Referral Banner -->
       <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3">
         <div>
-          <div class="text-xs font-bold text-lime-300">🎁 Реферальна програма</div>
+          <div class="text-xs font-bold text-lime-300">Реферальна програма</div>
           <div class="text-[10px] text-gray-400 mt-0.5">Запрошуйте друзів та отримуйте +1 день Premium за нового користувача</div>
         </div>
         <div class="flex gap-2">
@@ -298,7 +316,7 @@
             Запросити друга
           </button>
           <button onclick="copyRefLink()" class="px-3 py-2.5 bg-gray-800 border border-gray-700 text-white rounded-xl text-xs">
-            📋
+            Копіювати
           </button>
         </div>
       </div>
@@ -309,7 +327,7 @@
     <div id="tab-admin" class="tab-content hidden space-y-4">
       <div class="flex items-center justify-between border-b border-gray-800 pb-3">
         <h2 class="text-base font-bold text-lime-400 flex items-center gap-2">
-          <span>🛠</span> Адміністрування
+          <span></span> Адміністрування
         </h2>
         <span class="text-[10px] bg-red-950 text-red-400 px-2.5 py-1 rounded-full border border-red-800 font-bold">ADMIN MODE</span>
       </div>
@@ -363,13 +381,13 @@
       <!-- Broadcast Module -->
       <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3">
         <div class="text-xs font-bold text-white flex items-center justify-between">
-          <span>📢 Розсилка повідомлень</span>
+          <span>Розсилка повідомлень</span>
           <span class="text-[10px] text-gray-400">HTML підтримка</span>
         </div>
         <textarea id="broadcastText" rows="3" placeholder="Введіть текст розсилки (підтримуються HTML теги: <b>, <i>, <a>)..." 
                   class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-lime-400"></textarea>
         <div class="flex justify-between items-center">
-          <button onclick="adminPreviewBroadcast()" class="text-xs text-gray-400 hover:text-white">Предпросмотр</button>
+          <button onclick="adminPreviewBroadcast()" class="text-xs text-gray-400 hover:text-white">Попередній перегляд</button>
           <button id="broadcastBtn" onclick="adminStartBroadcast()" class="px-4 py-2 bg-lime-400 hover:bg-lime-300 text-black font-bold rounded-xl text-xs">
             Запустити розсилку
           </button>
@@ -463,10 +481,10 @@
 
         <div class="flex gap-2 pt-1">
           <button id="modalFavBtn" class="flex-1 py-2.5 bg-gray-800 border border-gray-700 text-white rounded-xl text-xs font-semibold">
-            ❤️ В Обране
+            Додати в обране
           </button>
           <a id="modalOlxLink" href="#" target="_blank" class="flex-1 text-center py-2.5 bg-lime-400 text-black font-bold rounded-xl text-xs">
-            👉 Відкрити на OLX
+            Відкрити оголошення
           </a>
         </div>
       </div>
@@ -475,13 +493,13 @@
     <!-- ================= LIMIT MODAL ================= -->
     <div id="limitModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4 z-50">
       <div class="bg-gradient-to-br from-lime-950 via-gray-900 to-gray-900 border-2 border-lime-400/80 rounded-3xl p-5 w-full max-w-sm space-y-4 text-center shadow-2xl">
-        <div class="text-3xl">👑</div>
+        <div class="text-3xl"></div>
         <div>
           <h3 class="text-sm font-bold text-lime-300">Ліміт FREE тарифу (1 / 1)</h3>
           <p class="text-[11px] text-gray-300 mt-1">Для створення безлімітних відстежень переходьте на PREMIUM!</p>
         </div>
         <button onclick="goToPremiumTab()" class="w-full py-3 bg-lime-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-lime-950">
-          Перейти до Оплати (149 грн)
+          Premium — скоро
         </button>
       </div>
     </div>
@@ -795,7 +813,7 @@
       imgContainer.innerHTML = `<img src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-full h-full object-cover">`;
 
       const favBtn = document.getElementById('modalFavBtn');
-      favBtn.innerText = isFav ? '❤️ В Обраному' : '🤍 Додати в Обране';
+      favBtn.innerText = isFav ? '❤️ В Обраному' : 'Додати в обране';
       favBtn.onclick = () => {
         toggleFavorite(item.link);
         closeAdModal();
