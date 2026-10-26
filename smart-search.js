@@ -103,27 +103,57 @@ function parseNaturalLanguageQuery(input) {
   let remaining = original;
   const criteria = {};
 
-  const pricePatterns = [
-    { regex: /(?:до|не дорожче|максимум|бюджет(?:ом)? до)\s*(\d[\d\s.,]*)\s*(?:грн|₴|гривень)?/i, key: 'maxPrice' },
-    { regex: /(?:від|мінімум)\s*(\d[\d\s.,]*)\s*(?:грн|₴|гривень)?/i, key: 'minPrice' }
-  ];
-  for (const pattern of pricePatterns) {
-    const match = remaining.match(pattern.regex);
-    if (match) {
-      const number = Number(match[1].replace(/[\s.,]/g, ''));
-      if (Number.isSafeInteger(number) && number >= 0) criteria[pattern.key] = number;
-      remaining = remaining.replace(match[0], ' ').trim();
+  const parseAmount = (raw, inheritedThousands = false) => {
+    const normalized = String(raw || '').trim().replace(/\s/g, '').replace(',', '.');
+    const match = normalized.match(/^(\d+(?:\.\d+)?)(к|k|тис\.?|тисяч(?:а|і|у)?|тыс\.?|тысяч(?:а|и)?|грн|₴)?$/i);
+    if (!match) return null;
+    let amount = Number(match[1]);
+    const unit = String(match[2] || '').toLocaleLowerCase('uk-UA').replace(/\.$/, '');
+    if (/^(к|k|тис|тисяч|тыс|тысяч)$/.test(unit) || (inheritedThousands && amount > 0 && amount < 1000 && !unit)) amount *= 1000;
+    return Number.isSafeInteger(Math.round(amount)) ? Math.round(amount) : null;
+  };
+  const amountPattern = '(\\d[\\d\\s.,]*(?:\\s*(?:к|k|тис\\.?|тисяч(?:а|і|у)?|тыс\\.?|тысяч(?:а|и)?|грн|₴))?)';
+  const rangeRegex = new RegExp('(?:від|от|з)\\s*' + amountPattern + '\\s*(?:до|по|[-–—])\\s*' + amountPattern, 'i');
+  const rangeMatch = remaining.match(rangeRegex);
+  if (rangeMatch) {
+    const hasThousands = /(?:к|тис|тисяч|тыс|тысяч)/i.test(rangeMatch[1] + rangeMatch[2]);
+    const minPrice = parseAmount(rangeMatch[1], hasThousands);
+    const maxPrice = parseAmount(rangeMatch[2], hasThousands);
+    if (minPrice !== null && maxPrice !== null) {
+      criteria.minPrice = Math.min(minPrice, maxPrice);
+      criteria.maxPrice = Math.max(minPrice, maxPrice);
+      remaining = remaining.replace(rangeMatch[0], ' ').trim();
     }
   }
 
-  const exclusionMatch = remaining.match(/(?:^|[\s,;])(?:не показувати|без|виключити)\s+([^,;]+)/i);
+  if (criteria.minPrice === undefined && criteria.maxPrice === undefined) {
+    const pricePatterns = [
+      { regex: new RegExp('(?:до|не дорожче|максимум|бюджет(?:ом)? до)\\s*' + amountPattern, 'i'), key: 'maxPrice' },
+      { regex: new RegExp('(?:від|от|мінімум)\\s*' + amountPattern, 'i'), key: 'minPrice' }
+    ];
+    for (const pattern of pricePatterns) {
+      const match = remaining.match(pattern.regex);
+      if (match) {
+        const amount = parseAmount(match[1]);
+        if (amount !== null) criteria[pattern.key] = amount;
+        remaining = remaining.replace(match[0], ' ').trim();
+      }
+    }
+  }
+
+  const exclusionMatch = remaining.match(/(?:^|[\s,;])(?:не показувати|не пропонувати|не пропоновать|не предлагать|не показывать|без|виключити|исключить)\s+([^.!?;]+)/i);
   if (exclusionMatch) {
-    criteria.excludeTerms = normalizeTermList(exclusionMatch[1].split(/\s+та\s+|\s+і\s+|\s+або\s+/i));
+    let exclusionText = exclusionMatch[1].trim();
+    exclusionText = exclusionText.replace(/\s+(?=(?:поломан\w*|слом\w*|зламан\w*|неисправ\w*|несправ\w*|заблок\w*|розбит\w*|разбит\w*|тріснут\w*|треснут\w*|трещин\w*|скол\w*|icloud|айклауд|на запчаст\w*|не працю\w*|не работа\w*|не включ\w*))/giu, ', ');
+    criteria.excludeTerms = normalizeTermList(exclusionText
+      .split(/[,;]|\s+(?:та|і|й|або|и|или|and|or)\s+/iu)
+      .map(term => term.trim().replace(/^(?:з|із|с|со)\s+/iu, ''))
+      .filter(Boolean));
     remaining = remaining.replace(exclusionMatch[0], ' ').trim();
   }
 
-  const newConditionMatch = remaining.match(/(?:^|[\s,;])(новий|нова|нове|нові|новый|новая|новое|новые)(?=$|[\s,;])/i);
-  const usedConditionMatch = remaining.match(/(?:^|[\s,;])(б\/у|бу|вживаний|вживана|вживане|вживані|уживаний|уживана|used)(?=$|[\s,;])/i);
+  const newConditionMatch = remaining.match(/(?:^|[\s,;])(новий|нова|нове|нові|новый|новая|новое|новые|new)(?=$|[\s,;])/i);
+  const usedConditionMatch = remaining.match(/(?:^|[\s,;])(б\/у|б\.у\.|бу|вживаний|вживана|вживане|вживані|уживаний|уживана|used|бушний)(?=$|[\s,;])/i);
   if (newConditionMatch) {
     criteria.condition = 'new';
     remaining = remaining.replace(newConditionMatch[0], ' ').trim();
@@ -132,13 +162,20 @@ function parseNaturalLanguageQuery(input) {
     remaining = remaining.replace(usedConditionMatch[0], ' ').trim();
   }
 
-  const photoMatch = remaining.match(/(?:^|[\s,;])(тільки з фото|лише з фото|з фото|с фото)(?=$|[\s,;])/i);
+  const photoMatch = remaining.match(/(?:^|[\s,;])(тільки з фото|лише з фото|з фото|с фото|with photos|photos only)(?=$|[\s,;])/i);
   if (photoMatch) {
     criteria.photosOnly = true;
     remaining = remaining.replace(photoMatch[0], ' ').trim();
   }
 
-  criteria.query = remaining.replace(/[;,]+/g, ' ').replace(/\s+/g, ' ').trim() || original;
+  remaining = remaining
+    .replace(/^(?:я\s+)?(?:хочу|хотів|хотіла|нужно)\s+(?:купити|купить|придбати|найти|знайти)\s+/iu, '')
+    .replace(/^(?:шукаю|ищу|знайди|підбери|подбери)\s+/iu, '')
+    .replace(/[;,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  criteria.query = remaining || original;
   return { original, criteria: normalizeCriteria(criteria), query: criteria.query };
 }
 
