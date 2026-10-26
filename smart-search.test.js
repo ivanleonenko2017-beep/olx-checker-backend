@@ -82,6 +82,28 @@ test('parses Ukrainian condition and photo phrases and exclusions without commas
   assert.equal(excluded.query, 'Ігровий ноутбук');
 });
 
+test('parses natural-language price ranges in thousands and used condition', () => {
+  const parsed = parseNaturalLanguageQuery('Хочу купить айфон 11 от 5 до 9 тысяч б/у');
+  assert.equal(parsed.criteria.minPrice, 5000);
+  assert.equal(parsed.criteria.maxPrice, 9000);
+  assert.equal(parsed.criteria.condition, 'used');
+  assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
+});
+
+test('parses multiple Ukrainian and Russian defect exclusions', () => {
+  const parsed = parseNaturalLanguageQuery('Хочу купить айфон 11 от 5 до 9 тысяч б/у не предлагать поломанные, заблокированные и с неисправной батареей');
+  assert.equal(parsed.criteria.minPrice, 5000);
+  assert.equal(parsed.criteria.maxPrice, 9000);
+  assert.equal(parsed.criteria.condition, 'used');
+  assert.deepEqual(parsed.criteria.excludeTerms, ['поломанные', 'заблокированные', 'неисправную батарею']);
+  assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
+});
+
+test('parses common broken-glass and activation-lock exclusions', () => {
+  const parsed = parseNaturalLanguageQuery('iPhone 11 за 7000 не показывать разбитое стекло, заблокирован, iCloud');
+  assert.deepEqual(parsed.criteria.excludeTerms, ['разбитое стекло', 'заблокирован', 'icloud']);
+});
+
 test('calculates median robustly', () => {
   assert.equal(median([100, 500, 200, 300, 10000]), 300);
   assert.equal(median([100, 200, 300, 400]), 250);
