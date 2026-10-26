@@ -10,9 +10,9 @@
   <meta name="theme-color" content="#0b0d0c">
   <meta name="description" content="ЗНАЙДЕНО — розумний моніторинг оголошень і вигідних знахідок.">
   <style>
-    :root { color-scheme: dark; background: #0b0d0c; --zd-bg:#0b0d0c; --zd-panel:#121614; --zd-panel-2:#171d19; --zd-line:rgba(168,201,87,.13); --zd-lime:#a8c957; --zd-muted:#9ca69d; }
+    :root { color-scheme: dark; background: #0b0d0c; --zd-bg:#0b0d0c; --zd-panel:#121614; --zd-panel-2:#171d19; --zd-line:rgba(163,230,53,.13); --zd-lime:#a3e635; --zd-muted:#9ca69d; }
     html, body { min-height:100%; background:var(--zd-bg)!important; }
-    body { background:radial-gradient(ellipse at 50% -10%, rgba(168,201,87,.08), transparent 42%),var(--zd-bg)!important; color:#f5f7f3!important; font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding-bottom:100px; letter-spacing:-.01em; }
+    body { background:radial-gradient(ellipse at 50% -10%, rgba(163,230,53,.08), transparent 42%),var(--zd-bg)!important; color:#f5f7f3!important; font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding-bottom:100px; letter-spacing:-.01em; }
     #app { background:transparent; min-height:100vh; max-width:460px; }
     input,select,textarea { color-scheme:dark; }
     button { -webkit-tap-highlight-color:transparent; }
@@ -25,42 +25,42 @@
     .text-white { color:#f5f7f3!important; }
     .text-lime-400,.text-lime-300 { color:var(--zd-lime)!important; }
     .bg-lime-400 { background-color:var(--zd-lime)!important; }
-    [class~="hover:bg-lime-300"]:hover { background-color:#c1df83!important; }
+    [class~="hover:bg-lime-300"]:hover { background-color:#bef264!important; }
     .border-lime-500\/40,.border-lime-800,.border-lime-500\/50 { border-color:var(--zd-line)!important; }
     .bg-lime-950,.bg-lime-950\/70 { background-color:#182016!important; }
     .rounded-3xl { border-radius:26px!important; }
     .rounded-2xl { border-radius:18px!important; }
     input,select,textarea { border-radius:14px!important; border-color:rgba(255,255,255,.1)!important; }
-    input:focus,select:focus,textarea:focus { border-color:var(--zd-lime)!important; box-shadow:0 0 0 3px rgba(168,201,87,.08); }
+    input:focus,select:focus,textarea:focus { border-color:var(--zd-lime)!important; box-shadow:0 0 0 3px rgba(163,230,53,.08); }
     button { transition:transform .16s ease,background-color .16s ease,border-color .16s ease,opacity .16s ease; }
     button:active { transform:scale(.985); }
     #tab-home > .border-b { padding-top:6px; padding-bottom:16px; }
     #tab-home h1 { font-size:21px!important; letter-spacing:-.055em; color:var(--zd-lime)!important; }
     #tab-home h1 svg { background:var(--zd-lime); color:#10140b!important; border-radius:9px; width:29px;height:29px;padding:5px; }
-    #tab-home .bg-gradient-to-br { background:linear-gradient(135deg,rgba(168,201,87,.13),rgba(18,22,20,.98) 56%)!important; border:1px solid rgba(168,201,87,.2)!important; box-shadow:0 18px 48px rgba(0,0,0,.22)!important; }
+    #tab-home .bg-gradient-to-br { background:linear-gradient(135deg,rgba(163,230,53,.13),rgba(18,22,20,.98) 56%)!important; border:1px solid rgba(163,230,53,.2)!important; box-shadow:0 18px 48px rgba(0,0,0,.22)!important; }
     #tab-home .bg-gradient-to-br > .flex:first-child { gap:12px; }
     #tab-home .bg-gradient-to-br .text-xs.font-bold { font-size:13px; letter-spacing:-.02em; }
     #tab-home .grid button { min-height:94px; background:rgba(18,22,20,.86)!important; border-color:rgba(255,255,255,.07)!important; }
-    #tab-home .grid button:hover { border-color:rgba(168,201,87,.45)!important; background:#171d19!important; }
-    #tab-home button.bg-lime-400, #tab-search button.bg-lime-400 { box-shadow:0 8px 24px rgba(168,201,87,.09)!important; font-size:13px!important; }
+    #tab-home .grid button:hover { border-color:rgba(163,230,53,.45)!important; background:#171d19!important; }
+    #tab-home button.bg-lime-400, #tab-search button.bg-lime-400 { box-shadow:0 8px 24px rgba(163,230,53,.09)!important; font-size:13px!important; }
     .shadow-xl,.shadow-lg { box-shadow:0 16px 38px rgba(0,0,0,.2)!important; }
     ::placeholder { color:#778178!important; opacity:1; }
 
     /* ZNAIDENO component polish */
-    .fixed.bottom-0 { background:rgba(15,19,16,.94)!important; border-top-color:rgba(168,201,87,.12)!important; box-shadow:0 -12px 34px rgba(0,0,0,.28); backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); }
+    .fixed.bottom-0 { background:rgba(15,19,16,.94)!important; border-top-color:rgba(163,230,53,.12)!important; box-shadow:0 -12px 34px rgba(0,0,0,.28); backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); }
     .nav-btn { min-width:52px; min-height:48px; border-radius:14px; padding:5px 8px; gap:1px; justify-content:center; transition:color .16s ease,background .16s ease; }
-    .nav-btn.text-lime-400 { background:rgba(168,201,87,.09); color:var(--zd-lime)!important; }
+    .nav-btn.text-lime-400 { background:rgba(163,230,53,.09); color:var(--zd-lime)!important; }
     .nav-btn svg { width:20px;height:20px; }
     .tab-content h2 { letter-spacing:-.035em; }
     #tab-profile .grid > div { background:linear-gradient(145deg,rgba(23,29,25,.95),rgba(18,22,20,.92))!important; }
-    #premiumSection { border-width:1px!important; border-color:rgba(168,201,87,.3)!important; }
+    #premiumSection { border-width:1px!important; border-color:rgba(163,230,53,.3)!important; }
     #premiumSection > .flex:first-child { align-items:center; }
     #premiumSection button[disabled] { opacity:.78; }
     #activeSearchesList > div, #favoritesList > div, #results > div { border-color:rgba(255,255,255,.08)!important; }
     #addFilterModal > div, #adPreviewModal > div, #legalModal > div, #limitModal > div { box-shadow:0 24px 80px rgba(0,0,0,.45); }
     #addFilterModal input, #addFilterModal select, #tab-search input, #tab-search select { min-height:42px; }
     #tab-documents button { transition:border-color .16s ease,background .16s ease; }
-    #tab-documents button:hover { border-color:rgba(168,201,87,.35)!important; background:#171d19!important; }
+    #tab-documents button:hover { border-color:rgba(163,230,53,.35)!important; background:#171d19!important; }
     @media (max-width:380px) { body { padding-left:12px!important;padding-right:12px!important; } .nav-btn { min-width:46px;padding-left:5px;padding-right:5px; } }
 
     @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; animation:none!important; scroll-behavior:auto!important; } }
