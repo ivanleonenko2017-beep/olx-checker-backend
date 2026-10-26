@@ -890,14 +890,35 @@
           body: JSON.stringify({ query })
         });
         const data = await response.json();
-        if (!data.success) { alert(data.error || 'Не вдалося розібрати запит'); return; }
+        if (!response.ok || !data.success) { alert(data.error || 'Не вдалося розібрати запит'); return; }
+
         const criteria = data.criteria || {};
         input.value = data.query || query;
-        if (criteria.maxPrice) document.getElementById('modalMaxPrice').value = criteria.maxPrice;
-        if (criteria.minPrice) document.getElementById('modalMinPrice').value = criteria.minPrice;
-        if (criteria.condition) document.getElementById('modalCondition').value = criteria.condition;
-        if (criteria.photosOnly) document.getElementById('modalPhotosOnly').checked = true;
-        if (criteria.excludeTerms?.length) document.getElementById('modalExcludeTerms').value = criteria.excludeTerms.join(', ');
+
+        // Apply only criteria actually inferred from the sentence; don't reset
+        // manually chosen form values just because the parser returned defaults.
+        if (criteria.maxPrice > 0) document.getElementById('modalMaxPrice').value = criteria.maxPrice;
+        if (criteria.minPrice > 0) document.getElementById('modalMinPrice').value = criteria.minPrice;
+        if (criteria.condition && criteria.condition !== 'all') {
+          document.getElementById('modalCondition').value = criteria.condition;
+        }
+        if (criteria.photosOnly === true) document.getElementById('modalPhotosOnly').checked = true;
+        if (Array.isArray(criteria.excludeTerms) && criteria.excludeTerms.length) {
+          document.getElementById('modalExcludeTerms').value = criteria.excludeTerms.join(', ');
+        }
+        if (Array.isArray(criteria.includeTerms) && criteria.includeTerms.length) {
+          document.getElementById('modalIncludeTerms').value = criteria.includeTerms.join(', ');
+        }
+        if (criteria.bargainHunter === true) {
+          document.getElementById('modalBargainHunter').checked = true;
+          document.getElementById('bargainOptions').classList.remove('hidden');
+        }
+        if (criteria.maxDiscountPercent > 0) {
+          document.getElementById('modalDiscountPercent').value = criteria.maxDiscountPercent;
+        }
+        if (criteria.minComparableListings > 0) {
+          document.getElementById('modalComparableListings').value = criteria.minComparableListings;
+        }
         alert('Запит розібрано. Перевірте умови та збережіть фільтр.');
       } catch (error) {
         alert('Не вдалося зв’язатися із сервером');
@@ -990,10 +1011,13 @@
       document.getElementById('modalMinPrice').value = '';
       document.getElementById('modalMaxPrice').value = '';
       document.getElementById('modalCity').value = '';
+      document.getElementById('modalCondition').value = 'all';
       document.getElementById('modalIncludeTerms').value = '';
       document.getElementById('modalExcludeTerms').value = '';
       document.getElementById('modalPhotosOnly').checked = false;
       document.getElementById('modalBargainHunter').checked = false;
+      document.getElementById('modalDiscountPercent').value = '15';
+      document.getElementById('modalComparableListings').value = '5';
       document.getElementById('bargainOptions').classList.add('hidden');
 
       await loadActiveFilters();
