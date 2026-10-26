@@ -112,7 +112,7 @@ function parseNaturalLanguageQuery(input) {
     if (/^(к|k|тис|тисяч|тыс|тысяч)$/.test(unit) || (inheritedThousands && amount > 0 && amount < 1000 && !unit)) amount *= 1000;
     return Number.isSafeInteger(Math.round(amount)) ? Math.round(amount) : null;
   };
-  const amountPattern = '(\\d[\\d\\s.,]*(?:\\s*(?:к|k|тис\\.?|тисяч(?:а|і|у)?|тыс\\.?|тысяч(?:а|и)?|грн|₴))?)';
+  const amountPattern = '(\\d[\\d\\s.,]*(?:\\s*(?:к|k|тисяч(?:а|і|у)?|тысяч(?:а|и)?|тис\\.?|тыс\\.?|грн|₴))?)';
   const rangeRegex = new RegExp('(?:від|от|з)\\s*' + amountPattern + '\\s*(?:до|по|[-–—])\\s*' + amountPattern, 'i');
   const rangeMatch = remaining.match(rangeRegex);
   if (rangeMatch) {
