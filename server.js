@@ -1472,9 +1472,30 @@ async function runBackgroundWorker() {
   }
 }
 
-setInterval(runBackgroundWorker, 60000);
+const ENABLE_BACKGROUND_WORKER = (process.env.ENABLE_BACKGROUND_WORKER || 'true').toLowerCase() !== 'false';
+if (ENABLE_BACKGROUND_WORKER) {
+  setInterval(runBackgroundWorker, 60000);
+  console.log('Background worker enabled');
+} else {
+  console.log('Background worker disabled by configuration');
+}
+
+app.get('/health', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'znaideno-smart-search',
+    databaseConfigured: Boolean(supabase),
+    adminDatabaseConfigured: Boolean(supabaseAdmin),
+    backgroundWorkerEnabled: ENABLE_BACKGROUND_WORKER,
+    webhookRegistrationEnabled: (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() !== 'false'
+  });
+});
 
 async function registerWebhook() {
+  if ((process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() === 'false') {
+    console.log('Telegram webhook registration disabled by configuration');
+    return;
+  }
   if (!TELEGRAM_BOT_TOKEN || !SERVER_URL) return;
   try {
     const targetWebhookUrl = `${SERVER_URL}/telegram-webhook`;
