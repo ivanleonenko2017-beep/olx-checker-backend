@@ -1,10 +1,10 @@
--- SECURITY HOTFIX — review before execution.
+-- SECURITY LOCKDOWN REFERENCE — applied and verified against production on 2026-10-27.
 -- Project: olx-checker-db (ovblyievvseuugpbmxjy)
 -- Purpose: prevent direct access via Supabase anon/authenticated API roles.
--- Prerequisite: Render must have SUPABASE_SERVICE_ROLE_KEY configured.
--- server.js on this branch prefers SUPABASE_SERVICE_ROLE_KEY for all server-side DB calls.
--- This script is intentionally NOT auto-applied. Review, run in a maintenance window,
--- then verify the application and re-run Supabase security advisors.
+-- Production verification: RLS enabled on all nine application tables; anon/authenticated
+-- have no SELECT privileges; service_role has SELECT privileges. Migration history includes
+-- enable_rls_and_revoke_public_app_table_access (20261027185207).
+-- This SQL is retained as a reviewable reference/recovery script; do not rerun blindly.
 
 begin;
 

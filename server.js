@@ -236,7 +236,7 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
 app.get('/api/proxy-image', async (req, res) => {
   // Only proxy HTTPS images from OLX-owned domains. Never accept arbitrary URLs:
   // this endpoint is public and must not be usable to reach internal services.
-  const fallback = () => res.redirect(`${SERVER_URL}/assets/no-photo.svg`);
+  const fallback = () => res.redirect(`${SERVER_URL}/assets/no-photo.png`);
   try {
     const imageUrl = typeof req.query.url === 'string' ? req.query.url : '';
     if (!imageUrl || imageUrl.length > 2048) return fallback();
@@ -1766,7 +1766,7 @@ async function runBackgroundWorker() {
 
           const photoToSend = item.rawImgUrl
             ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(item.rawImgUrl)}`
-            : `${SERVER_URL}/assets/no-photo.svg`;
+            : `${SERVER_URL}/assets/no-photo.png`;
           
           const delivered = await sendTelegramPhoto(filter.user_id, photoToSend, notificationText, keyboard);
           if (delivered) {
