@@ -51,10 +51,13 @@ const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').
 // configured so RLS can be enabled without granting public API roles data access.
 const SUPABASE_KEY = (SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
-// Telegram requires the secret to be configured at webhook registration and echoed
-// in X-Telegram-Bot-Api-Secret-Token. A runtime fallback keeps deployments functional;
-// set TELEGRAM_WEBHOOK_SECRET in Render for a stable secret across restarts.
-const TELEGRAM_WEBHOOK_SECRET = (process.env.TELEGRAM_WEBHOOK_SECRET || crypto.randomBytes(32).toString('hex')).trim();
+// All instances registering the same bot webhook must use the same secret.
+// Prefer an explicit Render secret; derive a stable fallback from the bot token rather
+// than generating a different random secret on each instance/restart.
+const TELEGRAM_WEBHOOK_SECRET = (process.env.TELEGRAM_WEBHOOK_SECRET ||
+  (TELEGRAM_BOT_TOKEN
+    ? crypto.createHmac('sha256', TELEGRAM_BOT_TOKEN).update('znaideno-telegram-webhook-v1').digest('hex')
+    : '')).trim();
 const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
@@ -1293,7 +1296,7 @@ app.post('/telegram-webhook', async (req, res) => {
   const receivedWebhookSecret = req.get('x-telegram-bot-api-secret-token') || '';
   const receivedSecretBuffer = Buffer.from(receivedWebhookSecret);
   const expectedSecretBuffer = Buffer.from(TELEGRAM_WEBHOOK_SECRET);
-  if (receivedSecretBuffer.length !== expectedSecretBuffer.length ||
+  if (!TELEGRAM_WEBHOOK_SECRET || receivedSecretBuffer.length !== expectedSecretBuffer.length ||
       !crypto.timingSafeEqual(receivedSecretBuffer, expectedSecretBuffer)) {
     return res.sendStatus(401);
   }
