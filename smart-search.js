@@ -88,10 +88,32 @@ function normalizeCriteria(input = {}) {
   };
 }
 
+function termMatches(haystack, rawTerm) {
+  const term = String(rawTerm || '').toLocaleLowerCase('uk-UA');
+  if (haystack.includes(term)) return true;
+
+  const ramRequirement = term.match(/(?:мінімум|не менше|від)?\\s*(\\d{1,3})\\s*(?:гб|gb)\\s*(?:оператив(?:ної)? пам.?яті|озу|ram)/iu);
+  if (ramRequirement) {
+    const values = [...haystack.matchAll(/(\\d{1,3})\\s*(?:гб|gb)\\s*(?:оператив(?:ної)? пам.?яті|озу|ram|оперативк)/giu)]
+      .map(match => Number(match[1]));
+    return values.some(value => value >= Number(ramRequirement[1]));
+  }
+
+  const storageRequirement = term.match(/(?:мінімум|не менше|від)?\\s*(\\d{1,4})\\s*(гб|gb|тб|tb)\\s*(?:ssd|накопичувач|пам.?яті|storage)/iu);
+  if (storageRequirement) {
+    const required = Number(storageRequirement[1]) * (/^(?:тб|tb)$/i.test(storageRequirement[2]) ? 1024 : 1);
+    const values = [...haystack.matchAll(/(\\d{1,4})\\s*(гб|gb|тб|tb)\\s*(?:ssd|накопичувач|пам.?яті|storage)/giu)]
+      .map(match => Number(match[1]) * (/^(?:тб|tb)$/i.test(match[2]) ? 1024 : 1));
+    return values.some(value => value >= required);
+  }
+
+  return false;
+}
+
 function matchesTerms(text, terms, mode = 'all') {
   const haystack = String(text || '').toLocaleLowerCase('uk-UA');
   if (!terms.length) return true;
-  const hits = terms.map(term => haystack.includes(term.toLocaleLowerCase('uk-UA')));
+  const hits = terms.map(term => termMatches(haystack, term));
   return mode === 'any' ? hits.some(Boolean) : hits.every(Boolean);
 }
 
