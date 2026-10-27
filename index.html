@@ -202,7 +202,7 @@
           <div class="flex justify-between items-end">
             <div>
               <div class="text-2xl font-bold text-emerald-400" id="avgPrice">0 грн</div>
-              <div class="text-[10px] text-gray-400">Середня ринкова ціна</div>
+              <div class="text-[10px] text-gray-400">Медіанна ринкова ціна · від 5 оголошень</div>
             </div>
             <span id="itemsCount" class="text-xs bg-blue-900/50 text-blue-300 px-2.5 py-1 rounded-full border border-blue-800">0 товарів</span>
           </div>
@@ -451,6 +451,62 @@
               <option value="new">Тільки нові</option>
             </select>
           </div>
+        </div>
+
+        <div class="border-t border-gray-800 pt-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-[11px] font-bold text-white">Точні умови</div>
+              <div class="text-[10px] text-gray-500">Додаткові правила пошуку</div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Характеристики / обов’язкові слова</label>
+            <input type="text" id="modalIncludeTerms" placeholder="RTX 3060, 16 GB RAM, 512 GB SSD" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+            <select id="modalIncludeTermsMode" class="w-full mt-2 p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+              <option value="all">Всі умови мають збігатися (І)</option>
+              <option value="any">Достатньо однієї умови (АБО)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Будь-яка з альтернатив (АБО)</label>
+            <input type="text" id="modalAnyTerms" placeholder="RTX 3060, RTX 4060" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+          </div>
+          <div>
+            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Не показувати слова</label>
+            <input type="text" id="modalExcludeTerms" placeholder="зламаний, на запчастини" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+          </div>
+          <label class="flex items-center gap-2 text-[11px] text-gray-300">
+            <input type="checkbox" id="modalPhotosOnly" class="accent-emerald-400">
+            Лише оголошення з фото
+          </label>
+          <div>
+            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Вік оголошення</label>
+            <select id="modalMaxAgeMinutes" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+              <option value="0">Без обмеження</option>
+              <option value="30">Не старше 30 хвилин</option>
+              <option value="60">Не старше 1 години</option>
+              <option value="180">Не старше 3 годин</option>
+              <option value="1440">Не старше 24 годин</option>
+            </select>
+            <p class="text-[9px] text-gray-500 mt-1">Застосовується лише коли OLX показує точний час публікації.</p>
+          </div>
+          <label class="flex items-center gap-2 text-[11px] text-gray-300">
+            <input type="checkbox" id="modalBargainHunter" class="accent-emerald-400">
+            <span>Шукати вигідні пропозиції нижче ринку</span>
+          </label>
+          <div id="bargainOptions" class="hidden grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] text-gray-400 mb-1">Знижка від ринку, %</label>
+              <input type="number" id="modalDiscountPercent" min="5" max="90" value="15" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+            </div>
+            <div>
+              <label class="block text-[10px] text-gray-400 mb-1">Мін. аналогів</label>
+              <input type="number" id="modalComparableListings" min="3" max="30" value="5" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+            </div>
+          </div>
+          <button type="button" onclick="parseSmartQuery()" class="w-full py-2 border border-emerald-400/40 text-emerald-300 rounded-xl text-[11px] font-semibold">Розібрати запит автоматично</button>
+          <p class="text-[9px] text-gray-500">Наприклад: «ігровий ноутбук до 20 000 грн, не показувати зламаний».</p>
         </div>
 
         <button id="saveFilterBtn" onclick="saveNewActiveFilter()" class="w-full py-3 bg-emerald-400 text-black font-bold rounded-xl text-xs mt-2">
@@ -834,12 +890,88 @@
       document.getElementById('premiumSection').scrollIntoView({ behavior: 'smooth' });
     }
 
+    document.getElementById('modalBargainHunter')?.addEventListener('change', (event) => {
+      document.getElementById('bargainOptions').classList.toggle('hidden', !event.target.checked);
+    });
+
+    async function parseSmartQuery() {
+      const input = document.getElementById('modalQuery');
+      const query = input.value.trim();
+      if (!query) { alert('Спочатку введіть пошуковий запит'); return; }
+      if (/^https?:\/\//i.test(query)) {
+        alert('Для посилання OLX розбір не потрібен. Збережіть посилання як пошуковий фільтр.');
+        return;
+      }
+      if (!initDataRaw) {
+        alert('Автоматичний розбір доступний після відкриття Mini App у Telegram');
+        return;
+      }
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/parse-query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': initDataRaw },
+          body: JSON.stringify({ query })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) { alert(data.error || 'Не вдалося розібрати запит'); return; }
+
+        const criteria = data.criteria || {};
+        input.value = data.query || query;
+
+        // Apply only criteria actually inferred from the sentence; don't reset
+        // manually chosen form values just because the parser returned defaults.
+        if (criteria.maxPrice > 0) document.getElementById('modalMaxPrice').value = criteria.maxPrice;
+        if (criteria.minPrice > 0) document.getElementById('modalMinPrice').value = criteria.minPrice;
+        if (criteria.condition && criteria.condition !== 'all') {
+          document.getElementById('modalCondition').value = criteria.condition;
+        }
+        if (criteria.city) document.getElementById('modalCity').value = criteria.city;
+        if (criteria.maxAgeMinutes > 0) document.getElementById('modalMaxAgeMinutes').value = String(criteria.maxAgeMinutes);
+        if (criteria.includeTermsMode) document.getElementById('modalIncludeTermsMode').value = criteria.includeTermsMode;
+        if (criteria.photosOnly === true) document.getElementById('modalPhotosOnly').checked = true;
+        if (Array.isArray(criteria.excludeTerms) && criteria.excludeTerms.length) {
+          document.getElementById('modalExcludeTerms').value = criteria.excludeTerms.join(', ');
+        }
+        if (Array.isArray(criteria.includeTerms) && criteria.includeTerms.length) {
+          document.getElementById('modalIncludeTerms').value = criteria.includeTerms.join(', ');
+        }
+        if (Array.isArray(criteria.anyTerms) && criteria.anyTerms.length) {
+          document.getElementById('modalAnyTerms').value = criteria.anyTerms.join(', ');
+        }
+        if (criteria.bargainHunter === true) {
+          document.getElementById('modalBargainHunter').checked = true;
+          document.getElementById('bargainOptions').classList.remove('hidden');
+        }
+        if (criteria.maxDiscountPercent > 0) {
+          document.getElementById('modalDiscountPercent').value = criteria.maxDiscountPercent;
+        }
+        if (criteria.minComparableListings > 0) {
+          document.getElementById('modalComparableListings').value = criteria.minComparableListings;
+        }
+        alert('Запит розібрано. Перевірте умови та збережіть фільтр.');
+      } catch (error) {
+        alert('Не вдалося зв’язатися із сервером');
+      }
+    }
+
     async function saveNewActiveFilter() {
       const query = document.getElementById('modalQuery').value.trim();
       const minPrice = document.getElementById('modalMinPrice').value.trim();
       const maxPrice = document.getElementById('modalMaxPrice').value.trim();
       const city = document.getElementById('modalCity').value.trim() || 'Всі міста';
       const condition = document.getElementById('modalCondition').value;
+      const criteria = {
+        includeTerms: document.getElementById('modalIncludeTerms').value,
+        includeTermsMode: document.getElementById('modalIncludeTermsMode').value,
+        anyTerms: document.getElementById('modalAnyTerms').value,
+        excludeTerms: document.getElementById('modalExcludeTerms').value,
+        photosOnly: document.getElementById('modalPhotosOnly').checked,
+        maxAgeMinutes: Number(document.getElementById('modalMaxAgeMinutes').value) || 0,
+        bargainHunter: document.getElementById('modalBargainHunter').checked,
+        maxDiscountPercent: Number(document.getElementById('modalDiscountPercent').value) || 15,
+        minComparableListings: Number(document.getElementById('modalComparableListings').value) || 5,
+        condition, city, minPrice: Number(minPrice) || 0, maxPrice: Number(maxPrice) || 0
+      };
 
       if (!query) {
         alert('Введіть назву товару');
@@ -858,7 +990,7 @@
               'Content-Type': 'application/json',
               'x-telegram-init-data': initDataRaw
             },
-            body: JSON.stringify({ query, minPrice, maxPrice, city, condition })
+            body: JSON.stringify({ query, minPrice, maxPrice, city, condition, criteria })
           });
           const data = await res.json();
           
@@ -898,7 +1030,7 @@
           id: 'local_' + Date.now(), query,
           min_price: Number(minPrice) || 0, max_price: Number(maxPrice) || 0,
           minPrice: Number(minPrice) || 0, maxPrice: Number(maxPrice) || 0,
-          city, condition
+          city, condition, criteria
         });
         localStorage.setItem('olx_active_filters', JSON.stringify(localFilters));
       }
@@ -911,6 +1043,17 @@
       document.getElementById('modalMinPrice').value = '';
       document.getElementById('modalMaxPrice').value = '';
       document.getElementById('modalCity').value = '';
+      document.getElementById('modalCondition').value = 'all';
+      document.getElementById('modalIncludeTerms').value = '';
+      document.getElementById('modalIncludeTermsMode').value = 'all';
+      document.getElementById('modalAnyTerms').value = '';
+      document.getElementById('modalExcludeTerms').value = '';
+      document.getElementById('modalPhotosOnly').checked = false;
+      document.getElementById('modalMaxAgeMinutes').value = '0';
+      document.getElementById('modalBargainHunter').checked = false;
+      document.getElementById('modalDiscountPercent').value = '15';
+      document.getElementById('modalComparableListings').value = '5';
+      document.getElementById('bargainOptions').classList.add('hidden');
 
       await loadActiveFilters();
     }
@@ -1140,7 +1283,7 @@
         window.lastAvgPrice = data.averagePrice;
         currentSearchResults = data.items;
 
-        document.getElementById('avgPrice').innerText = data.averagePrice.toLocaleString('uk-UA') + ' грн';
+        document.getElementById('avgPrice').innerText = data.averagePrice > 0 ? data.averagePrice.toLocaleString('uk-UA') + ' грн' : 'Недостатньо даних';
         document.getElementById('itemsCount').innerText = 'Аналіз ' + data.count + ' товарів';
         analyticsDiv.classList.remove('hidden');
 

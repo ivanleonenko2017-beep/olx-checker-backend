@@ -5,6 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const { normalizeCriteria, applyCriteriaToListing, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
 
 const app = express();
 app.use(cors());
@@ -239,6 +240,31 @@ function isPublishedToday(locationDate) {
   return /(?:^|[\\s,·])(?:сьогодні|сегодня|today)(?=$|[\\s,·])/i.test(label);
 }
 
+function getListingAgeMinutes(locationDate) {
+  const label = String(locationDate || '').toLocaleLowerCase('uk-UA');
+  if (!isPublishedToday(label)) return null;
+  const timeMatch = label.match(/(?:сьогодні|сегодня|today)[^\d]{0,16}(\d{1,2})[:.](\d{2})/i);
+  if (!timeMatch) return null;
+  const publishedHour = Number(timeMatch[1]);
+  const publishedMinute = Number(timeMatch[2]);
+  if (publishedHour > 23 || publishedMinute > 59) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date());
+    const hour = Number(parts.find(part => part.type === 'hour')?.value);
+    const minute = Number(parts.find(part => part.type === 'minute')?.value);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    const currentMinutes = hour * 60 + minute;
+    const publishedMinutes = publishedHour * 60 + publishedMinute;
+    return currentMinutes >= publishedMinutes
+      ? currentMinutes - publishedMinutes
+      : currentMinutes - publishedMinutes + 1440;
+  } catch (_) {
+    return null;
+  }
+}
+
 function locationMatches(locationDate, requestedLocation) {
   const requested = String(requestedLocation || '').trim().toLocaleLowerCase('uk-UA');
   if (!requested || requested === 'всі міста' || requested === 'вся україна' || requested === 'уся україна') return true;
@@ -422,15 +448,10 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     }
   });
 
-  const prices = rawItems.map(i => i.price).sort((a, b) => a - b);
-  let averagePrice = 0;
-
-  if (prices.length > 0) {
-    const medianPrice = prices[Math.floor(prices.length / 2)];
-    const filteredPrices = prices.filter(p => p >= medianPrice * 0.5 && p <= medianPrice * 2.0);
-    const sum = filteredPrices.reduce((a, b) => a + b, 0);
-    averagePrice = filteredPrices.length > 0 ? Math.round(sum / filteredPrices.length) : medianPrice;
-  }
+  const prices = rawItems.map(i => i.price).filter(price => Number.isFinite(price) && price > 0);
+  // Keep the legacy API field name for compatibility, but use a robust median.
+  // No market-price estimate is returned with fewer than five listings.
+  const averagePrice = prices.length >= 5 ? median(prices) : 0;
 
   if (!rawItems.length && /olx/i.test(targetUrl) && !/search|listing|og:/.test(pageText)) {
     const error = new Error('Не вдалося розпізнати сторінку OLX. Сайт міг змінити розмітку або тимчасово обмежити доступ.');
@@ -441,8 +462,72 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   return { items: rawItems, averagePrice };
 }
 
+
+const listingDescriptionCache = new Map();
+const EMPTY_CARD_DESCRIPTION = 'Відкрийте оголошення на OLX, щоб переглянути повний опис продавця.';
+
+async function fetchListingDescription(inputUrl) {
+  let parsedUrl;
+  try { parsedUrl = new URL(inputUrl); } catch { return ''; }
+  const host = parsedUrl.hostname.toLowerCase();
+  if (parsedUrl.protocol !== 'https:' || !(host === 'olx.ua' || host.endsWith('.olx.ua')) ||
+      parsedUrl.username || parsedUrl.password ||
+      !(/\/d\//.test(parsedUrl.pathname) || /\/obyavlenie\//.test(parsedUrl.pathname))) return '';
+
+  const key = parsedUrl.toString().replace(/\/$/, '');
+  const cached = listingDescriptionCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.description;
+  if (cached) listingDescriptionCache.delete(key);
+
+  try {
+    // Throttle only real upstream requests; cache hits return immediately.
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const response = await axios.get(key, {
+      headers: { ...HEADERS, Referer: 'https://www.olx.ua/' },
+      timeout: 8000,
+      maxRedirects: 0,
+      validateStatus: status => status >= 200 && status < 300
+    });
+    const $ = cheerio.load(String(response.data || ''));
+    let description = $('[data-testid="ad-description"], [data-cy="ad-description"], [data-testid*="description"], [class*="description"]').first().text().trim();
+
+    if (!description) {
+      $('script[type="application/ld+json"]').each((_, el) => {
+        if (description) return;
+        try {
+          const json = JSON.parse($(el).contents().text());
+          const candidates = Array.isArray(json) ? json : [json];
+          for (const item of candidates) {
+            if (item && typeof item.description === 'string' && item.description.trim()) {
+              description = item.description.trim();
+              break;
+            }
+          }
+        } catch (_) {}
+      });
+    }
+    if (!description) description = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '';
+    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
+    if (description && !/verify you are human|access denied|robot check|підтверд.{0,20}що ви людина/i.test(description)) {
+      listingDescriptionCache.set(key, { description, expiresAt: Date.now() + 10 * 60 * 1000 });
+      if (listingDescriptionCache.size > 500) {
+        const oldestKey = listingDescriptionCache.keys().next().value;
+        listingDescriptionCache.delete(oldestKey);
+      }
+      return description;
+    }
+  } catch (error) {
+    console.warn('[Smart Search details] Не вдалося отримати опис:', error.response?.status || error.code || 'request-failed');
+  }
+  // Cache misses briefly too, so a blocked or unavailable ad is not requested
+  // again for every filter scan in the next minute.
+  listingDescriptionCache.set(key, { description: '', expiresAt: Date.now() + 60 * 1000 });
+  return '';
+}
+
 app.get('/api/search', userAuthMiddleware, async (req, res) => {
   const startedAt = Date.now();
+  const testPremiumBypass = process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
   console.log(`[API search] Request received: queryProvided=${Boolean(req.query.query)}, categoryUrlProvided=${Boolean(req.query.categoryUrl)}, filters=${Boolean(req.query.minPrice || req.query.maxPrice || req.query.city || req.query.condition)}`);
   try {
     // Enforce trial/Premium access server-side for every search request.
@@ -489,7 +574,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const trialEndsMs = trialStartedMs > 0 ? trialStartedMs + 5 * 24 * 60 * 60 * 1000 : 0;
     const hasActiveTrial = trialEndsMs > Date.now();
 
-    if (!hasActivePremium && !hasActiveTrial) {
+    if (!hasActivePremium && !hasActiveTrial && !testPremiumBypass) {
       return res.status(403).json({
         success: false,
         error: 'Пробний період завершився. Для продовження користування потрібен Premium.',
@@ -520,10 +605,11 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const requestedLocation = String(city || '').trim();
     let items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
+    const conditionText = item => String(item.title || '') + ' ' + String(item.description || '');
     if (requestedCondition === 'new') {
-      items = items.filter(item => /\b(нове|новый|новая|новое|нові|новые|новая річ|новий товар)\b/i.test(`${item.title} ${item.description || ''}`));
+      items = items.filter(item => /(?:^|[^\p{L}])(?:нове|новий|нова|нові|новый|новая|новое|новые|new)(?=$|[^\p{L}])/iu.test(conditionText(item)));
     } else if (requestedCondition === 'used') {
-      items = items.filter(item => /\b(б\/у|бу|вживан|уживан|після використання|used)\b/i.test(`${item.title} ${item.description || ''}`));
+      items = items.filter(item => /б\/у|(?:^|[^\p{L}])бу(?=$|[^\p{L}])|вживан|уживан|після використання|used/iu.test(conditionText(item)));
     }
     console.log(`[API search] Completed: parsed=${parsedItems.length}, returned=${items.length}, durationMs=${Date.now() - startedAt}`);
     res.json({ success: true, count: items.length, averagePrice, items });
@@ -589,6 +675,7 @@ app.get('/api/ad-details', async (req, res) => {
 
 app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
   try {
+    const testPremiumBypass = process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
     const userId = req.telegramUser.id;
     const isAdmin = await checkIsAdmin(userId);
     let userData = { tariff: 'free', premium_until: null, trial_started_at: null };
@@ -623,7 +710,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       }
     }
 
-    const hasActivePremium = isAdmin || (
+    const hasActivePremium = testPremiumBypass || isAdmin || (
       userData.tariff === 'premium' &&
       Boolean(userData.premium_until) &&
       Number.isFinite(Date.parse(userData.premium_until)) &&
@@ -631,7 +718,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
     );
     const trialStartedMs = userData.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
     const trialEndsAt = trialStartedMs > 0 ? new Date(trialStartedMs + 5 * 24 * 60 * 60 * 1000).toISOString() : null;
-    const hasActiveTrial = Boolean(trialEndsAt && Date.parse(trialEndsAt) > Date.now());
+    const hasActiveTrial = testPremiumBypass || Boolean(trialEndsAt && Date.parse(trialEndsAt) > Date.now());
     if (isAdmin) {
       userData.tariff = 'premium';
       userData.is_admin = true;
@@ -692,11 +779,18 @@ app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
 
 app.post('/api/filters', userAuthMiddleware, async (req, res) => {
   try {
+    const testPremiumBypass = process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
     if (!supabase) {
       return res.status(503).json({ success: false, error: 'Перевірка доступу тимчасово недоступна. Спробуйте пізніше.' });
     }
     const userId = req.telegramUser.id;
     const { query, minPrice, maxPrice, city, condition } = req.body;
+    const criteriaInput = { ...(req.body.criteria && typeof req.body.criteria === 'object' ? req.body.criteria : {}) };
+    if (condition !== undefined && condition !== null && condition !== '') criteriaInput.condition = condition;
+    if (city !== undefined && city !== null && city !== '') criteriaInput.city = city;
+    if (minPrice !== undefined && minPrice !== null && minPrice !== '') criteriaInput.minPrice = minPrice;
+    if (maxPrice !== undefined && maxPrice !== null && maxPrice !== '') criteriaInput.maxPrice = maxPrice;
+    const criteria = normalizeCriteria(criteriaInput);
 
     if (!query || typeof query !== 'string') {
       return res.status(400).json({ success: false, error: 'Введіть коректний пошуковий запит' });
@@ -731,17 +825,20 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
         Number.isFinite(premiumExpiry) && premiumExpiry > Date.now());
       const trialStart = userData?.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
       const hasActiveTrial = trialStart > 0 && Date.now() < trialStart + 5 * 24 * 60 * 60 * 1000;
-      if (!isAdmin && !isPremium && !hasActiveTrial) {
+      if (!isAdmin && !isPremium && !hasActiveTrial && !testPremiumBypass) {
         return res.status(403).json({ success: false, error: 'TRIAL_EXPIRED' });
       }
 
       const { data, error } = await supabase.from('filters').insert([{
         user_id: userId,
         query: cleanQuery,
-        min_price: parseInt(minPrice, 10) || 0,
-        max_price: parseInt(maxPrice, 10) || 0,
-        city: city ? city.trim() : 'Всі міста',
-        condition: condition || 'all'
+        // Persist one canonical set of values so the worker cannot overwrite
+        // parsed natural-language criteria with empty top-level form fields.
+        min_price: criteria.minPrice || 0,
+        max_price: criteria.maxPrice || 0,
+        city: criteria.city || (city ? city.trim() : 'Всі міста'),
+        condition: criteria.condition || condition || 'all',
+        criteria
       }]).select();
 
       if (error) throw error;
@@ -770,6 +867,16 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/parse-query', userAuthMiddleware, async (req, res) => {
+  try {
+    const text = typeof req.body?.query === 'string' ? req.body.query.slice(0, 500) : '';
+    if (!text.trim()) return res.status(400).json({ success: false, error: 'Введіть пошуковий запит' });
+    return res.json({ success: true, ...parseNaturalLanguageQuery(text) });
+  } catch (err) {
+    return res.status(400).json({ success: false, error: 'Не вдалося розібрати запит' });
   }
 });
 
@@ -1193,10 +1300,49 @@ async function runBackgroundWorker() {
         }
 
         const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
+        const criteria = normalizeCriteria({
+          ...(filter.criteria || {}),
+          minPrice: filter.min_price,
+          maxPrice: filter.max_price,
+          city: filter.city,
+          condition: filter.condition
+        });
         const requestedLocation = String(filter.city || '').trim();
-        // Only notify about listings OLX explicitly labels as published today.
-        const todaysItems = parsedItems.filter(item => isPublishedToday(item.locationDate));
-        const items = todaysItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+        // Advanced term filters need the listing page, not just the often-incomplete
+        // search card. Cache successful descriptions and short-lived misses.
+        const needsFullDescription = criteria.includeTerms.length > 0 || criteria.anyTerms.length > 0 || criteria.excludeTerms.length > 0;
+        if (needsFullDescription) {
+          for (const item of parsedItems) {
+            const fullDescription = await fetchListingDescription(item.link);
+            item.detailsLoaded = Boolean(fullDescription);
+            if (fullDescription) item.description = fullDescription;
+          }
+        }
+        // Load seen links before date filtering. New notifications should be limited
+        // to today's listings, but previously seen listings must remain eligible for
+        // price-drop checks even after OLX stops labeling them as "today".
+        const { data: knownRows, error: knownError } = await supabase
+          .from('seen_ads').select('ad_link').eq('filter_id', filter.id);
+        if (knownError) {
+          console.error(`Не вдалося перевірити seen_ads для фільтра ${filter.id}:`, knownError.message);
+          continue;
+        }
+        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
+        const items = parsedItems
+          .filter(item => {
+            const link = String(item.link || '').trim().replace(/\/$/, '');
+            return isPublishedToday(item.locationDate) || knownLinks.has(link);
+          })
+          .filter(item => locationMatches(item.locationDate, requestedLocation))
+          .filter(item => {
+            // If the detail page could not be read, don't claim the item passed
+            // explicit required/excluded-word rules using incomplete card text.
+            if (needsFullDescription && !item.detailsLoaded) return false;
+            return applyCriteriaToListing({
+              ...item,
+              ageMinutes: getListingAgeMinutes(item.locationDate)
+            }, criteria).matches;
+          });
         if (requestedLocation && !['всі міста', 'вся україна', 'уся україна'].includes(requestedLocation.toLocaleLowerCase('uk-UA')) && parsedItems.length > 0 && items.length === 0) {
           console.log(`[Location Filter] Для фільтра ${filter.id} не знайдено карток із локацією "${requestedLocation}" серед ${parsedItems.length} результатів OLX.`);
         }
@@ -1208,25 +1354,70 @@ async function runBackgroundWorker() {
 
         if (!items || items.length === 0) continue;
 
-        // Skip links already seen for this filter before attempting an insert.
-        const { data: knownRows, error: knownError } = await supabase
-          .from('seen_ads').select('ad_link').eq('filter_id', filter.id);
-        if (knownError) {
-          console.error(`Не вдалося перевірити seen_ads для фільтра ${filter.id}:`, knownError.message);
-          continue;
+        // knownLinks was loaded above so older seen listings can be checked for price drops.
+        const { data: priceRows, error: priceRowsError } = await supabase
+          .from('ad_price_history').select('ad_link,last_price').eq('filter_id', String(filter.id));
+        // Price history is an optional feature until its Supabase migration is applied.
+        // Never disable new-listing notifications just because that table is not ready.
+        if (priceRowsError) {
+          console.warn(`[Price History] Історія цін недоступна для фільтра ${filter.id}; звичайні сповіщення продовжуються:`, priceRowsError.message);
         }
-        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
+        const previousPrices = new Map((priceRows || []).map(row => [
+          String(row.ad_link || '').trim().replace(/\/$/, ''),
+          Number(row.last_price)
+        ]));
         for (const item of items) {
           const canonicalLink = String(item.link || '').trim().replace(/\/$/, '');
-          if (!canonicalLink || knownLinks.has(canonicalLink)) continue;
+          if (!canonicalLink) continue;
+          const previousPrice = previousPrices.get(canonicalLink);
+          const isPreviouslySeen = knownLinks.has(canonicalLink);
+          const hasPriceDrop = isPreviouslySeen && Number.isFinite(previousPrice) && previousPrice > Number(item.price) && Number(item.price) > 0;
+          if (isPreviouslySeen && !hasPriceDrop) {
+            // Keep the latest observed price as the baseline even after increases;
+            // otherwise a later drop could be compared with a stale historical value.
+            if (Number(item.price) > 0 && previousPrice !== Number(item.price)) {
+              const { error: baselineError } = await supabase.from('ad_price_history').upsert({
+                filter_id: String(filter.id), ad_link: canonicalLink, last_price: Number(item.price), updated_at: new Date().toISOString()
+              }, { onConflict: 'filter_id,ad_link' });
+              if (!baselineError) previousPrices.set(canonicalLink, Number(item.price));
+              else console.error('[Price History] Не вдалося оновити базову ціну:', baselineError.message);
+            }
+            continue;
+          }
 
-          const isCheap = averagePrice > 0 && item.price < averagePrice * 0.85;
-          const discount = isCheap ? Math.round((1 - item.price / averagePrice) * 100) : 0;
+          // Compare only listings that pass the same product/condition/location
+          // rules. Budget and age limits are excluded from market comparables so
+          // they do not artificially push the reference median down.
+          const comparableCriteria = {
+            ...criteria,
+            minPrice: 0,
+            maxPrice: 0,
+            maxAgeMinutes: 0,
+            bargainHunter: false
+          };
+          const comparablePrices = parsedItems
+            .filter(other => String(other.link || '').trim().replace(/\/$/, '') !== canonicalLink)
+            .filter(other => locationMatches(other.locationDate, requestedLocation))
+            .filter(other => !needsFullDescription || other.detailsLoaded)
+            .filter(other => applyCriteriaToListing(other, comparableCriteria).matches)
+            .map(other => Number(other.price))
+            .filter(price => Number.isFinite(price) && price > 0);
+          const bargain = estimateBargainPrice(item.price, comparablePrices, {
+            minComparableListings: criteria.bargainHunter ? criteria.minComparableListings : 5,
+            discountPercent: criteria.bargainHunter ? criteria.maxDiscountPercent : 15
+          });
+          const isCheap = bargain.isBargain;
+          const discount = isCheap ? (bargain.discountPercent ?? 0) : 0;
 
           const notificationText = 
-            `🔎 <b>Знайдено нове оголошення для фільтра “${filter.query}”</b>\n\n` +
+            (hasPriceDrop
+              ? `📉 <b>Ціна знизилася для оголошення у фільтрі “${filter.query}”</b>\n\n<b>Було:</b> ${previousPrice.toLocaleString('uk-UA')} грн → <b>Стало:</b> ${Number(item.price).toLocaleString('uk-UA')} грн\n\n`
+              : `🔎 <b>Знайдено нове оголошення для фільтра “${filter.query}”</b>\n\n`) +
             `📌 <b>${item.title}</b>\n` +
-            `💰 <b>Ціна:</b> ${item.priceText} ${isCheap ? `🔥 (Нижче ринку на ${discount}%)` : ''}\n` +
+            `💰 <b>Ціна:</b> ${item.priceText} ${isCheap ? `🔥 (Нижче медіани на ${discount}%)` : ''}\n` +
+            (isCheap && bargain.reliable
+              ? `📊 <b>Медіана аналогів:</b> ${Number(bargain.referencePrice).toLocaleString('uk-UA')} грн • ${bargain.comparableCount} оголошень\n`
+              : '') +
             `📍 <b>Місто:</b> ${item.locationDate}\n\n` +
             `<a href="${item.link}">👉 Відкрити оголошення на OLX</a>`;
 
@@ -1253,8 +1444,20 @@ async function runBackgroundWorker() {
               if (insertError && !/duplicate key|unique constraint/i.test(insertError.message || '')) {
                 console.error(`Не вдалося зберегти доставлене оголошення для фільтра ${filter.id}:`, insertError.message);
               }
-            } else {
-              knownLinks.add(canonicalLink);
+            }
+            // A price-drop alert is for an already-seen ad, so inserting seen_ads
+            // normally hits the unique key. Update the price snapshot after every
+            // confirmed delivery, not only after a new seen_ads row was inserted.
+            knownLinks.add(canonicalLink);
+            if (Number(item.price) > 0) {
+              const { error: historyError } = await supabase.from('ad_price_history').upsert({
+                filter_id: String(filter.id),
+                ad_link: canonicalLink,
+                last_price: Number(item.price),
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'filter_id,ad_link' });
+              if (historyError) console.error('[Price History] Не вдалося оновити ціну:', historyError.message);
+              else previousPrices.set(canonicalLink, Number(item.price));
             }
           } else {
             console.warn(`[Notifications] Не доставлено оголошення для фільтра ${filter.id}; буде повторна спроба під час наступного сканування.`);
@@ -1272,9 +1475,30 @@ async function runBackgroundWorker() {
   }
 }
 
-setInterval(runBackgroundWorker, 60000);
+const ENABLE_BACKGROUND_WORKER = (process.env.ENABLE_BACKGROUND_WORKER || 'true').toLowerCase() !== 'false';
+if (ENABLE_BACKGROUND_WORKER) {
+  setInterval(runBackgroundWorker, 60000);
+  console.log('Background worker enabled');
+} else {
+  console.log('Background worker disabled by configuration');
+}
+
+app.get('/health', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'znaideno-smart-search',
+    databaseConfigured: Boolean(supabase),
+    adminDatabaseConfigured: Boolean(supabaseAdmin),
+    backgroundWorkerEnabled: ENABLE_BACKGROUND_WORKER,
+    webhookRegistrationEnabled: (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() !== 'false'
+  });
+});
 
 async function registerWebhook() {
+  if ((process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() === 'false') {
+    console.log('Telegram webhook registration disabled by configuration');
+    return;
+  }
   if (!TELEGRAM_BOT_TOKEN || !SERVER_URL) return;
   try {
     const targetWebhookUrl = `${SERVER_URL}/telegram-webhook`;
