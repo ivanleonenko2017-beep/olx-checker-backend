@@ -143,7 +143,9 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     return { matches: false, reason: 'missing_any_alternative', criteria };
   }
   const exclusionText = lowerText
-    .replace(/(?:не|not)\s+(?:заблокован\p{L}*|заблокирован\p{L}*)/giu, ' ');
+    .replace(/не\s+заблокован\p{L}*/giu, ' ')
+    .replace(/не\s+заблокирован\p{L}*/giu, ' ')
+    .replace(/not\s+blocked/giu, ' ');
   if (expandDefectExclusions(criteria.excludeTerms).some(term => exclusionText.includes(term.toLocaleLowerCase('uk-UA')))) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
