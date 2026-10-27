@@ -1352,14 +1352,16 @@ async function runBackgroundWorker() {
 
         if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
           const citySlug = getOlxCitySlug(filter.city);
-          const cityPath = citySlug ? `/${citySlug}` : '';
+          const searchPath = citySlug
+            ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(targetUrl)}/`
+            : `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/`;
           if (filter.min_price || filter.max_price) {
             const searchMin = filter.min_price ? `search%5Bfilter_float_price%3Afrom%5D=${filter.min_price}` : '';
             const searchMax = filter.max_price ? `search%5Bfilter_float_price%3Ato%5D=${filter.max_price}` : '';
             const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
-            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}${cityPath}/?${queryParams}`;
+            targetUrl = `${searchPath}?${queryParams}`;
           } else {
-            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}${cityPath}/`;
+            targetUrl = searchPath;
           }
           console.log(`[OLX search] filter=${filter.id} cityScope=${citySlug || 'all'}`);
         }
