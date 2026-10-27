@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { normalizeCriteria, applyCriteriaToListing, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
+const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 
 const app = express();
 app.use(cors());
@@ -105,6 +106,27 @@ async function checkIsAdmin(userId) {
   } catch (e) {
     return false;
   }
+}
+
+async function consumeDailySearchQuota(userId, dailyLimit) {
+  if (!supabaseAdmin) throw new Error('Service-role database client is required for atomic search quota checks');
+  const { data, error } = await supabaseAdmin.rpc('consume_daily_search', {
+    p_telegram_id: Number(userId),
+    p_daily_limit: Number(dailyLimit)
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row.allowed !== 'boolean') throw new Error('Unexpected search quota response');
+  return { allowed: row.allowed, used: Number(row.used_count || 0), remaining: Number(row.remaining_count || 0) };
+}
+
+async function getDailySearchUsage(userId) {
+  if (!supabaseAdmin) return { used: 0, date: null };
+  const { data, error } = await supabaseAdmin.from('user_daily_usage')
+    .select('search_count,usage_date').eq('telegram_id', Number(userId)).maybeSingle();
+  if (error) throw error;
+  if (!data || data.usage_date !== new Date().toISOString().slice(0, 10)) return { used: 0, date: null };
+  return { used: Number(data.search_count || 0), date: data.usage_date };
 }
 
 function userAuthMiddleware(req, res, next) {
@@ -645,22 +667,25 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       }
     }
 
-    const hasActivePremium = isAdmin || (
-      accessUser?.tariff === 'premium' &&
-      Boolean(accessUser.premium_until) &&
-      Number.isFinite(Date.parse(accessUser.premium_until)) &&
-      Date.parse(accessUser.premium_until) > Date.now()
-    );
-    const trialStartedMs = accessUser?.trial_started_at ? Date.parse(accessUser.trial_started_at) : 0;
-    const trialEndsMs = trialStartedMs > 0 ? trialStartedMs + 5 * 24 * 60 * 60 * 1000 : 0;
-    const hasActiveTrial = trialEndsMs > Date.now();
-
-    if (!hasActivePremium && !hasActiveTrial && !testPremiumBypass) {
-      return res.status(403).json({
-        success: false,
-        error: 'Пробний період завершився. Для продовження користування потрібен Premium.',
-        code: 'TRIAL_EXPIRED'
-      });
+    let access = deriveAccess(accessUser || {}, isAdmin);
+    if (testPremiumBypass) access = { ...access, plan: 'premium', hasActivePremium: true, hasActiveTrial: false, searchLimit: Infinity };
+    let searchQuota = { used: 0, remaining: access.searchLimit };
+    if (!isAdmin && !testPremiumBypass) {
+      const quota = await consumeDailySearchQuota(userId, access.searchLimit);
+      if (!quota.allowed) {
+        return res.status(429).json({
+          success: false,
+          code: 'DAILY_SEARCH_LIMIT',
+          error: access.plan === 'free'
+            ? 'Ви використали 5 безкоштовних пошуків на сьогодні. Ліміт оновиться опівночі.'
+            : 'Ви використали денний ліміт пошуку. Спробуйте завтра.',
+          plan: access.plan,
+          searchesUsedToday: quota.used,
+          searchesLimitToday: access.searchLimit,
+          searchesRemainingToday: 0
+        });
+      }
+      searchQuota = { used: quota.used, remaining: quota.remaining };
     }
 
     const { query: rawQuery, categoryUrl, minPrice: rawMinPrice, maxPrice: rawMaxPrice, city: rawCity, condition: rawCondition, smart: smartMode } = req.query;
@@ -721,6 +746,10 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       count: items.length,
       averagePrice,
       items,
+      plan: access.plan,
+      searchesUsedToday: searchQuota.used,
+      searchesLimitToday: Number.isFinite(access.searchLimit) ? access.searchLimit : null,
+      searchesRemainingToday: Number.isFinite(searchQuota.remaining) ? searchQuota.remaining : null,
       ...(parsedNaturalQuery ? { parsedQuery: parsedNaturalQuery.query, criteria: parsedCriteria } : {})
     });
   } catch (error) {
@@ -820,19 +849,16 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       }
     }
 
-    const hasActivePremium = testPremiumBypass || isAdmin || (
-      userData.tariff === 'premium' &&
-      Boolean(userData.premium_until) &&
-      Number.isFinite(Date.parse(userData.premium_until)) &&
-      Date.parse(userData.premium_until) > Date.now()
-    );
-    const trialStartedMs = userData.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
-    const trialEndsAt = trialStartedMs > 0 ? new Date(trialStartedMs + 5 * 24 * 60 * 60 * 1000).toISOString() : null;
-    const hasActiveTrial = testPremiumBypass || Boolean(trialEndsAt && Date.parse(trialEndsAt) > Date.now());
+    let access = deriveAccess(userData, isAdmin);
+    if (testPremiumBypass) access = { ...access, plan: 'premium', hasActivePremium: true, hasActiveTrial: false };
+    const hasActivePremium = access.hasActivePremium || testPremiumBypass;
+    const hasActiveTrial = access.hasActiveTrial;
+    const trialEndsAt = access.trialEndsAt;
     if (isAdmin) {
       userData.tariff = 'premium';
       userData.is_admin = true;
-    } else if (!hasActivePremium) {
+    } else if (!hasActivePremium && userData.tariff === 'premium' && userData.premium_until &&
+      Date.parse(userData.premium_until) <= Date.now()) {
       userData.tariff = 'free';
     }
 
@@ -856,6 +882,18 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       hasActivePremium,
       hasActiveTrial,
       trialEndsAt,
+      access: {
+        plan: access.plan,
+        filterLimit: Number.isFinite(access.filterLimit) ? access.filterLimit : null,
+        searchLimit: Number.isFinite(access.searchLimit) ? access.searchLimit : null,
+        checkIntervalMinutes: access.checkIntervalMinutes,
+        premiumPriceUah: PREMIUM_PRICE_UAH
+      },
+      searchesUsedToday: (await getDailySearchUsage(userId)).used,
+      paymentEnabled: process.env.PAYMENTS_ENABLED === 'true' &&
+        Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) &&
+        Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
+      telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
       user: userData,
       stats: { totalReferrals }
     });
@@ -930,13 +968,21 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
       const { data: userData, error: userError } = await supabase.from('users')
         .select('tariff,premium_until,trial_started_at').eq('telegram_id', userId).maybeSingle();
       if (userError) throw userError;
-      const premiumExpiry = userData?.premium_until ? Date.parse(userData.premium_until) : 0;
-      const isPremium = isAdmin || Boolean(userData && userData.tariff === 'premium' &&
-        Number.isFinite(premiumExpiry) && premiumExpiry > Date.now());
-      const trialStart = userData?.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
-      const hasActiveTrial = trialStart > 0 && Date.now() < trialStart + 5 * 24 * 60 * 60 * 1000;
-      if (!isAdmin && !isPremium && !hasActiveTrial && !testPremiumBypass) {
-        return res.status(403).json({ success: false, error: 'TRIAL_EXPIRED' });
+      let access = deriveAccess(userData || {}, isAdmin);
+      if (testPremiumBypass) access = { ...access, plan: 'premium', filterLimit: 20 };
+      if (!canCreateFilter(access, (existingFilters || []).length)) {
+        return res.status(403).json({
+          success: false,
+          error: 'LIMIT_EXCEEDED',
+          code: 'LIMIT_EXCEEDED',
+          plan: access.plan,
+          filterLimit: access.filterLimit,
+          message: access.plan === 'free'
+            ? 'На безкоштовному тарифі можна мати 1 активний фільтр. Видаліть старий або оформіть Premium.'
+            : access.plan === 'trial'
+              ? 'Під час пробного періоду можна мати до 3 активних фільтрів.'
+              : 'На Premium можна мати до 20 активних фільтрів.'
+        });
       }
 
       const { data, error } = await supabase.from('filters').insert([{
@@ -1157,6 +1203,36 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
   }
 });
 
+app.post('/api/payments/stars/invoice-link', userAuthMiddleware, async (req, res) => {
+  try {
+    const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+    if (process.env.PAYMENTS_ENABLED !== 'true' || !Number.isSafeInteger(starsPrice) || starsPrice < 1) {
+      return res.status(503).json({
+        success: false,
+        code: 'PAYMENTS_DISABLED',
+        error: 'Оплата ще не активована. Зараз триває тестування; доступ до Premium можна буде придбати після фінального налаштування.'
+      });
+    }
+    if (!TELEGRAM_BOT_TOKEN) return res.status(503).json({ success: false, error: 'Платіжний бот тимчасово недоступний.' });
+    const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createInvoiceLink`, {
+      title: 'ЗНАЙДЕНО Premium — 30 днів',
+      description: 'Premium: до 20 активних фільтрів, перевірка кожні 2 хвилини та розширені можливості пошуку.',
+      payload: 'znaideno_premium_monthly_v1',
+      provider_token: '',
+      currency: 'XTR',
+      prices: [{ label: 'ЗНАЙДЕНО Premium · 30 днів', amount: starsPrice }],
+      subscription_period: 2592000
+    }, { timeout: 10000 });
+    if (!response.data?.ok || typeof response.data.result !== 'string') {
+      throw new Error(response.data?.description || 'Telegram не повернув платіжне посилання');
+    }
+    res.json({ success: true, invoiceLink: response.data.result, starsPrice, priceUah: PREMIUM_PRICE_UAH });
+  } catch (error) {
+    console.error('[Stars] Не вдалося створити invoice link:', error.response?.data?.description || error.message);
+    res.status(502).json({ success: false, error: 'Не вдалося створити рахунок. Спробуйте пізніше.' });
+  }
+});
+
 app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
   const update = req.body;
@@ -1165,8 +1241,11 @@ app.post('/telegram-webhook', async (req, res) => {
   // Telegram Stars checkout: approve only the expected digital Premium product.
   if (update.pre_checkout_query) {
     const query = update.pre_checkout_query;
-    const valid = query.currency === 'XTR' && query.invoice_payload === 'olx_checker_premium_30d_v1' &&
-      Number(query.total_amount) === Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
+    const configuredStarsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+    const valid = process.env.PAYMENTS_ENABLED === 'true' &&
+      Number.isSafeInteger(configuredStarsPrice) && configuredStarsPrice > 0 &&
+      query.currency === 'XTR' && query.invoice_payload === 'znaideno_premium_monthly_v1' &&
+      Number(query.total_amount) === configuredStarsPrice;
     try {
       await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery`, {
         pre_checkout_query_id: query.id,
@@ -1200,47 +1279,50 @@ app.post('/telegram-webhook', async (req, res) => {
     }
     try {
       const { data: existingPayment, error: paymentReadError } = await supabase
-        .from('star_payments').select('telegram_payment_charge_id')
+        .from('star_payments')
+        .select('telegram_payment_charge_id,activation_status,premium_until,is_recurring,is_first_recurring')
         .eq('telegram_payment_charge_id', payment.telegram_payment_charge_id).maybeSingle();
       if (paymentReadError) throw paymentReadError;
+
+      let premiumUntil;
       if (existingPayment) {
-        // Recover an interrupted activation if the ledger row exists but Premium was not granted.
-        const { data: existingUser, error: existingUserError } = await supabase
-          .from('users').select('premium_until,tariff').eq('telegram_id', chatId).maybeSingle();
-        if (existingUserError) throw existingUserError;
-        const existingExpiry = existingUser && existingUser.premium_until ? Date.parse(existingUser.premium_until) : 0;
-        if (!Number.isFinite(existingExpiry) || existingExpiry <= Date.now()) {
-          const repairedUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-          const { error: repairError } = await supabase.from('users').upsert({
-            telegram_id: chatId,
-            first_name: msg.from && msg.from.first_name ? msg.from.first_name : 'User',
-            tariff: 'premium',
-            premium_until: repairedUntil
-          }, { onConflict: 'telegram_id' });
-          if (repairError) throw repairError;
-          await sendTelegramMessage(chatId, 'Знайшли незавершену активацію платежу та відновили Premium на 30 днів. Дякуємо за підтримку ЗНАЙДЕНО.');
-        } else {
-          await sendTelegramMessage(chatId, 'Цей платіж уже оброблено, Premium активний. Дякуємо за підтримку ЗНАЙДЕНО.');
+        if (existingPayment.activation_status === 'active' && existingPayment.premium_until) {
+          await sendTelegramMessage(chatId, 'Цей платіж уже оброблено. Premium залишається активним до вказаної дати.');
+          return;
         }
-        return;
+        premiumUntil = existingPayment.premium_until;
+        if (!premiumUntil) {
+          const { data: currentUser, error: userReadError } = await supabase
+            .from('users').select('premium_until').eq('telegram_id', chatId).maybeSingle();
+          if (userReadError) throw userReadError;
+          const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
+          const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
+          premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
+          const { error: saveExpiryError } = await supabase.from('star_payments')
+            .update({ premium_until: premiumUntil }).eq('telegram_payment_charge_id', payment.telegram_payment_charge_id);
+          if (saveExpiryError) throw saveExpiryError;
+        }
+      } else {
+        const { data: currentUser, error: userReadError } = await supabase
+          .from('users').select('premium_until').eq('telegram_id', chatId).maybeSingle();
+        if (userReadError) throw userReadError;
+        const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
+        const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
+        premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
+        const { error: paymentInsertError } = await supabase.from('star_payments').insert([{
+          telegram_payment_charge_id: payment.telegram_payment_charge_id,
+          provider_payment_charge_id: payment.provider_payment_charge_id || null,
+          telegram_id: chatId,
+          currency: payment.currency,
+          total_amount: payment.total_amount,
+          invoice_payload: payment.invoice_payload,
+          activation_status: 'pending',
+          premium_until: premiumUntil,
+          is_recurring: payment.is_recurring === true,
+          is_first_recurring: payment.is_first_recurring === true
+        }]);
+        if (paymentInsertError) throw paymentInsertError;
       }
-
-      const { data: currentUser, error: userReadError } = await supabase
-        .from('users').select('premium_until,tariff').eq('telegram_id', chatId).maybeSingle();
-      if (userReadError) throw userReadError;
-      const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
-      const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
-      const premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-      const { error: paymentInsertError } = await supabase.from('star_payments').insert([{
-        telegram_payment_charge_id: payment.telegram_payment_charge_id,
-        provider_payment_charge_id: payment.provider_payment_charge_id || null,
-        telegram_id: chatId,
-        currency: payment.currency,
-        total_amount: payment.total_amount,
-        invoice_payload: payment.invoice_payload
-      }]);
-      if (paymentInsertError) throw paymentInsertError;
 
       const { error: grantError } = await supabase.from('users').upsert({
         telegram_id: chatId,
@@ -1249,6 +1331,13 @@ app.post('/telegram-webhook', async (req, res) => {
         premium_until: premiumUntil
       }, { onConflict: 'telegram_id' });
       if (grantError) throw grantError;
+      const { error: activateError } = await supabase.from('star_payments').update({
+        activation_status: 'active',
+        premium_until: premiumUntil,
+        is_recurring: payment.is_recurring === true || existingPayment?.is_recurring === true,
+        is_first_recurring: payment.is_first_recurring === true || existingPayment?.is_first_recurring === true
+      }).eq('telegram_payment_charge_id', payment.telegram_payment_charge_id);
+      if (activateError) throw activateError;
       await sendTelegramMessage(chatId, 'Оплату Telegram Stars підтверджено! Premium активовано на 30 днів. Дякуємо за підтримку ЗНАЙДЕНО.');
     } catch (err) {
       console.error('Помилка обробки Telegram Stars платежу:', err.message);
@@ -1268,13 +1357,18 @@ app.post('/telegram-webhook', async (req, res) => {
   if (text.startsWith('/start')) {
     const startPayload = text.trim().split(/\s+/, 2)[1] || '';
     if (startPayload === 'buy_premium') {
-      const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
+      const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+      if (process.env.PAYMENTS_ENABLED !== 'true' || !Number.isSafeInteger(starsPrice) || starsPrice < 1) {
+        await sendTelegramMessage(chatId, 'Оплата Premium ще вимкнена на час тестування. Вартість для користувача — 149 грн/місяць; точну суму в Telegram Stars буде показано перед запуском.');
+        return;
+      }
       try {
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendInvoice`, {
           chat_id: chatId,
           title: 'ЗНАЙДЕНО Premium — 30 днів',
-          description: '30 днів Premium: до 1 перевірки кожні 2 хвилини та безлімітні фільтри.',
-          payload: 'olx_checker_premium_30d_v1',
+          description: 'Premium на 30 днів: до 20 активних фільтрів та перевірка кожні 2 хвилини.',
+          payload: 'znaideno_premium_monthly_v1',
+          subscription_period: 2592000,
           provider_token: '',
           currency: 'XTR',
           prices: [{ label: 'Premium на 30 днів', amount: starsPrice }]
@@ -1307,7 +1401,7 @@ app.post('/telegram-webhook', async (req, res) => {
           if (!inviterReadError && inviter) {
             const currentExpiry = inviter.premium_until ? Date.parse(inviter.premium_until) : 0;
             const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
-            const nextExpiry = new Date(rewardBase + 1 * 24 * 60 * 60 * 1000).toISOString();
+            const nextExpiry = new Date(rewardBase + 3 * 24 * 60 * 60 * 1000).toISOString();
             const { error: rewardError } = await supabase.from('users').update({
               tariff: 'premium',
               premium_until: nextExpiry
@@ -1329,7 +1423,7 @@ app.post('/telegram-webhook', async (req, res) => {
       `• <b>Розумні фільтри:</b> відсіює чохли, запчастини, коробки та спам.\n\n` +
       `👑 <b>Переваги PREMIUM:</b>\n` +
       `✓ Перевірка нових товарів кожні <b>2 хвилини</b>.\n` +
-      `✓ <b>Безлімітні</b> активні відстеження.\n` +
+      `✓ До <b>20 активних</b> відстежень.\n` +
       `✓ Пріоритетне надсилання сповіщень.\n\n` +
       `👇 <i>Натисніть кнопку нижче, щоб відкрити додаток та налаштувати пошук:</i>`;
 
@@ -1337,6 +1431,39 @@ app.post('/telegram-webhook', async (req, res) => {
       inline_keyboard: [[{ text: 'Відкрити ЗНАЙДЕНО', web_app: { url: SERVER_URL } }]]
     };
     await sendTelegramMessage(chatId, welcomeText, keyboard);
+    return;
+  }
+
+  if (text.startsWith('/cancel_subscription')) {
+    try {
+      if (!supabase || !TELEGRAM_BOT_TOKEN) throw new Error('Платіжний сервіс тимчасово недоступний');
+      const { data: lastRecurringPayment, error: recurringReadError } = await supabase
+        .from('star_payments')
+        .select('telegram_payment_charge_id,premium_until')
+        .eq('telegram_id', chatId)
+        .eq('activation_status', 'active')
+        .eq('is_recurring', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (recurringReadError) throw recurringReadError;
+      if (!lastRecurringPayment) {
+        await sendTelegramMessage(chatId, 'Не знайшли активної автопродовжуваної підписки для скасування. Якщо потрібна допомога, напишіть у підтримку платежів.');
+        return;
+      }
+      const cancelResponse = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editUserStarSubscription`, {
+        user_id: chatId,
+        telegram_payment_charge_id: lastRecurringPayment.telegram_payment_charge_id,
+        is_canceled: true
+      }, { timeout: 10000 });
+      if (!cancelResponse.data?.ok) throw new Error(cancelResponse.data?.description || 'Telegram не підтвердив скасування');
+      await sendTelegramMessage(chatId, 'Автопродовження скасовано. Premium залишиться доступним до ' +
+        new Date(lastRecurringPayment.premium_until || Date.now()).toLocaleDateString('uk-UA') +
+        '. Повторного списання не буде.');
+    } catch (err) {
+      console.error('[Stars] Не вдалося скасувати підписку:', err.response?.data?.description || err.message);
+      await sendTelegramMessage(chatId, 'Не вдалося скасувати автопродовження автоматично. Напишіть у підтримку платежів: ivanleonenko2016@gmail.com.');
+    }
     return;
   }
 
@@ -1372,7 +1499,8 @@ async function runBackgroundWorker() {
 
   try {
     isWorkerRunning = true;
-    const { data: filters, error: filtersError } = await supabase.from('filters').select('*');
+    const { data: filters, error: filtersError } = await supabase.from('filters').select('*').order('created_at', { ascending: true });
+    const freeFilterProcessed = new Set();
     if (filtersError) throw filtersError;
     if (!filters || filters.length === 0) return;
 
@@ -1389,10 +1517,14 @@ async function runBackgroundWorker() {
           (filterOwner.tariff === 'premium' && filterOwner.premium_until &&
             Number.isFinite(Date.parse(filterOwner.premium_until)) && Date.parse(filterOwner.premium_until) > Date.now())
         ));
-        const trialStart = filterOwner?.trial_started_at ? Date.parse(filterOwner.trial_started_at) : 0;
-        const ownerTrial = trialStart > 0 && Date.now() < trialStart + 5 * 24 * 60 * 60 * 1000;
-        if (!ownerPremium && !ownerTrial && filterOwner?.is_admin !== true) continue;
-        const intervalMs = (ownerPremium || ownerTrial ? 2 : 15) * 60 * 1000;
+        const access = deriveAccess(filterOwner || {}, filterOwner?.is_admin === true);
+        const ownerTrial = access.hasActiveTrial;
+        const ownerPremium = access.hasActivePremium;
+        if (!ownerPremium && !ownerTrial && filterOwner?.is_admin !== true) {
+          if (freeFilterProcessed.has(String(filter.user_id))) continue;
+          freeFilterProcessed.add(String(filter.user_id));
+        }
+        const intervalMs = access.checkIntervalMinutes * 60 * 1000;
         const lastCheckedAt = filter.last_checked_at ? Date.parse(filter.last_checked_at) : 0;
         if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0 && Date.now() - lastCheckedAt < intervalMs) continue;
 
