@@ -85,6 +85,7 @@ function normalizeCriteria(input = {}) {
     bargainHunter: source.bargainHunter === true || source.bargain_hunter === true,
     maxDiscountPercent: Math.min(90, Math.max(5, maxDiscountPercent)),
     minComparableListings: Math.min(30, Math.max(3, toPositiveInteger(source.minComparableListings, 5))),
+    maxAgeMinutes: Math.min(10080, Math.max(0, toPositiveInteger(source.maxAgeMinutes ?? source.max_age_minutes, 0))),
     includeTermsMode: source.includeTermsMode === 'any' || source.include_terms_mode === 'any' ? 'any' : 'all'
   };
 }
@@ -141,6 +142,11 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   }
   if (criteria.maxPrice && (!price || price > criteria.maxPrice)) {
     return { matches: false, reason: 'above_max_price', criteria };
+  }
+  if (criteria.maxAgeMinutes > 0) {
+    const ageMinutes = Number(listing?.ageMinutes);
+    if (!Number.isFinite(ageMinutes) || ageMinutes < 0) return { matches: false, reason: 'age_unknown', criteria };
+    if (ageMinutes > criteria.maxAgeMinutes) return { matches: false, reason: 'too_old', criteria };
   }
   // parseOlx always supplies proxyImg, including the no-photo fallback.
   // Treat only real image URLs as photos so photosOnly does not match every card.
@@ -226,6 +232,14 @@ function parseNaturalLanguageQuery(input) {
   } else if (usedConditionMatch) {
     criteria.condition = 'used';
     remaining = remaining.replace(usedConditionMatch[0], ' ').trim();
+  }
+
+  const ageMatch = remaining.match(/(?:за останні|за последние|не старше|не старіше|опубліковані за останні|опубликованные за последние)\s*(\d{1,4})\s*(хв(?:илин(?:у|и)?)?|мин(?:ут(?:ы)?)?|год(?:ину|ини|ин)?|час(?:а|ов)?|дн(?:і|я|ей|ів)?|день|дня|дней)/iu);
+  if (ageMatch) {
+    const amount = Number(ageMatch[1]);
+    const unit = ageMatch[2].toLocaleLowerCase('uk-UA');
+    criteria.maxAgeMinutes = /^(?:хв|мин)/iu.test(unit) ? amount : /^(?:год|час)/iu.test(unit) ? amount * 60 : amount * 1440;
+    remaining = remaining.replace(ageMatch[0], ' ').trim();
   }
 
   const photoMatch = remaining.match(/(?:^|[\s,;])(тільки з фото|лише з фото|з фото|с фото|with photos|photos only)(?=$|[\s,;])/i);
