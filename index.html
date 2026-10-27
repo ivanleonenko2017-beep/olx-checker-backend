@@ -267,6 +267,9 @@
           <div class="text-[10px] text-gray-400 mt-0.5">Рефералів</div>
         </div>
       </div>
+      <div id="searchUsageInfo" class="px-3 py-2 rounded-xl bg-gray-900 border border-gray-800 text-[10px] text-gray-400">
+        Денний ліміт пошуку завантажується…
+      </div>
 
       <!-- Trial urgency banner -->
       <div id="trialUrgencyBanner" class="hidden p-4 rounded-2xl bg-gradient-to-r from-amber-950/90 to-gray-900 border border-amber-400/70 shadow-lg space-y-2">
@@ -281,7 +284,7 @@
         </div>
         <div class="rounded-xl bg-black/30 p-3">
           <div class="text-xs font-bold text-white">Не втрачайте переваги Premium</div>
-          <div class="text-[11px] text-gray-300 mt-1">Після завершення пробного періоду доступ до пошуку та активного моніторингу буде обмежено. Підписка стане доступною після запуску платежів.</div>
+          <div class="text-[11px] text-gray-300 mt-1">Після пробного періоду залишиться безкоштовний режим: 1 фільтр і до 5 пошуків на день. Підписка стане доступною після запуску платежів.</div>
         </div>
       </div>
 
@@ -293,22 +296,22 @@
               <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
               ЗНАЙДЕНО PREMIUM
             </div>
-            <div class="text-[11px] text-gray-300 mt-0.5">Миттєві сповіщення без затримок</div>
+            <div class="text-[11px] text-gray-300 mt-0.5">До 20 фільтрів · перевірка кожні 2 хвилини</div>
           </div>
-          <span class="text-xs font-extrabold bg-amber-400 text-black px-2.5 py-1 rounded-xl">ТЕСТ · оплата вимкнена</span>
+          <span class="text-xs font-extrabold bg-amber-400 text-black px-2.5 py-1 rounded-xl">149 грн / місяць</span>
         </div>
 
         <div class="space-y-2 pt-1 border-t border-emerald-800/60 text-xs text-gray-200">
           <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Перевірка товарів кожні 2 хвилини</div>
-          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Безлімітні активні відстеження</div>
+          <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> До 20 активних відстежень</div>
           <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold">✓</span> Пріоритетні бот-сповіщення</div>
         </div>
 
         <div class="pt-2 space-y-2">
-          <button type="button" disabled class="w-full py-3 bg-gray-700 text-gray-400 font-extrabold rounded-2xl text-xs cursor-not-allowed flex items-center justify-center gap-2">
-            <span></span> Оплата вимкнена на час тестування
+          <button id="premiumPayBtn" type="button" onclick="payViaTelegramStars()" disabled class="w-full py-3 bg-gray-700 text-gray-400 font-extrabold rounded-2xl text-xs cursor-not-allowed flex items-center justify-center gap-2">
+            <span>✦</span> Оплата вимкнена на час тестування
           </button>
-          <p class="text-[10px] text-gray-400 text-center">Реальні платежі не приймаються. Суму та спосіб оплати буде відкрито після окремого запуску.</p>
+          <p id="premiumPaymentNote" class="text-[10px] text-gray-400 text-center">Після запуску оплата проходитиме через Telegram Stars. Фактичну суму в Stars буде показано перед підтвердженням платежу.</p>
         </div>
       </div>
 
@@ -316,7 +319,7 @@
       <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3">
         <div>
           <div class="text-xs font-bold text-emerald-300">Реферальна програма</div>
-          <div class="text-[10px] text-gray-400 mt-0.5">Запрошуйте друзів та отримуйте +1 день Premium за нового користувача</div>
+          <div class="text-[10px] text-gray-400 mt-0.5">Запрошуйте друзів та отримуйте +3 дні Premium за нового користувача</div>
         </div>
         <div class="flex gap-2">
           <button onclick="shareReferralLink()" class="flex-1 py-2.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold rounded-xl text-xs transition">
@@ -558,11 +561,11 @@
       <div class="bg-gradient-to-br from-emerald-950 via-gray-900 to-gray-900 border-2 border-emerald-400/80 rounded-3xl p-5 w-full max-w-sm space-y-4 text-center shadow-2xl">
         <div class="text-3xl"></div>
         <div>
-          <h3 class="text-sm font-bold text-emerald-300">Ліміт FREE тарифу (1 / 1)</h3>
-          <p class="text-[11px] text-gray-300 mt-1">Для створення безлімітних відстежень переходьте на PREMIUM!</p>
+          <h3 id="limitModalTitle" class="text-sm font-bold text-emerald-300">Ліміт тарифу</h3>
+          <p id="limitModalText" class="text-[11px] text-gray-300 mt-1">Збільште кількість активних фільтрів із Premium.</p>
         </div>
         <button onclick="goToPremiumTab()" class="w-full py-3 bg-emerald-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-emerald-950">
-          Premium — скоро
+          Premium · 149 грн/міс
         </button>
       </div>
     </div>
@@ -663,8 +666,32 @@
         const data = await res.json();
         if (data.success) {
           window.hasActivePremium = data.hasActivePremium === true || data.isAdmin === true;
-          window.hasActiveTrial = data.hasActiveTrial === true || data.isAdmin === true;
+          window.hasActiveTrial = data.hasActiveTrial === true;
           window.trialEndsAt = data.trialEndsAt || null;
+          window.userAccess = data.access || {};
+          window.paymentEnabled = data.paymentEnabled === true;
+          const payButton = document.getElementById('premiumPayBtn');
+          const payNote = document.getElementById('premiumPaymentNote');
+          if (payButton) {
+            payButton.disabled = !window.paymentEnabled;
+            payButton.classList.toggle('cursor-not-allowed', !window.paymentEnabled);
+            payButton.classList.toggle('bg-gray-700', !window.paymentEnabled);
+            payButton.classList.toggle('text-gray-400', !window.paymentEnabled);
+            payButton.classList.toggle('bg-emerald-400', window.paymentEnabled);
+            payButton.classList.toggle('text-black', window.paymentEnabled);
+            payButton.innerText = window.paymentEnabled ? 'Оформити підписку · Telegram Stars' : 'Оплата вимкнена на час тестування';
+          }
+          if (payNote) payNote.innerText = window.paymentEnabled
+            ? '149 грн/місяць — орієнтир ціни. Точну суму в Telegram Stars буде показано у рахунку до підтвердження.'
+            : 'Ціна Premium — 149 грн/місяць. Реальні списання вимкнені до завершення тестування та налаштування ціни в Telegram Stars.';
+          const usageInfo = document.getElementById('searchUsageInfo');
+          if (usageInfo) {
+            const limit = data.access?.searchLimit;
+            const used = Number(data.searchesUsedToday || 0);
+            usageInfo.innerText = limit
+              ? `Пошуки сьогодні: ${Math.min(used, limit)} / ${limit}. Ліміт оновлюється щодня.`
+              : 'Пошуки сьогодні: без обмеження для адміністратора.';
+          }
           const trialBanner = document.getElementById('trialUrgencyBanner');
           if (trialBanner) {
             if (window.hasActiveTrial && !window.hasActivePremium && window.trialEndsAt) {
@@ -673,7 +700,7 @@
               trialBanner.classList.remove('hidden');
               if (remainingDays <= 1) {
                 document.getElementById('trialUrgencyTitle').innerText = 'Пробний Premium завершується сьогодні';
-                document.getElementById('trialUrgencyText').innerText = 'Це останній день повного доступу. Після завершення пробного періоду пошук і моніторинг будуть обмежені.';
+                document.getElementById('trialUrgencyText').innerText = 'Після пробного періоду залишиться безкоштовний режим: 1 фільтр і до 5 пошуків на день.';
                 trialBanner.classList.remove('border-amber-400/70', 'from-amber-950/90');
                 trialBanner.classList.add('border-red-500/80', 'from-red-950/90');
               } else if (remainingDays <= 2) {
@@ -681,7 +708,7 @@
                 document.getElementById('trialUrgencyText').innerText = 'Завершіть налаштування фільтрів зараз, щоб встигнути скористатися всіма можливостями.';
               } else {
                 document.getElementById('trialUrgencyTitle').innerText = 'Ваш пробний Premium має обмежений термін';
-                document.getElementById('trialUrgencyText').innerText = 'Безлімітні фільтри та швидкий моніторинг доступні ще ' + remainingDays + ' дн.';
+                document.getElementById('trialUrgencyText').innerText = 'До 3 фільтрів і швидкий моніторинг доступні ще ' + remainingDays + ' дн.';
               }
             } else {
               trialBanner.classList.add('hidden');
@@ -706,9 +733,8 @@
             document.getElementById('userTariffBadge').innerText = 'TRIAL PRO';
             document.getElementById('profileTariffBadge').innerText = `Пробний PRO · ${remaining} дн.`;
           } else {
-            document.getElementById('userTariffBadge').innerText = 'TRIAL ЗАВЕРШЕНО';
-            document.getElementById('profileTariffBadge').innerText =
-              data.user && data.user.tariff === 'premium' ? 'Premium закінчився' : 'Пробний період завершився';
+            document.getElementById('userTariffBadge').innerText = 'FREE ТАРИФ';
+            document.getElementById('profileTariffBadge').innerText = 'Безкоштовний тариф · 1 фільтр';
           }
           if (data.stats) {
             document.getElementById('statRefUsers').innerText = data.stats.totalReferrals || 0;
@@ -721,9 +747,45 @@
       }
     }
 
-    function payViaTelegramStars() {
-      alert('Оплата вимкнена на час тестування ЗНАЙДЕНО. Реальні платежі не приймаються.');
-      return;
+    async function payViaTelegramStars() {
+      if (!window.paymentEnabled) {
+        alert('Оплата тимчасово вимкнена на час тестування.');
+        return;
+      }
+      if (!initDataRaw) {
+        alert('Відкрийте ЗНАЙДЕНО через Telegram, щоб оформити Premium.');
+        return;
+      }
+      const button = document.getElementById('premiumPayBtn');
+      if (button) { button.disabled = true; button.innerText = 'Створюємо рахунок…'; }
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/payments/stars/invoice-link`, {
+          method: 'POST',
+          headers: { 'x-telegram-init-data': initDataRaw }
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success || !data.invoiceLink) throw new Error(data.error || 'Не вдалося створити рахунок');
+        const webApp = window.Telegram && window.Telegram.WebApp;
+        if (webApp && typeof webApp.openInvoice === 'function') {
+          webApp.openInvoice(data.invoiceLink, async (status) => {
+            if (status === 'paid') {
+              alert('Оплату отримано. Оновлюємо ваш Premium…');
+              await loadUserProfile();
+            } else if (status === 'failed') {
+              alert('Платіж не завершився. Сервіс не активував Premium.');
+            }
+          });
+        } else {
+          window.open(data.invoiceLink, '_blank', 'noopener');
+        }
+      } catch (error) {
+        alert(error.message || 'Не вдалося створити рахунок');
+      } finally {
+        if (button) {
+          button.disabled = !window.paymentEnabled;
+          button.innerText = window.paymentEnabled ? 'Оформити підписку · Telegram Stars' : 'Оплата вимкнена на час тестування';
+        }
+      }
     }
 
     function getFavorites() {
@@ -796,12 +858,14 @@
 
       if (!query) return;
 
-      if (window.hasActiveTrial !== true && window.hasActivePremium !== true && !isAdminUser) {
-        goToPremiumTab();
-        alert('Пробний період завершився. Оформлення підписки буде доступне після запуску оплати.');
-        return;
-      }
-      if (userFilters.length >= 1 && !isAdminUser && window.hasActivePremium !== true && window.hasActiveTrial !== true) {
+      const filterLimit = isAdminUser ? Infinity : (window.userAccess?.filterLimit ?? (window.hasActivePremium ? 20 : window.hasActiveTrial ? 3 : 1));
+      if (!isAdminUser && userFilters.length >= filterLimit) {
+        const title = document.getElementById('limitModalTitle');
+        const text = document.getElementById('limitModalText');
+        if (title) title.innerText = window.userAccess?.plan === 'trial' ? 'Ліміт пробного тарифу (3 фільтри)' : 'Ліміт тарифу';
+        if (text) text.innerText = window.userAccess?.plan === 'trial'
+          ? 'Під час пробного періоду можна мати до 3 активних фільтрів.'
+          : 'На безкоштовному тарифі доступний 1 активний фільтр. Premium дає до 20 активних фільтрів.';
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -824,12 +888,14 @@
     }
 
     function openAddFilterModal() {
-      if (window.hasActiveTrial !== true && window.hasActivePremium !== true && !isAdminUser) {
-        goToPremiumTab();
-        alert('Пробний період завершився. Оформлення підписки буде доступне після запуску оплати.');
-        return;
-      }
-      if (userFilters.length >= 1 && !isAdminUser && window.hasActivePremium !== true && window.hasActiveTrial !== true && document.getElementById('addFilterModal').classList.contains('hidden')) {
+      const filterLimit = isAdminUser ? Infinity : (window.userAccess?.filterLimit ?? (window.hasActivePremium ? 20 : window.hasActiveTrial ? 3 : 1));
+      if (!isAdminUser && userFilters.length >= filterLimit) {
+        const title = document.getElementById('limitModalTitle');
+        const text = document.getElementById('limitModalText');
+        if (title) title.innerText = window.userAccess?.plan === 'trial' ? 'Ліміт пробного тарифу (3 фільтри)' : 'Ліміт тарифу';
+        if (text) text.innerText = window.userAccess?.plan === 'trial'
+          ? 'Під час пробного періоду можна мати до 3 активних фільтрів.'
+          : 'На безкоштовному тарифі доступний 1 активний фільтр. Premium дає до 20 активних фільтрів.';
         document.getElementById('limitModal').classList.remove('hidden');
         document.getElementById('limitModal').classList.add('flex');
         return;
@@ -1012,11 +1078,17 @@
             if (data.error === 'TRIAL_EXPIRED') {
               closeAddFilterModal();
               goToPremiumTab();
-              alert('Пробний період завершився. Оформлення підписки буде доступне після запуску оплати.');
+              alert('Ви користуєтеся безкоштовним тарифом: 1 активний фільтр і до 5 пошуків на день.');
             } else if (data.error === 'LIMIT_EXCEEDED') {
               closeAddFilterModal();
+              const title = document.getElementById('limitModalTitle');
+              const text = document.getElementById('limitModalText');
+              if (title) title.innerText = 'Ліміт активних фільтрів';
+              if (text) text.innerText = data.message || 'Досягнуто ліміт вашого тарифу.';
               document.getElementById('limitModal').classList.remove('hidden');
               document.getElementById('limitModal').classList.add('flex');
+            } else if (data.code === 'DAILY_SEARCH_LIMIT') {
+              alert(data.error || 'Досягнуто денний ліміт пошуку.');
             } else {
               alert(data.error || 'Помилка збереження');
             }
@@ -1074,15 +1146,11 @@
 
     function renderActiveFilters() {
       const container = document.getElementById('activeSearchesList');
-      const hasPremiumAccess = isAdminUser || window.hasActivePremium === true || window.hasActiveTrial === true;
-      const countText = hasPremiumAccess
-        ? `${userFilters.length} / Безліміт`
-        : `${userFilters.length} / 1 (Free)`;
-
+      const filterLimit = isAdminUser ? Infinity : (window.userAccess?.filterLimit ?? (window.hasActivePremium ? 20 : window.hasActiveTrial ? 3 : 1));
+      const limitLabel = Number.isFinite(filterLimit) ? String(filterLimit) : '∞';
+      const countText = `${userFilters.length} / ${limitLabel}`;
       document.getElementById('activeFiltersCounter').innerText = countText;
-      document.getElementById('statActiveFilters').innerText = hasPremiumAccess
-        ? `${userFilters.length} / ∞`
-        : `${userFilters.length} / 1`;
+      document.getElementById('statActiveFilters').innerText = countText;
 
       if (userFilters.length === 0) {
         container.innerHTML = `

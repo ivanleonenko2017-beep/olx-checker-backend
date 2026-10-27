@@ -5,6 +5,7 @@ on:
     branches:
       - feature/smart-search-v1
       - feature/ai-search-test
+      - feature/trial-free-premium-launch
   pull_request:
     branches:
       - pre-release/1.0.0-hardening
@@ -20,5 +21,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Run Smart Search regression tests
-        run: node --test smart-search.test.js
+      - name: Run all unit and regression tests
+        run: |
+          npm test
+          node --check server.js
