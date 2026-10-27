@@ -86,7 +86,8 @@ function normalizeCriteria(input = {}) {
     maxDiscountPercent: Math.min(90, Math.max(5, maxDiscountPercent)),
     minComparableListings: Math.min(30, Math.max(3, toPositiveInteger(source.minComparableListings, 5))),
     maxAgeMinutes: Math.min(10080, Math.max(0, toPositiveInteger(source.maxAgeMinutes ?? source.max_age_minutes, 0))),
-    includeTermsMode: source.includeTermsMode === 'any' || source.include_terms_mode === 'any' ? 'any' : 'all'
+    includeTermsMode: source.includeTermsMode === 'any' || source.include_terms_mode === 'any' ? 'any' : 'all',
+    modelTerm: typeof source.modelTerm === 'string' ? source.modelTerm.trim().slice(0, 60) : ''
   };
 }
 
@@ -133,6 +134,19 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   const lowerText = text.toLocaleLowerCase('uk-UA');
   const price = toPositiveInteger(listing?.price, 0);
 
+  // A broad OLX query may return adjacent phone models. Enforce the requested
+  // iPhone generation against the title, while allowing suffixes such as Pro.
+  if (criteria.modelTerm) {
+    const modelPattern = criteria.modelTerm.toLocaleLowerCase('uk-UA')
+      .split(/\s+/)
+      .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('\\s+');
+    const exactModel = new RegExp('(?:^|[^\\p{L}\\p{N}])' + modelPattern + '(?=$|[^\\p{L}\\p{N}])', 'iu');
+    if (!exactModel.test(String(listing?.title || '').toLocaleLowerCase('uk-UA'))) {
+      return { matches: false, reason: 'model_mismatch', criteria };
+    }
+  }
+
   if (criteria.includeTerms.length && criteria.includeTermsMode === 'all' && !matchesTerms(lowerText, criteria.includeTerms, 'all')) {
     return { matches: false, reason: 'missing_required_term', criteria };
   }
@@ -146,6 +160,15 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     .replace(/не\s+заблокован\p{L}*/giu, ' ')
     .replace(/не\s+заблокирован\p{L}*/giu, ' ')
     .replace(/not\s+blocked/giu, ' ');
+  const requiresUndamagedScreen = criteria.excludeTerms.some(term =>
+    /(?:екран|диспле|скло|стекл)/iu.test(term) &&
+    /(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд|бит(?:ий|ый|ое))/iu.test(term)
+  );
+  const screenDamagePattern = /(?:екран|диспле|скло|стекл)[^,.;:!?]{0,15}(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд|бит(?:ий|ый|ое))|(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд|бит(?:ий|ый|ое))[^,.;:!?]{0,15}(?:екран|диспле|скло|стекл)/iu;
+  const screenConditionText = [listing?.title, listing?.description].filter(Boolean).join('; ').toLocaleLowerCase('uk-UA');
+  if (requiresUndamagedScreen && screenDamagePattern.test(screenConditionText)) {
+    return { matches: false, reason: 'excluded_term', criteria };
+  }
   if (expandDefectExclusions(criteria.excludeTerms).some(term => exclusionText.includes(term.toLocaleLowerCase('uk-UA')))) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
@@ -335,6 +358,16 @@ function parseNaturalLanguageQuery(input) {
     .replace(/(?:^|\s)(?:с|и|та|й|and|with)(?=\s|$)/giu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+  // Preserve a structured model constraint so unrelated phone generations
+  // returned by OLX's broad text search cannot leak into the results.
+  const phoneModelMatch = remaining.match(/(?:iphone|айфон)\s*(\d{1,2})(?:\s*(pro\s*max|pro|max|mini|plus))?/iu);
+  if (phoneModelMatch) {
+    const family = 'iPhone ' + phoneModelMatch[1];
+    criteria.modelTerm = phoneModelMatch[2]
+      ? family + ' ' + phoneModelMatch[2].replace(/\s+/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
+      : family;
+  }
 
   criteria.query = remaining || original;
   return { original, criteria: normalizeCriteria(criteria), query: criteria.query };
