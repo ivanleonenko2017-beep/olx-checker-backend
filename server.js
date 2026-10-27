@@ -237,7 +237,7 @@ app.get('/', (req, res) => {
 
 function isPublishedToday(locationDate) {
   const label = String(locationDate || '').toLocaleLowerCase('uk-UA');
-  return /(?:^|[\\s,·])(?:сьогодні|сегодня|today)(?=$|[\\s,·])/i.test(label);
+  return /(?:^|[\s,·])(?:сьогодні|сегодня|today)(?=$|[\s,·])/i.test(label);
 }
 
 function getListingAgeMinutes(locationDate) {
