@@ -265,13 +265,75 @@ function getListingAgeMinutes(locationDate) {
   }
 }
 
+function normalizeLocationText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’']/g, '')
+    .toLocaleLowerCase('uk-UA')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function getOlxCitySlug(city) {
+  const normalized = normalizeLocationText(city);
+  const knownSlugs = {
+    'чернигов': 'chernigov',
+    'чернігів': 'chernigov',
+    'київ': 'kiev',
+    'киев': 'kiev',
+    'львів': 'lvov',
+    'львов': 'lvov',
+    'харків': 'kharkov',
+    'харьков': 'kharkov',
+    'одеса': 'odessa',
+    'одесса': 'odessa',
+    'дніпро': 'dnepr',
+    'днепр': 'dnepr',
+    'запоріжжя': 'zaporozhye',
+    'запорожье': 'zaporozhye',
+    'полтава': 'poltava',
+    'сумі': 'sumy',
+    'суми': 'sumy',
+    'рівне': 'rovno',
+    'ровно': 'rovno',
+    'житомир': 'zhitomir',
+    'чернівці': 'chernovtsy',
+    'черновцы': 'chernovtsy'
+  };
+  if (knownSlugs[normalized]) return knownSlugs[normalized];
+  const transliteration = {
+    а:'a', б:'b', в:'v', г:'g', ґ:'g', д:'d', е:'e', є:'ye', ж:'zh', з:'z',
+    и:'y', і:'i', ї:'yi', й:'y', к:'k', л:'l', м:'m', н:'n', о:'o', п:'p',
+    р:'r', с:'s', т:'t', у:'u', ф:'f', х:'kh', ц:'ts', ч:'ch', ш:'sh',
+    щ:'shch', ь:'', ю:'yu', я:'ya'
+  };
+  return normalized.split('').map(char => transliteration[char] ?? char).join('')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 function locationMatches(locationDate, requestedLocation) {
-  const requested = String(requestedLocation || '').trim().toLocaleLowerCase('uk-UA');
-  if (!requested || requested === 'всі міста' || requested === 'вся україна' || requested === 'уся україна') return true;
-  const actual = String(locationDate || '').toLocaleLowerCase('uk-UA');
-  // OLX cards usually expose the city in their location/date label. Match the
-  // requested place only against that label; never pretend a broad search is local.
-  return actual.includes(requested);
+  const requestedRaw = String(requestedLocation || '').trim();
+  const requested = normalizeLocationText(requestedRaw);
+  if (!requested || ['всі міста', 'вся україна', 'уся україна'].some(value => normalizeLocationText(value) === requested)) return true;
+  const actual = normalizeLocationText(locationDate);
+  if (actual.includes(requested)) return true;
+  const aliases = {
+    'чернігів': ['чернигов', 'chernigov'],
+    'чернигов': ['чернігів', 'chernigov'],
+    'київ': ['киев', 'kiev'],
+    'киев': ['київ', 'kiev'],
+    'львів': ['львов', 'lvov'],
+    'львов': ['львів', 'lvov'],
+    'харків': ['харьков', 'kharkov'],
+    'харьков': ['харків', 'kharkov'],
+    'одеса': ['одесса', 'odessa'],
+    'одесса': ['одеса', 'odessa'],
+    'дніпро': ['днепр', 'dnepr'],
+    'днепр': ['дніпро', 'dnepr']
+  };
+  return (aliases[requestedRaw.toLocaleLowerCase('uk-UA')] || aliases[requested] || [])
+    .some(alias => actual.includes(normalizeLocationText(alias)));
 }
 
 async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
@@ -1289,14 +1351,17 @@ async function runBackgroundWorker() {
         let targetUrl = filter.query ? filter.query.trim() : '';
 
         if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+          const citySlug = getOlxCitySlug(filter.city);
+          const cityPath = citySlug ? `/${citySlug}` : '';
           if (filter.min_price || filter.max_price) {
             const searchMin = filter.min_price ? `search%5Bfilter_float_price%3Afrom%5D=${filter.min_price}` : '';
             const searchMax = filter.max_price ? `search%5Bfilter_float_price%3Ato%5D=${filter.max_price}` : '';
             const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
-            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/?${queryParams}`;
+            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}${cityPath}/?${queryParams}`;
           } else {
-            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/`;
+            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}${cityPath}/`;
           }
+          console.log(`[OLX search] filter=${filter.id} cityScope=${citySlug || 'all'}`);
         }
 
         const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
@@ -1333,16 +1398,24 @@ async function runBackgroundWorker() {
           return isPublishedToday(item.locationDate) || knownLinks.has(link);
         });
         const locationEligibleItems = dateEligibleItems.filter(item => locationMatches(item.locationDate, requestedLocation));
-        const items = locationEligibleItems.filter(item => {
+        const criteriaEvaluations = locationEligibleItems.map(item => {
           // If the detail page could not be read, don't claim the item passed
           // explicit required/excluded-word rules using incomplete card text.
-          if (needsFullDescription && !item.detailsLoaded) return false;
-          return applyCriteriaToListing({
+          if (needsFullDescription && !item.detailsLoaded) {
+            return { item, matches: false, reason: 'description_unavailable' };
+          }
+          const result = applyCriteriaToListing({
             ...item,
             ageMinutes: getListingAgeMinutes(item.locationDate)
-          }, criteria).matches;
+          }, criteria);
+          return { item, matches: result.matches, reason: result.reason || 'matched' };
         });
-        console.log(`[Worker Diagnostics] filter=${filter.id} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
+        const items = criteriaEvaluations.filter(result => result.matches).map(result => result.item);
+        const rejectionCounts = criteriaEvaluations.reduce((counts, result) => {
+          if (!result.matches) counts[result.reason] = (counts[result.reason] || 0) + 1;
+          return counts;
+        }, {});
+        console.log(`[Worker Diagnostics] filter=${filter.id} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} rejected=${JSON.stringify(rejectionCounts)} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
         const { error: checkedAtError } = await supabase.from('filters')
           .update({ last_checked_at: new Date().toISOString() }).eq('id', filter.id);
         if (checkedAtError) {
