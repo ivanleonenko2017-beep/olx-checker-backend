@@ -230,7 +230,7 @@ function parseNaturalLanguageQuery(input) {
 
   // "Normal screen" filters explicit damage wording only; absent descriptions
   // cannot establish the physical condition of a device.
-  const normalScreenMatch = remaining.match(/(?:з\s+)?норм(?:альн)?\p{L}*\s+(?:екран\p{L}*|диспле\p{L}*)|(?:екран\p{L}*|диспле\p{L}*)\s+(?:в\s+)?нормальн\p{L}*/iu);
+  const normalScreenMatch = remaining.match(/(?:з\s+)?норм(?:альн)?\p{L}*\s+(?:[еэ]кран\p{L}*|диспле\p{L}*)|(?:[еэ]кран\p{L}*|диспле\p{L}*)\s+(?:в\s+)?нормальн\p{L}*/iu);
   if (normalScreenMatch) {
     criteria.excludeTerms = [...(criteria.excludeTerms || []), 'розбитий екран', 'битий екран', 'тріснутий екран', 'треснутый экран', 'разбитый экран', 'тріщина', 'трещина', 'скол', 'пошкоджений дисплей'];
     remaining = remaining.replace(normalScreenMatch[0], ' ').trim();
