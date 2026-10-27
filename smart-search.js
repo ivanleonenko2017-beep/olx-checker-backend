@@ -142,7 +142,15 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   if (criteria.anyTerms.length && !matchesTerms(lowerText, criteria.anyTerms, 'any')) {
     return { matches: false, reason: 'missing_any_alternative', criteria };
   }
-  if (expandDefectExclusions(criteria.excludeTerms).some(term => lowerText.includes(term.toLocaleLowerCase('uk-UA')))) {
+  const expandedExclusions = expandDefectExclusions(criteria.excludeTerms);
+  const blockedPattern = /(?<!не\\s)(?<!not\\s)(?:заблокован\\p{L}*|заблокирован\\p{L}*|blocked|locked|activation\\s+lock|блокування\\s+активації)/iu;
+  const hasBlockedPhrase = blockedPattern.test(lowerText);
+  const hasOtherExcludedTerm = expandedExclusions.some(term => {
+    const normalizedTerm = term.toLocaleLowerCase('uk-UA');
+    if (/^(?:заблокован\\p{L}*|заблокирован\\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(normalizedTerm)) return false;
+    return lowerText.includes(normalizedTerm);
+  });
+  if ((expandedExclusions.some(term => /^(?:заблокован\\p{L}*|заблокирован\\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(term.toLocaleLowerCase('uk-UA'))) && hasBlockedPhrase) || hasOtherExcludedTerm) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
   if (criteria.minPrice && (!price || price < criteria.minPrice)) {
@@ -224,7 +232,7 @@ function parseNaturalLanguageQuery(input) {
   // Natural-language negative requirements such as "не заблокований".
   const notBlockedMatch = remaining.match(/не\s+(?:заблокован\p{L}*|заблокирован\p{L}*|в\s+блок\p{L}*)|без\s+(?:блокуван\p{L}*|блокировк\p{L}*|icloud|айклауд)/iu);
   if (notBlockedMatch) {
-    criteria.excludeTerms = [...(criteria.excludeTerms || []), 'заблокований', 'заблокирован', 'activation lock', 'блокування активації'];
+    criteria.excludeTerms = [...(criteria.excludeTerms || []), 'заблокований', 'заблокирован', 'activation lock', 'блокування активації', 'icloud locked', 'icloud заблокований', 'icloud заблокирован'];
     remaining = remaining.replace(notBlockedMatch[0], ' ').trim();
   }
 
