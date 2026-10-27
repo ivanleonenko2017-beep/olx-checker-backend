@@ -1272,7 +1272,7 @@ app.post('/telegram-webhook', async (req, res) => {
   // Grant Premium only after Telegram confirms a successful Stars payment.
   if (msg.successful_payment) {
     const payment = msg.successful_payment;
-    const expectedStars = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
+    const expectedStars = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
     if (payment.currency !== 'XTR' || payment.invoice_payload !== 'znaideno_premium_monthly_v1' ||
         Number(payment.total_amount) !== expectedStars || !payment.telegram_payment_charge_id) {
       console.error('Отримано платіж із неочікуваними параметрами; Premium не нараховано.');
@@ -1285,7 +1285,7 @@ app.post('/telegram-webhook', async (req, res) => {
       return;
     }
     try {
-      const { data: existingPayment, error: paymentReadError } = await supabase
+      const { data: existingPayment, error: paymentReadError } = await paymentDb
         .from('star_payments')
         .select('telegram_payment_charge_id,activation_status,premium_until,is_recurring,is_first_recurring')
         .eq('telegram_payment_charge_id', payment.telegram_payment_charge_id).maybeSingle();
@@ -1299,7 +1299,7 @@ app.post('/telegram-webhook', async (req, res) => {
         }
         premiumUntil = existingPayment.premium_until;
         if (!premiumUntil) {
-          const { data: currentUser, error: userReadError } = await supabase
+          const { data: currentUser, error: userReadError } = await paymentDb
             .from('users').select('premium_until').eq('telegram_id', chatId).maybeSingle();
           if (userReadError) throw userReadError;
           const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
@@ -1310,7 +1310,7 @@ app.post('/telegram-webhook', async (req, res) => {
           if (saveExpiryError) throw saveExpiryError;
         }
       } else {
-        const { data: currentUser, error: userReadError } = await supabase
+        const { data: currentUser, error: userReadError } = await paymentDb
           .from('users').select('premium_until').eq('telegram_id', chatId).maybeSingle();
         if (userReadError) throw userReadError;
         const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
