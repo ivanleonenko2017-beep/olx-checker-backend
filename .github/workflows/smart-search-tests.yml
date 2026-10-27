@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/smart-search-v1
+      - feature/ai-search-test
   pull_request:
     branches:
       - pre-release/1.0.0-hardening

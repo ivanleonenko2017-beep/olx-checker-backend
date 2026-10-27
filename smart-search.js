@@ -221,6 +221,21 @@ function parseNaturalLanguageQuery(input) {
     }
   }
 
+  // Natural-language negative requirements such as "не заблокований".
+  const notBlockedMatch = remaining.match(/не\s+(?:заблокован\p{L}*|заблокирован\p{L}*|в\s+блок\p{L}*)|без\s+(?:блокуван\p{L}*|блокировк\p{L}*|icloud|айклауд)/iu);
+  if (notBlockedMatch) {
+    criteria.excludeTerms = [...(criteria.excludeTerms || []), 'заблокований', 'заблокирован', 'icloud', 'айклауд', 'activation lock'];
+    remaining = remaining.replace(notBlockedMatch[0], ' ').trim();
+  }
+
+  // "Normal screen" filters explicit damage wording only; absent descriptions
+  // cannot establish the physical condition of a device.
+  const normalScreenMatch = remaining.match(/(?:з\s+)?норм(?:альн)?\p{L}*\s+(?:[еэ]кран\p{L}*|диспле\p{L}*)|(?:[еэ]кран\p{L}*|диспле\p{L}*)\s+(?:в\s+)?нормальн\p{L}*/iu);
+  if (normalScreenMatch) {
+    criteria.excludeTerms = [...(criteria.excludeTerms || []), 'розбитий екран', 'битий екран', 'тріснутий екран', 'треснутый экран', 'разбитый экран', 'тріщина', 'трещина', 'скол', 'пошкоджений дисплей'];
+    remaining = remaining.replace(normalScreenMatch[0], ' ').trim();
+  }
+
   const exclusionMatch = remaining.match(/(?:^|[\s,;])(?:не показувати|не пропонувати|не пропоновать|не предлагать|не показывать|без|виключити|исключить)\s+([^.!?;]+)/i);
   if (exclusionMatch) {
     let exclusionText = exclusionMatch[1].trim();
@@ -310,9 +325,10 @@ function parseNaturalLanguageQuery(input) {
 
   remaining = remaining
     .replace(/^(?:я\s+)?(?:хочу|хотів|хотіла|нужно)\s+(?:купити|купить|придбати|найти|знайти)\s+/iu, '')
+    .replace(/^(?:я\s+)?(?:куплю|купити|купить|придбаю|придбати|хочу|хотів|хотіла|нужно)\s+/iu, '')
     .replace(/^(?:шукаю|ищу|знайди|найди|підбери|подбери)\s+/iu, '')
     .replace(/[;,]+/g, ' ')
-    .replace(/\b(?:с|и|та|й|and|with)\b/giu, ' ')
+    .replace(/(?:^|\s)(?:с|и|та|й|and|with)(?=\s|$)/giu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
