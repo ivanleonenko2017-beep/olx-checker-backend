@@ -152,6 +152,18 @@ test('OR alternatives accept either model but reject listings with neither', () 
   assert.equal(applyCriteriaToListing({ title: 'Ноутбук GTX 1650', price: 12000 }, criteria).reason, 'missing_any_alternative');
 });
 
+test('parses maximum listing age from natural language', () => {
+  const parsed = parseNaturalLanguageQuery('iPhone 13 за останні 30 хвилин');
+  assert.equal(parsed.criteria.maxAgeMinutes, 30);
+  assert.equal(parsed.query, 'iPhone 13');
+});
+
+test('requires a reliable publication age when a maximum age is configured', () => {
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 13', price: 9000, ageMinutes: 12 }, { maxAgeMinutes: 30 }).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 13', price: 9000, ageMinutes: 45 }, { maxAgeMinutes: 30 }).reason, 'too_old');
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 13', price: 9000 }, { maxAgeMinutes: 30 }).reason, 'age_unknown');
+});
+
 test('calculates median robustly', () => {
   assert.equal(median([100, 500, 200, 300, 10000]), 300);
   assert.equal(median([100, 200, 300, 400]), 250);
