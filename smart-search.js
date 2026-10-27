@@ -124,14 +124,14 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   const lowerText = text.toLocaleLowerCase('uk-UA');
   const price = toPositiveInteger(listing?.price, 0);
 
-  if (criteria.includeTerms.length && !matchesTerms(lowerText, criteria.includeTerms, 'all')) {
+  if (criteria.includeTerms.length && criteria.includeTermsMode === 'all' && !matchesTerms(lowerText, criteria.includeTerms, 'all')) {
+    return { matches: false, reason: 'missing_required_term', criteria };
+  }
+  if (criteria.includeTerms.length && criteria.includeTermsMode === 'any' && !matchesTerms(lowerText, criteria.includeTerms, 'any')) {
     return { matches: false, reason: 'missing_required_term', criteria };
   }
   if (criteria.anyTerms.length && !matchesTerms(lowerText, criteria.anyTerms, 'any')) {
     return { matches: false, reason: 'missing_any_alternative', criteria };
-  }
-  if (criteria.includeTermsMode === 'any' && criteria.includeTerms.length && !matchesTerms(lowerText, criteria.includeTerms, 'any')) {
-    return { matches: false, reason: 'missing_required_term', criteria };
   }
   if (expandDefectExclusions(criteria.excludeTerms).some(term => lowerText.includes(term.toLocaleLowerCase('uk-UA')))) {
     return { matches: false, reason: 'excluded_term', criteria };
