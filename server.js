@@ -1307,7 +1307,7 @@ async function runBackgroundWorker() {
         const requestedLocation = String(filter.city || '').trim();
         // Advanced term filters need the listing page, not just the often-incomplete
         // search card. Cache successful descriptions and short-lived misses.
-        const needsFullDescription = criteria.includeTerms.length > 0 || criteria.excludeTerms.length > 0;
+        const needsFullDescription = criteria.includeTerms.length > 0 || criteria.anyTerms.length > 0 || criteria.excludeTerms.length > 0;
         if (needsFullDescription) {
           for (const item of parsedItems) {
             const fullDescription = await fetchListingDescription(item.link);
@@ -1382,7 +1382,7 @@ async function runBackgroundWorker() {
             continue;
           }
 
-          const comparablePrices = parsedItems
+          const comparablePrices = items
             .filter(other => String(other.link || '').trim().replace(/\/$/, '') !== canonicalLink)
             .map(other => Number(other.price))
             .filter(price => Number.isFinite(price) && price > 0);
