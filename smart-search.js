@@ -206,10 +206,10 @@ function parseNaturalLanguageQuery(input) {
   }
 
   // Convert explicit alternatives into a structured OR condition.
-  const alternativeMatch = remaining.match(/(.{2,70}?)\s+(?:або|чи|или|or)\s+(.{2,70}?)(?=$|[,;])/iu);
-  if (alternativeMatch && /(?:rtx|gtx|rx|gb|гб|ram|озу|ssd|tb|тб|core|ryzen|iphone|айфон|galaxy|пам.?ят)/iu.test(alternativeMatch[0])) {
+  const alternativeMatch = remaining.match(/((?:nvidia\\s*)?(?:rtx|gtx|rx)\\s*\\d{3,4}(?:\\s*ti|\\s*super)?|(?:iphone|айфон)\\s*\\d{1,2}|(?:core\\s*i[3579]|ryzen\\s*[3579])\\s*\\d{3,5})\\s+(?:або|чи|или|or)\\s+((?:nvidia\\s*)?(?:rtx|gtx|rx)\\s*\\d{3,4}(?:\\s*ti|\\s*super)?|(?:iphone|айфон)\\s*\\d{1,2}|(?:core\\s*i[3579]|ryzen\\s*[3579])\\s*\\d{3,5})/iu);
+  if (alternativeMatch) {
     const alternatives = [alternativeMatch[1].trim(), alternativeMatch[2].trim()]
-      .map(term => term.replace(/^(?:мінімум|від|with|з)\s+/iu, '').replace(/[.!?]+$/, '').trim())
+      .map(term => term.replace(/[.!?]+$/, '').trim())
       .filter(term => term.length >= 2);
     if (alternatives.length === 2) {
       criteria.includeTerms = [...(criteria.includeTerms || []), ...alternatives];
