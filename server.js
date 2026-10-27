@@ -947,8 +947,15 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
 
     if (supabase) {
       try {
-        await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
-      } catch (uErr) {}
+        await supabase.from('users').upsert({
+          telegram_id: userId,
+          trial_started_at: new Date().toISOString()
+        }, { onConflict: 'telegram_id', ignoreDuplicates: true });
+        await supabase.from('users').update({ trial_started_at: new Date().toISOString() })
+          .eq('telegram_id', userId).is('trial_started_at', null);
+      } catch (uErr) {
+        console.warn('[Filter access] Не вдалося ініціалізувати пробний період:', uErr.message);
+      }
 
       const { data: existingFilters, error: filtersError } = await supabase
         .from('filters')
