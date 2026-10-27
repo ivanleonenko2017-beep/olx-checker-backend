@@ -1382,16 +1382,27 @@ async function runBackgroundWorker() {
             continue;
           }
 
-          const comparablePrices = items
+          // Compare only listings that pass the same product/condition/location
+          // rules. Budget and age limits are excluded from market comparables so
+          // they do not artificially push the reference median down.
+          const comparableCriteria = {
+            ...criteria,
+            minPrice: 0,
+            maxPrice: 0,
+            maxAgeMinutes: 0,
+            bargainHunter: false
+          };
+          const comparablePrices = parsedItems
             .filter(other => String(other.link || '').trim().replace(/\/$/, '') !== canonicalLink)
+            .filter(other => locationMatches(other.locationDate, requestedLocation))
+            .filter(other => !needsFullDescription || other.detailsLoaded)
+            .filter(other => applyCriteriaToListing(other, comparableCriteria).matches)
             .map(other => Number(other.price))
             .filter(price => Number.isFinite(price) && price > 0);
-          const bargain = criteria.bargainHunter
-            ? estimateBargainPrice(item.price, comparablePrices, {
-                minComparableListings: criteria.minComparableListings,
-                discountPercent: criteria.maxDiscountPercent
-              })
-            : { isBargain: averagePrice > 0 && item.price < averagePrice * 0.85, discountPercent: averagePrice > 0 ? Math.round((1 - item.price / averagePrice) * 100) : 0, referencePrice: averagePrice, comparableCount: comparablePrices.length, reliable: averagePrice > 0 };
+          const bargain = estimateBargainPrice(item.price, comparablePrices, {
+            minComparableListings: criteria.bargainHunter ? criteria.minComparableListings : 5,
+            discountPercent: criteria.bargainHunter ? criteria.maxDiscountPercent : 15
+          });
           const isCheap = bargain.isBargain;
           const discount = isCheap ? (bargain.discountPercent ?? 0) : 0;
 
@@ -1400,7 +1411,10 @@ async function runBackgroundWorker() {
               ? `📉 <b>Ціна знизилася для оголошення у фільтрі “${filter.query}”</b>\n\n<b>Було:</b> ${previousPrice.toLocaleString('uk-UA')} грн → <b>Стало:</b> ${Number(item.price).toLocaleString('uk-UA')} грн\n\n`
               : `🔎 <b>Знайдено нове оголошення для фільтра “${filter.query}”</b>\n\n`) +
             `📌 <b>${item.title}</b>\n` +
-            `💰 <b>Ціна:</b> ${item.priceText} ${isCheap ? `🔥 (Нижче ринку на ${discount}%)` : ''}\n` +
+            `💰 <b>Ціна:</b> ${item.priceText} ${isCheap ? `🔥 (Нижче медіани на ${discount}%)` : ''}\n` +
+            (isCheap && bargain.reliable
+              ? `📊 <b>Медіана аналогів:</b> ${Number(bargain.referencePrice).toLocaleString('uk-UA')} грн • ${bargain.comparableCount} оголошень\n`
+              : '') +
             `📍 <b>Місто:</b> ${item.locationDate}\n\n` +
             `<a href="${item.link}">👉 Відкрити оголошення на OLX</a>`;
 
