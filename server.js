@@ -512,13 +512,13 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     const srcset = imgEl.attr('srcset') || imgEl.attr('data-srcset') || '';
     const candidates = [
       lazySrc,
-      srcset && !srcset.startsWith('data:') ? srcset.split(',').pop().trim().split(/\\s+/)[0] : '',
+      srcset && !srcset.startsWith('data:') ? srcset.split(',').pop().trim().split(/\s+/)[0] : '',
       src,
       imgEl.attr('content') || ''
     ];
 
     let candidate = candidates.find(value =>
-      value && !value.startsWith('data:') && !/placeholder|no-photo|noimage|blank\\.gif/i.test(value)
+      value && !value.startsWith('data:') && !/placeholder|no-photo|noimage|blank\.gif/i.test(value)
     ) || '';
 
     if (candidate) {
@@ -528,7 +528,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
       try {
         const imageUrl = new URL(candidate);
         if (imageUrl.protocol === 'https:' &&
-            /(^|\\.)olx\.(ua|pl|bg|ro|pt|kz|uz|az|ge|md|by)$|olxcdn\.com$|olxstatic\.com$/i.test(imageUrl.hostname)) {
+            /(^|\.)olx\.(ua|pl|bg|ro|pt|kz|uz|az|ge|md|by)$|olxcdn\.com$|olxstatic\.com$/i.test(imageUrl.hostname)) {
           rawImgUrl = imageUrl.toString();
         }
       } catch (_) {
@@ -812,10 +812,13 @@ app.get('/api/ad-details', async (req, res) => {
       validateStatus: status => status >= 200 && status < 400
     });
     const $ = cheerio.load(String(response.data || ''));
-    let description = $('meta[name="description"]').attr('content') ||
-      $('meta[property="og:description"]').attr('content') ||
+    // Prefer listing-specific seller text and structured listing metadata over
+    // generic site-wide meta descriptions, which otherwise look identical on every ad.
+    let description =
       $('[data-testid="ad-description"]').text() ||
-      $('[data-cy="ad-description"]').text() || '';
+      $('[data-cy="ad-description"]').text() ||
+      $('[data-testid*="ad-description"]').text() ||
+      $('[data-cy*="description"]').text() || '';
     if (!String(description).trim()) {
       $('script[type="application/ld+json"]').each((_, el) => {
         if (String(description).trim()) return;
@@ -830,7 +833,11 @@ app.get('/api/ad-details', async (req, res) => {
         } catch (_) {}
       });
     }
-    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();
+    if (!String(description).trim()) {
+      description = $('meta[property="og:description"]').attr('content') ||
+        $('meta[name="description"]').attr('content') || '';
+    }
+    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     if (description.length > 500) description = description.slice(0, 497).trimEnd() + '...';
     res.json({ success: true, description });
   } catch (err) {
