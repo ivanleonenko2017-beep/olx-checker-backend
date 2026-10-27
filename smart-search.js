@@ -92,17 +92,17 @@ function termMatches(haystack, rawTerm) {
   const term = String(rawTerm || '').toLocaleLowerCase('uk-UA');
   if (haystack.includes(term)) return true;
 
-  const ramRequirement = term.match(/(?:мінімум|не менше|від)?\\s*(\\d{1,3})\\s*(?:гб|gb)\\s*(?:оператив(?:ної)? пам.?яті|озу|ram)/iu);
+  const ramRequirement = term.match(/(?:мінімум|не менше|від)?\s*(\d{1,3})\s*(?:гб|gb)\s*(?:оператив(?:ної)? пам.?яті|озу|ram)/iu);
   if (ramRequirement) {
-    const values = [...haystack.matchAll(/(\\d{1,3})\\s*(?:гб|gb)\\s*(?:оператив(?:ної)? пам.?яті|озу|ram|оперативк)/giu)]
+    const values = [...haystack.matchAll(/(\d{1,3})\s*(?:гб|gb)\s*(?:оператив(?:ної)? пам.?яті|озу|ram|оперативк)/giu)]
       .map(match => Number(match[1]));
     return values.some(value => value >= Number(ramRequirement[1]));
   }
 
-  const storageRequirement = term.match(/(?:мінімум|не менше|від)?\\s*(\\d{1,4})\\s*(гб|gb|тб|tb)\\s*(?:ssd|накопичувач|пам.?яті|storage)/iu);
+  const storageRequirement = term.match(/(?:мінімум|не менше|від)?\s*(\d{1,4})\s*(гб|gb|тб|tb)\s*(?:ssd|накопичувач|пам.?яті|storage)/iu);
   if (storageRequirement) {
     const required = Number(storageRequirement[1]) * (/^(?:тб|tb)$/i.test(storageRequirement[2]) ? 1024 : 1);
-    const values = [...haystack.matchAll(/(\\d{1,4})\\s*(гб|gb|тб|tb)\\s*(?:ssd|накопичувач|пам.?яті|storage)/giu)]
+    const values = [...haystack.matchAll(/(\d{1,4})\s*(гб|gb|тб|tb)\s*(?:ssd|накопичувач|пам.?яті|storage)/giu)]
       .map(match => Number(match[1]) * (/^(?:тб|tb)$/i.test(match[2]) ? 1024 : 1));
     return values.some(value => value >= required);
   }
@@ -171,8 +171,8 @@ function parseNaturalLanguageQuery(input) {
     if (/^(к|k|тис|тисяч|тыс|тысяч)$/.test(unit) || (inheritedThousands && amount > 0 && amount < 1000 && !unit)) amount *= 1000;
     return Number.isSafeInteger(Math.round(amount)) ? Math.round(amount) : null;
   };
-  const amountPattern = '(\\d[\\d\\s.,]*(?:\\s*(?:к|k|тисяч(?:а|і|у)?|тысяч(?:а|и)?|тис\\.?|тыс\\.?|грн|₴))?)';
-  const rangeRegex = new RegExp('(?:від|от|з)\\s*' + amountPattern + '\\s*(?:до|по|[-–—])\\s*' + amountPattern, 'i');
+  const amountPattern = '(\d[\d\s.,]*(?:\s*(?:к|k|тисяч(?:а|і|у)?|тысяч(?:а|и)?|тис\\.?|тыс\\.?|грн|₴))?)';
+  const rangeRegex = new RegExp('(?:від|от|з)\s*' + amountPattern + '\s*(?:до|по|[-–—])\s*' + amountPattern, 'i');
   const rangeMatch = remaining.match(rangeRegex);
   if (rangeMatch) {
     const hasThousands = /(?:к|тис|тисяч|тыс|тысяч)/i.test(rangeMatch[1] + rangeMatch[2]);
@@ -187,8 +187,8 @@ function parseNaturalLanguageQuery(input) {
 
   if (criteria.minPrice === undefined && criteria.maxPrice === undefined) {
     const pricePatterns = [
-      { regex: new RegExp('(?:до|не дорожче|максимум|бюджет(?:ом)? до)\\s*' + amountPattern, 'i'), key: 'maxPrice' },
-      { regex: new RegExp('(?:від|от|мінімум)\\s*' + amountPattern, 'i'), key: 'minPrice' }
+      { regex: new RegExp('(?:до|не дорожче|максимум|бюджет(?:ом)? до)\s*' + amountPattern, 'i'), key: 'maxPrice' },
+      { regex: new RegExp('(?:від|от|мінімум)\s*' + amountPattern, 'i'), key: 'minPrice' }
     ];
     for (const pattern of pricePatterns) {
       const match = remaining.match(pattern.regex);
@@ -228,7 +228,7 @@ function parseNaturalLanguageQuery(input) {
   }
 
   // Convert explicit alternatives into a structured OR condition.
-  const alternativeMatch = remaining.match(/((?:nvidia\\s*)?(?:rtx|gtx|rx)\\s*\\d{3,4}(?:\\s*ti|\\s*super)?|(?:iphone|айфон)\\s*\\d{1,2}|(?:core\\s*i[3579]|ryzen\\s*[3579])\\s*\\d{3,5})\\s+(?:або|чи|или|or)\\s+((?:nvidia\\s*)?(?:rtx|gtx|rx)\\s*\\d{3,4}(?:\\s*ti|\\s*super)?|(?:iphone|айфон)\\s*\\d{1,2}|(?:core\\s*i[3579]|ryzen\\s*[3579])\\s*\\d{3,5})/iu);
+  const alternativeMatch = remaining.match(/((?:nvidia\s*)?(?:rtx|gtx|rx)\s*\d{3,4}(?:\s*ti|\s*super)?|(?:iphone|айфон)\s*\d{1,2}|(?:core\s*i[3579]|ryzen\s*[3579])\s*\d{3,5})\s+(?:або|чи|или|or)\s+((?:nvidia\s*)?(?:rtx|gtx|rx)\s*\d{3,4}(?:\s*ti|\s*super)?|(?:iphone|айфон)\s*\d{1,2}|(?:core\s*i[3579]|ryzen\s*[3579])\s*\d{3,5})/iu);
   if (alternativeMatch) {
     const alternatives = [alternativeMatch[1].trim(), alternativeMatch[2].trim()]
       .map(term => term.replace(/[.!?]+$/, '').trim())
@@ -243,8 +243,8 @@ function parseNaturalLanguageQuery(input) {
   // Keep hardware requirements as explicit criteria instead of leaving them
   // buried in the broad OLX query.
   const specPatterns = [
-    /(?:мінімум|не менше|від)\s*(\d{1,3})\s*(?:гб|gb)\s*(?:оператив(?:ної)? пам.?яті|озу|ram)/iu,
-    /(?:мінімум|не менше|від)\s*(\d{1,4})\s*(?:гб|gb|тб|tb)\s*(?:ssd|накопичувач|пам.?яті|storage)/iu
+    /(?:(?:мінімум|minimum|минимум|не менше|від)\s*)?(\d{1,3})\s*(?:гб|gb)\s*(?:оператив(?:ної|ной)? пам.?ят[іи]|озу|ram)/iu,
+    /(?:(?:мінімум|minimum|минимум|не менше|від)\s*)?(\d{1,4})\s*(?:гб|gb|тб|tb)\s*(?:ssd|накопичувач|пам.?ят[іи]|storage)/iu
   ];
   for (const pattern of specPatterns) {
     const match = remaining.match(pattern);
