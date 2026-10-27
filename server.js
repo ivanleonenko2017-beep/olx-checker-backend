@@ -687,13 +687,18 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       const cleanQ = query.trim();
       if (cleanQ.startsWith('http://') || cleanQ.startsWith('https://')) {
         targetUrl = cleanQ;
-      } else if (minPrice || maxPrice) {
+      } else {
+        // Smart Search must ask OLX for the selected city before applying
+        // client-side location matching; otherwise the first national page
+        // can contain no listings from the requested city at all.
+        const citySlug = parsedNaturalQuery && city ? getOlxCitySlug(city) : '';
+        const searchPath = citySlug
+          ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(cleanQ)}/`
+          : `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/`;
         const searchMin = minPrice ? `search%5Bfilter_float_price%3Afrom%5D=${minPrice}` : '';
         const searchMax = maxPrice ? `search%5Bfilter_float_price%3Ato%5D=${maxPrice}` : '';
         const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
-        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/?${queryParams}`;
-      } else {
-        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/`;
+        targetUrl = queryParams ? `${searchPath}?${queryParams}` : searchPath;
       }
     }
 
@@ -701,11 +706,16 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
 
     const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query);
     const requestedLocation = String(city || '').trim();
-    let items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+    const locationItems = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
     if (requestedCondition !== 'all') criteria.condition = requestedCondition;
-    items = items.filter(item => applyCriteriaToListing(item, criteria).matches);
-    console.log(`[API search] Completed: parsed=${parsedItems.length}, returned=${items.length}, smart=${Boolean(parsedNaturalQuery)}, durationMs=${Date.now() - startedAt}`);
+    const rejectionReasons = {};
+    const items = locationItems.filter(item => {
+      const result = applyCriteriaToListing(item, criteria);
+      if (!result.matches) rejectionReasons[result.reason] = (rejectionReasons[result.reason] || 0) + 1;
+      return result.matches;
+    });
+    console.log(`[API search] Completed: parsed=${parsedItems.length}, cityMatched=${locationItems.length}, returned=${items.length}, rejected=${JSON.stringify(rejectionReasons)}, city=${JSON.stringify(requestedLocation)}, url=${targetUrl}, smart=${Boolean(parsedNaturalQuery)}, durationMs=${Date.now() - startedAt}`);
     res.json({
       success: true,
       count: items.length,
