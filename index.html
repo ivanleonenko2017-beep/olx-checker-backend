@@ -1273,6 +1273,13 @@
       const maxPriceInput = document.getElementById('maxPrice');
       const cityInput = document.getElementById('cityInput');
       const conditionInput = document.getElementById('conditionSelect');
+      if (window.currentAiQuery && window.currentAiQuery !== inputVal && window.currentAiAutoFields) {
+        const previous = window.currentAiAutoFields;
+        if (minPriceInput.value === String(previous.minPrice || '')) minPriceInput.value = '';
+        if (maxPriceInput.value === String(previous.maxPrice || '')) maxPriceInput.value = '';
+        if (cityInput.value === String(previous.city || '')) cityInput.value = '';
+        if (conditionInput.value === String(previous.condition || 'all')) conditionInput.value = 'all';
+      }
       const btn = document.getElementById('searchBtn');
       const resultsDiv = document.getElementById('results');
       const analyticsDiv = document.getElementById('analytics');
@@ -1310,6 +1317,12 @@
           maxPrice: maxPriceInput.value || criteria.maxPrice || 0,
           city: cityInput.value || criteria.city || '',
           condition: conditionInput.value || criteria.condition || 'all'
+        };
+        window.currentAiAutoFields = {
+          minPrice: criteria.minPrice || 0,
+          maxPrice: criteria.maxPrice || 0,
+          city: criteria.city || '',
+          condition: criteria.condition || 'all'
         };
         renderAiCriteria(window.currentAiCriteria, window.currentAiParsedQuery);
 
