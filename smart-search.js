@@ -288,7 +288,7 @@ function parseNaturalLanguageQuery(input) {
 
   remaining = remaining
     .replace(/^(?:я\s+)?(?:хочу|хотів|хотіла|нужно)\s+(?:купити|купить|придбати|найти|знайти)\s+/iu, '')
-    .replace(/^(?:шукаю|ищу|знайди|підбери|подбери)\s+/iu, '')
+    .replace(/^(?:шукаю|ищу|знайди|найди|підбери|подбери)\s+/iu, '')
     .replace(/[;,]+/g, ' ')
     .replace(/\b(?:с|и|та|й|and|with)\b/giu, ' ')
     .replace(/\s+/g, ' ')
