@@ -124,10 +124,10 @@ test('parses multiple Ukrainian and Russian defect exclusions', () => {
 });
 
 test('parses common broken-glass and activation-lock exclusions', () => {
-  const parsed = parseNaturalLanguageQuery('iPhone 11 за 7000 не показывать разбитое стекло, заблокирован, iCloud');
+  const parsed = parseNaturalLanguageQuery('iPhone 11 за 7000 не показывать разбитое стекло, заблокирован');
   assert.ok(parsed.criteria.excludeTerms.includes('разбитое стекло'));
-  assert.equal(applyCriteriaToListing({ title: 'iPhone 11, битый экран', price: 7000 }, parsed.criteria).matches, false);
-  assert.ok(parsed.criteria.excludeTerms.includes('iCloud'));
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 11, разбитое стекло', price: 7000 }, parsed.criteria).matches, false);
+  assert.equal(parsed.criteria.excludeTerms.some(term => /^icloud$/i.test(term)), false);
 });
 
 test('parses city, minimum hardware specs, and GPU alternatives from one natural-language query', () => {
@@ -209,4 +209,28 @@ test('normal-screen request does not claim to verify listings with no damage wor
   const parsed = parseNaturalLanguageQuery('Куплю iPhone 11 з норм екраном');
   assert.equal(parsed.query, 'iPhone 11');
   assert.ok(parsed.criteria.excludeTerms.includes('битий екран'));
+});
+
+
+test('does not reject clean iCloud wording or a listing that explicitly says not blocked', () => {
+  const parsed = parseNaturalLanguageQuery('Куплю айфон 11 не заблокированный з норм екраном');
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11, iCloud чистый, не заблокированный',
+    description: 'Екран цілий, без пошкоджень',
+    price: 7000
+  }, parsed.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11, iCloud чистый',
+    description: 'Телефон працює, екран цілий',
+    price: 7000
+  }, parsed.criteria).matches, true);
+});
+
+test('normal-screen filter does not exclude an unrelated body crack or chip', () => {
+  const parsed = parseNaturalLanguageQuery('Куплю айфон 11 з норм екраном');
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11, трещина на корпусе, скол на рамке',
+    description: 'Экран целый',
+    price: 7000
+  }, parsed.criteria).matches, true);
 });
