@@ -46,10 +46,10 @@ if (rawUrl.endsWith('/rest/v1')) rawUrl = rawUrl.slice(0, -8);
 if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 
 const SUPABASE_URL = rawUrl;
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 // All database access originates on this server. Prefer the service-role key when
 // configured so RLS can be enabled without granting public API roles data access.
 const SUPABASE_KEY = (SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || '').trim();
-const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 // Telegram requires the secret to be configured at webhook registration and echoed
 // in X-Telegram-Bot-Api-Secret-Token. A runtime fallback keeps deployments functional;
