@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { normalizeCriteria, applyCriteriaToListing, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
+const { normalizeMonobankTransaction } = require('./mono-sponsor');
 
 const app = express();
 app.disable('x-powered-by');
@@ -938,6 +939,27 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/user/sponsor-status', userAuthMiddleware, async (req, res) => {
+  try {
+    if (!supabaseAdmin) {
+      return res.status(503).json({ success: false, error: 'Статус підтримки тимчасово недоступний.' });
+    }
+    const { data, error } = await supabaseAdmin.from('users')
+      .select('is_sponsor,sponsor_since')
+      .eq('telegram_id', Number(req.telegramUser.id))
+      .maybeSingle();
+    if (error) throw error;
+    return res.json({
+      success: true,
+      isSponsor: data?.is_sponsor === true,
+      sponsorSince: data?.sponsor_since || null
+    });
+  } catch (err) {
+    console.error('[Sponsor status] Database request failed:', err.message);
+    return res.status(500).json({ success: false, error: 'Не вдалося оновити статус підтримки.' });
+  }
+});
+
 app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
   try {
     const userId = req.telegramUser.id;
@@ -1827,6 +1849,91 @@ if (ENABLE_BACKGROUND_WORKER) {
   console.log('Background worker enabled');
 } else {
   console.log('Background worker disabled by configuration');
+}
+
+if (MONOBANK_TOKEN && MONOBANK_JAR_ID) {
+  // Initial check after startup, then no more than once per minute.
+  setTimeout(pollMonobankJarDonations, 5000);
+  setInterval(pollMonobankJarDonations, 60000);
+  console.log('Monobank Jar sponsor watcher configured');
+} else {
+  console.log('Monobank Jar sponsor watcher disabled (MONOBANK_TOKEN / MONOBANK_JAR_ID not configured)');
+}
+
+// Monobank Jar donation watcher. This records a supporter badge only; it does not grant Premium.
+const MONOBANK_TOKEN = (process.env.MONOBANK_TOKEN || '').trim();
+const MONOBANK_JAR_ID = (process.env.MONOBANK_JAR_ID || '').trim();
+let monoSponsorPollRunning = false;
+let monoSponsorLastPollAt = 0;
+
+async function pollMonobankJarDonations() {
+  if (!MONOBANK_TOKEN || !MONOBANK_JAR_ID || !supabaseAdmin || monoSponsorPollRunning) return;
+  // Monobank personal API should not be queried more frequently than once per 60 seconds.
+  if (Date.now() - monoSponsorLastPollAt < 60000) return;
+  monoSponsorPollRunning = true;
+  monoSponsorLastPollAt = Date.now();
+  try {
+    const { data: cursorRow, error: cursorError } = await supabaseAdmin
+      .from('mono_jar_sync_state').select('last_time').eq('id', 1).maybeSingle();
+    if (cursorError) throw cursorError;
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const fromSeconds = Number.isSafeInteger(Number(cursorRow?.last_time)) && Number(cursorRow.last_time) > 0
+      ? Number(cursorRow.last_time) : Math.max(nowSeconds - 120, 0);
+    if (fromSeconds >= nowSeconds) return;
+
+    const url = 'https://api.monobank.ua/personal/statement/' +
+      encodeURIComponent(MONOBANK_JAR_ID) + '/' + fromSeconds + '/' + nowSeconds;
+    const response = await axios.get(url, {
+      headers: { 'X-Token': MONOBANK_TOKEN, 'Accept': 'application/json' },
+      timeout: 12000,
+      maxContentLength: 2 * 1024 * 1024
+    });
+    if (!Array.isArray(response.data)) throw new Error('Unexpected Monobank statement response');
+
+    const transactions = response.data
+      .filter(tx => Number(tx?.time) > fromSeconds && Number(tx?.time) <= nowSeconds)
+      .sort((a, b) => Number(a.time) - Number(b.time));
+
+    for (const tx of transactions) {
+      const donation = normalizeMonobankTransaction(tx, MONOBANK_JAR_ID);
+      if (!donation) continue;
+
+      // Upsert makes retries safe if the process stops midway through a statement window.
+      const { error: donationError } = await supabaseAdmin.from('sponsor_donations')
+        .upsert(donation, { onConflict: 'mono_transaction_id', ignoreDuplicates: true });
+      if (donationError) throw donationError;
+
+      const { data: updatedUsers, error: updateError } = await supabaseAdmin.from('users')
+        .update({ is_sponsor: true, sponsor_since: donation.occurred_at })
+        .eq('telegram_id', donation.telegram_id)
+        .select('telegram_id');
+      if (updateError) throw updateError;
+
+      if (!updatedUsers || updatedUsers.length === 0) {
+        // A donor may not have opened the bot yet. Create the minimal user row so the
+        // sponsor marker is not lost; the normal profile flow can fill remaining fields.
+        const { error: userUpsertError } = await supabaseAdmin.from('users').upsert({
+          telegram_id: donation.telegram_id,
+          first_name: 'Користувач',
+          is_sponsor: true,
+          sponsor_since: donation.occurred_at
+        }, { onConflict: 'telegram_id' });
+        if (userUpsertError) throw userUpsertError;
+      }
+      console.log('[Sponsor] Donation matched to Telegram account:', donation.telegram_id);
+    }
+
+    // Advance the durable cursor only after all transactions were processed successfully.
+    const nextCursor = Math.max(fromSeconds, ...transactions.map(tx => Number(tx.time) || fromSeconds));
+    const { error: cursorUpdateError } = await supabaseAdmin.from('mono_jar_sync_state')
+      .upsert({ id: 1, last_time: Math.min(nextCursor, nowSeconds), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    if (cursorUpdateError) throw cursorUpdateError;
+  } catch (err) {
+    console.error('[Sponsor] Monobank statement sync failed:', err.response?.status || err.code || err.message);
+  } finally {
+    monoSponsorPollRunning = false;
+  }
 }
 
 app.get('/health', (_req, res) => {
