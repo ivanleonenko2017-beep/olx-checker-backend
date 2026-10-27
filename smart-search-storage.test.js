@@ -25,3 +25,20 @@ test('storage alternatives still reject a different capacity', () => {
   assert.equal(result.matches, false);
   assert.equal(result.reason, 'missing_any_alternative');
 });
+
+test('structured OLX condition metadata satisfies used-condition filter', () => {
+  const result = applyCriteriaToListing(
+    { title: 'Apple iPhone 11 128GB', description: 'Стан оголошення: вживаний.', price: 12000 },
+    { anyTerms: ['128 gb', '256 gb'], condition: 'used' }
+  );
+  assert.equal(result.matches, true);
+});
+
+test('new-condition metadata does not satisfy used-condition filter', () => {
+  const result = applyCriteriaToListing(
+    { title: 'Apple iPhone 11 128GB', description: 'Стан оголошення: новий.', price: 12000 },
+    { anyTerms: ['128 gb', '256 gb'], condition: 'used' }
+  );
+  assert.equal(result.matches, false);
+  assert.equal(result.reason, 'condition_mismatch');
+});
