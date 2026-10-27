@@ -145,7 +145,9 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   const exclusionText = lowerText
     .replace(/(?:не|not)\s+(?:заблокован\p{L}*|заблокирован\p{L}*)/giu, ' ')
     .replace(/(?:без|не|no|without)\s+(?:пошкоджен\p{L}*|поврежден\p{L}*|розбит\p{L}*|разбит\p{L}*|тріснут\p{L}*|треснут\p{L}*|трещин\p{L}*|тріщин\p{L}*)/giu, ' ');
-  if (expandDefectExclusions(criteria.excludeTerms).some(term => exclusionText.includes(term.toLocaleLowerCase('uk-UA')))) {
+  const screenDamageRequested = criteria.excludeTerms.some(term => /(?:скло|стекл|екран|экран|диспле)/iu.test(term));
+  const screenDamageDetected = /(?<!без\s)(?<!не\s)(?:розбит|разбит|бит(?:ий|ое|ый)|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден).{0,24}(?:скло|стекл|екран|экран|диспле)|(?:скло|стекл|екран|экран|диспле).{0,24}(?<!без\s)(?<!не\s)(?:розбит|разбит|бит|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден)/iu.test(exclusionText);
+  if (expandDefectExclusions(criteria.excludeTerms).some(term => exclusionText.includes(term.toLocaleLowerCase('uk-UA'))) || (screenDamageRequested && screenDamageDetected)) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
   if (criteria.minPrice && (!price || price < criteria.minPrice)) {
