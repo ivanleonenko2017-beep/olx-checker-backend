@@ -23,7 +23,7 @@ app.use((req, res, next) => {
 app.use(cors({
   origin: (origin, callback) => {
     const allowedOrigins = new Set([
-      (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\\/$/, ''),
+      (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, ''),
       ...(process.env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean)
     ]);
     if (!origin || allowedOrigins.has(origin)) return callback(null, true);
