@@ -580,7 +580,12 @@ async function fetchListingDescription(inputUrl) {
         }
       } catch (_) {}
     });
-    if (!description) description = $('[data-testid*="condition"], [data-cy*="condition"], [class*="condition"]').text().trim();
+    const visibleCondition = $('[data-testid*="condition"], [data-cy*="condition"], [class*="condition"]').text().trim();
+    if (!conditionMarker && /вживан|уживан|б\/?у|used|pre.?owned/i.test(visibleCondition)) {
+      conditionMarker = ' Стан оголошення: вживаний.';
+    } else if (!conditionMarker && /новий|нова|нове|new/i.test(visibleCondition)) {
+      conditionMarker = ' Стан оголошення: новий.';
+    }
     if (!description) description = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '';
     description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
     if (description && conditionMarker) description = (description + conditionMarker).slice(0, 5000);
