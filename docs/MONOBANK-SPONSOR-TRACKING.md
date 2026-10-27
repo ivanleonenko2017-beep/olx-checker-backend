@@ -42,3 +42,4 @@ The backend must have `SUPABASE_SERVICE_ROLE_KEY` configured in Render. Do not e
 - Run one active watcher instance per Jar. The in-process guard prevents overlapping polls in one process; it is not a distributed lock across multiple replicas.
 - Do not use a real public Jar for automated end-to-end testing unless you are comfortable with the test transfer being real.
 - The watcher is intentionally separate from Telegram Stars subscriptions.
+
