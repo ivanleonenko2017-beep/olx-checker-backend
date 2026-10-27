@@ -804,10 +804,12 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
       const { data, error } = await supabase.from('filters').insert([{
         user_id: userId,
         query: cleanQuery,
-        min_price: parseInt(minPrice, 10) || 0,
-        max_price: parseInt(maxPrice, 10) || 0,
-        city: city ? city.trim() : 'Всі міста',
-        condition: condition || 'all',
+        // Persist one canonical set of values so the worker cannot overwrite
+        // parsed natural-language criteria with empty top-level form fields.
+        min_price: criteria.minPrice || 0,
+        max_price: criteria.maxPrice || 0,
+        city: criteria.city || (city ? city.trim() : 'Всі міста'),
+        condition: criteria.condition || condition || 'all',
         criteria
       }]).select();
 
