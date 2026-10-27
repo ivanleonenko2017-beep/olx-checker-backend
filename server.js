@@ -1290,9 +1290,21 @@ async function runBackgroundWorker() {
             if (fullDescription) item.description = fullDescription;
           }
         }
-        // Only notify about listings OLX explicitly labels as published today.
-        const todaysItems = parsedItems.filter(item => isPublishedToday(item.locationDate));
-        const items = todaysItems
+        // Load seen links before date filtering. New notifications should be limited
+        // to today's listings, but previously seen listings must remain eligible for
+        // price-drop checks even after OLX stops labeling them as "today".
+        const { data: knownRows, error: knownError } = await supabase
+          .from('seen_ads').select('ad_link').eq('filter_id', filter.id);
+        if (knownError) {
+          console.error(`Не вдалося перевірити seen_ads для фільтра ${filter.id}:`, knownError.message);
+          continue;
+        }
+        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
+        const items = parsedItems
+          .filter(item => {
+            const link = String(item.link || '').trim().replace(/\/$/, '');
+            return isPublishedToday(item.locationDate) || knownLinks.has(link);
+          })
           .filter(item => locationMatches(item.locationDate, requestedLocation))
           .filter(item => {
             // If the detail page could not be read, don't claim the item passed
@@ -1311,14 +1323,7 @@ async function runBackgroundWorker() {
 
         if (!items || items.length === 0) continue;
 
-        // Skip links already seen for this filter before attempting an insert.
-        const { data: knownRows, error: knownError } = await supabase
-          .from('seen_ads').select('ad_link').eq('filter_id', filter.id);
-        if (knownError) {
-          console.error(`Не вдалося перевірити seen_ads для фільтра ${filter.id}:`, knownError.message);
-          continue;
-        }
-        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
+        // knownLinks was loaded above so older seen listings can be checked for price drops.
         const { data: priceRows, error: priceRowsError } = await supabase
           .from('ad_price_history').select('ad_link,last_price').eq('filter_id', String(filter.id));
         // Price history is an optional feature until its Supabase migration is applied.
