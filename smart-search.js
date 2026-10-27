@@ -98,7 +98,7 @@ function termMatches(haystack, rawTerm) {
   // or "128 ГБ". Treat these as equivalent for explicit capacity filters.
   const phoneStorage = term.match(/^(\d{2,4})\s*(?:gb|гб)$/iu);
   if (phoneStorage) {
-    const capacityPattern = new RegExp('(?:^|[^\\d])' + phoneStorage[1] + '\\s*(?:gb|гб)(?=$|[^\\p{L}])', 'iu');
+    const capacityPattern = new RegExp('(?:^|[^\\d])' + phoneStorage[1] + '\s*(?:gb|гб)(?=$|[^\\p{L}])', 'iu');
     if (capacityPattern.test(haystack)) return true;
   }
 
@@ -150,7 +150,7 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     if (/^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(normalizedTerm)) return false;
     return lowerText.includes(normalizedTerm);
   });
-  const hasScreenDamage = /(?<!без\\s)(?<!не\\s)(?:розбит|разбит|бит(?:ий|ое|ый)|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден).{0,24}(?:скло|стекл|екран|экран|диспле)|(?:скло|стекл|екран|экран|диспле).{0,24}(?<!без\\s)(?<!не\\s)(?:розбит|разбит|бит|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден)/iu.test(lowerText);
+  const hasScreenDamage = /(?<!без\s)(?<!не\s)(?:розбит|разбит|бит(?:ий|ое|ый)|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден).{0,24}(?:скло|стекл|екран|экран|диспле)|(?:скло|стекл|екран|экран|диспле).{0,24}(?<!без\s)(?<!не\s)(?:розбит|разбит|бит|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден)/iu.test(lowerText);
   const screenDamageRequested = criteria.excludeTerms.some(term => /екран|экран|скло|стекл|диспле/iu.test(term));
   if (((expandedExclusions.some(term => /^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(term.toLocaleLowerCase('uk-UA'))) && hasBlockedPhrase) || hasOtherExcludedTerm || (screenDamageRequested && hasScreenDamage))) {
     return { matches: false, reason: 'excluded_term', criteria };
@@ -202,8 +202,8 @@ function parseNaturalLanguageQuery(input) {
     if (/^(к|k|тис|тисяч|тыс|тысяч)$/.test(unit) || (inheritedThousands && amount > 0 && amount < 1000 && !unit)) amount *= 1000;
     return Number.isSafeInteger(Math.round(amount)) ? Math.round(amount) : null;
   };
-  const amountPattern = '(\\d[\\d\\s.,]*(?:\\s*(?:к|k|тисяч(?:а|і|у)?|тысяч(?:а|и)?|тис\\.?|тыс\\.?|грн|₴))?)';
-  const rangeRegex = new RegExp('(?:від|от|з)\\s*' + amountPattern + '\\s*(?:до|по|[-–—])\\s*' + amountPattern, 'i');
+  const amountPattern = '(\\d[\\d\s.,]*(?:\s*(?:к|k|тисяч(?:а|і|у)?|тысяч(?:а|и)?|тис\\.?|тыс\\.?|грн|₴))?)';
+  const rangeRegex = new RegExp('(?:від|от|з)\s*' + amountPattern + '\s*(?:до|по|[-–—])\s*' + amountPattern, 'i');
   const rangeMatch = remaining.match(rangeRegex);
   if (rangeMatch) {
     const hasThousands = /(?:к|тис|тисяч|тыс|тысяч)/i.test(rangeMatch[1] + rangeMatch[2]);
@@ -218,8 +218,8 @@ function parseNaturalLanguageQuery(input) {
 
   if (criteria.minPrice === undefined && criteria.maxPrice === undefined) {
     const pricePatterns = [
-      { regex: new RegExp('(?:до|не дорожче|максимум|бюджет(?:ом)? до)\\s*' + amountPattern, 'i'), key: 'maxPrice' },
-      { regex: new RegExp('(?:від|от|мінімум)\\s*' + amountPattern, 'i'), key: 'minPrice' }
+      { regex: new RegExp('(?:до|не дорожче|максимум|бюджет(?:ом)? до)\s*' + amountPattern, 'i'), key: 'maxPrice' },
+      { regex: new RegExp('(?:від|от|мінімум)\s*' + amountPattern, 'i'), key: 'minPrice' }
     ];
     for (const pattern of pricePatterns) {
       const match = remaining.match(pattern.regex);
