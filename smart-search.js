@@ -165,7 +165,8 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     /(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд|бит(?:ий|ый|ое))/iu.test(term)
   );
   const screenDamagePattern = /(?:екран|диспле|скло|стекл)[^,.;:!?]{0,15}(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд|бит(?:ий|ый|ое))|(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд|бит(?:ий|ый|ое))[^,.;:!?]{0,15}(?:екран|диспле|скло|стекл)/iu;
-  if (requiresUndamagedScreen && screenDamagePattern.test(exclusionText)) {
+  const screenConditionText = [listing?.title, listing?.description].filter(Boolean).join('; ').toLocaleLowerCase('uk-UA');
+  if (requiresUndamagedScreen && screenDamagePattern.test(screenConditionText)) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
   if (expandDefectExclusions(criteria.excludeTerms).some(term => exclusionText.includes(term.toLocaleLowerCase('uk-UA')))) {
