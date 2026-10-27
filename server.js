@@ -1522,11 +1522,6 @@ async function runBackgroundWorker() {
           console.error(`Не вдалося перевірити тариф користувача для фільтра ${filter.id}:`, ownerError.message);
           continue;
         }
-        const ownerPremium = Boolean(filterOwner && (
-          filterOwner.is_admin === true ||
-          (filterOwner.tariff === 'premium' && filterOwner.premium_until &&
-            Number.isFinite(Date.parse(filterOwner.premium_until)) && Date.parse(filterOwner.premium_until) > Date.now())
-        ));
         const access = deriveAccess(filterOwner || {}, filterOwner?.is_admin === true);
         const ownerTrial = access.hasActiveTrial;
         const ownerPremium = access.hasActivePremium;
