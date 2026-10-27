@@ -60,6 +60,9 @@ const TELEGRAM_WEBHOOK_SECRET = (process.env.TELEGRAM_WEBHOOK_SECRET ||
     ? crypto.createHmac('sha256', TELEGRAM_BOT_TOKEN).update('znaideno-telegram-webhook-v1').digest('hex')
     : '')).trim();
 const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
+const MONOBANK_TOKEN = (process.env.MONOBANK_TOKEN || '').trim();
+const MONOBANK_JAR_ID = (process.env.MONOBANK_JAR_ID || '').trim();
+const MONOBANK_JAR_URL = (process.env.MONOBANK_JAR_URL || '').trim();
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
   .split(',')
@@ -931,7 +934,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
         Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) &&
         Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
       telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
-      sponsorJarUrl: /^https:\/\/send\.monobank\.ua\//i.test(process.env.MONOBANK_JAR_URL || '') ? process.env.MONOBANK_JAR_URL.trim() : null,
+      sponsorJarUrl: /^https:\/\/send\.monobank\.ua\//i.test(MONOBANK_JAR_URL) ? MONOBANK_JAR_URL : null,
       user: userData,
       stats: { totalReferrals }
     });
@@ -1862,8 +1865,6 @@ if (MONOBANK_TOKEN && MONOBANK_JAR_ID) {
 }
 
 // Monobank Jar donation watcher. This records a supporter badge only; it does not grant Premium.
-const MONOBANK_TOKEN = (process.env.MONOBANK_TOKEN || '').trim();
-const MONOBANK_JAR_ID = (process.env.MONOBANK_JAR_ID || '').trim();
 let monoSponsorPollRunning = false;
 let monoSponsorLastPollAt = 0;
 
@@ -1906,7 +1907,7 @@ async function pollMonobankJarDonations() {
       if (donationError) throw donationError;
 
       const { data: updatedUsers, error: updateError } = await supabaseAdmin.from('users')
-        .update({ is_sponsor: true, sponsor_since: donation.occurred_at })
+         .update({ is_sponsor: true })
         .eq('telegram_id', donation.telegram_id)
         .select('telegram_id');
       if (updateError) throw updateError;
