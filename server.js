@@ -1376,15 +1376,9 @@ async function runBackgroundWorker() {
         });
         const requestedLocation = String(filter.city || '').trim();
         // Advanced term filters need the listing page, not just the often-incomplete
-        // search card. Cache successful descriptions and short-lived misses.
+        // search card. Fetch full descriptions only after date and city filtering below,
+        // avoiding up to 30 unnecessary sequential network requests for unrelated ads.
         const needsFullDescription = criteria.includeTerms.length > 0 || criteria.anyTerms.length > 0 || criteria.excludeTerms.length > 0;
-        if (needsFullDescription) {
-          for (const item of parsedItems) {
-            const fullDescription = await fetchListingDescription(item.link);
-            item.detailsLoaded = Boolean(fullDescription);
-            if (fullDescription) item.description = fullDescription;
-          }
-        }
         // Load seen links before date filtering. New notifications should be limited
         // to today's listings, but previously seen listings must remain eligible for
         // price-drop checks even after OLX stops labeling them as "today".
@@ -1400,6 +1394,18 @@ async function runBackgroundWorker() {
           return isPublishedToday(item.locationDate) || knownLinks.has(link);
         });
         const locationEligibleItems = dateEligibleItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+        if (needsFullDescription) {
+          // Limit detail-page requests to ads that could actually be notified.
+          // A small concurrency cap keeps the worker responsive without hammering OLX.
+          for (let i = 0; i < locationEligibleItems.length; i += 3) {
+            const batch = locationEligibleItems.slice(i, i + 3);
+            await Promise.all(batch.map(async item => {
+              const fullDescription = await fetchListingDescription(item.link);
+              item.detailsLoaded = Boolean(fullDescription);
+              if (fullDescription) item.description = fullDescription;
+            }));
+          }
+        }
         const criteriaEvaluations = locationEligibleItems.map(item => {
           // If the detail page could not be read, don't claim the item passed
           // explicit required/excluded-word rules using incomplete card text.
