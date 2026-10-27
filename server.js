@@ -552,24 +552,38 @@ async function fetchListingDescription(inputUrl) {
     });
     const $ = cheerio.load(String(response.data || ''));
     let description = $('[data-testid="ad-description"], [data-cy="ad-description"], [data-testid*="description"], [class*="description"]').first().text().trim();
+    let conditionMarker = '';
 
-    if (!description) {
-      $('script[type="application/ld+json"]').each((_, el) => {
-        if (description) return;
-        try {
-          const json = JSON.parse($(el).contents().text());
-          const candidates = Array.isArray(json) ? json : [json];
-          for (const item of candidates) {
-            if (item && typeof item.description === 'string' && item.description.trim()) {
-              description = item.description.trim();
-              break;
-            }
+    // OLX often exposes condition as structured metadata rather than in the
+    // seller's description. Preserve it as matching context for Smart Search.
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const json = JSON.parse($(el).contents().text());
+        const candidates = Array.isArray(json) ? json : [json];
+        for (const item of candidates) {
+          if (!item || typeof item !== 'object') continue;
+          const rawCondition = item.itemCondition ?? item.condition ??
+            (Array.isArray(item.additionalProperty)
+              ? item.additionalProperty.find(prop => /condition|стан/i.test(String(prop?.name || '')))?.value
+              : '');
+          const conditionValue = typeof rawCondition === 'string'
+            ? rawCondition
+            : String(rawCondition?.name || rawCondition?.['@id'] || '');
+          if (/UsedCondition|pre.?owned|вживан|уживан|б\/?у/i.test(conditionValue)) {
+            conditionMarker = ' Стан оголошення: вживаний.';
+          } else if (/NewCondition|brand.?new|новий|нова|нове/i.test(conditionValue)) {
+            conditionMarker = ' Стан оголошення: новий.';
           }
-        } catch (_) {}
-      });
-    }
+          if (!description && typeof item.description === 'string' && item.description.trim()) {
+            description = item.description.trim();
+          }
+        }
+      } catch (_) {}
+    });
+    if (!description) description = $('[data-testid*="condition"], [data-cy*="condition"], [class*="condition"]').text().trim();
     if (!description) description = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '';
     description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
+    if (description && conditionMarker) description = (description + conditionMarker).slice(0, 5000);
     if (description && !/verify you are human|access denied|robot check|підтверд.{0,20}що ви людина/i.test(description)) {
       listingDescriptionCache.set(key, { description, expiresAt: Date.now() + 10 * 60 * 1000 });
       if (listingDescriptionCache.size > 500) {
