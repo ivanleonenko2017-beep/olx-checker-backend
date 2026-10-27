@@ -73,6 +73,7 @@ function normalizeCriteria(input = {}) {
 
   return {
     includeTerms: normalizeTermList(source.includeTerms ?? source.include_terms),
+    anyTerms: normalizeTermList(source.anyTerms ?? source.any_terms),
     excludeTerms: normalizeTermList(source.excludeTerms ?? source.exclude_terms),
     condition: ['all', 'new', 'used'].includes(String(source.condition || 'all').toLowerCase())
       ? String(source.condition || 'all').toLowerCase()
@@ -92,17 +93,17 @@ function termMatches(haystack, rawTerm) {
   const term = String(rawTerm || '').toLocaleLowerCase('uk-UA');
   if (haystack.includes(term)) return true;
 
-  const ramRequirement = term.match(/(?:мінімум|не менше|від)?\s*(\d{1,3})\s*(?:гб|gb)\s*(?:оператив(?:ної)? пам.?яті|озу|ram)/iu);
-  if (ramRequirement) {
-    const values = [...haystack.matchAll(/(\d{1,3})\s*(?:гб|gb)\s*(?:оператив(?:ної)? пам.?яті|озу|ram|оперативк)/giu)]
+  const ramRequirement = term.match(/(\d{1,3})\s*(?:гб|gb)/iu);
+  if (ramRequirement && /(?:ram|озу|оператив|пам.?ят)/iu.test(term)) {
+    const values = [...haystack.matchAll(/(\d{1,3})\s*(?:гб|gb)\s*(?:ram|озу|оператив\w*\s+пам\w*)/giu)]
       .map(match => Number(match[1]));
     return values.some(value => value >= Number(ramRequirement[1]));
   }
 
-  const storageRequirement = term.match(/(?:мінімум|не менше|від)?\s*(\d{1,4})\s*(гб|gb|тб|tb)\s*(?:ssd|накопичувач|пам.?яті|storage)/iu);
-  if (storageRequirement) {
+  const storageRequirement = term.match(/(\d{1,4})\s*(гб|gb|тб|tb)/iu);
+  if (storageRequirement && /(?:ssd|накопичувач|storage)/iu.test(term)) {
     const required = Number(storageRequirement[1]) * (/^(?:тб|tb)$/i.test(storageRequirement[2]) ? 1024 : 1);
-    const values = [...haystack.matchAll(/(\d{1,4})\s*(гб|gb|тб|tb)\s*(?:ssd|накопичувач|пам.?яті|storage)/giu)]
+    const values = [...haystack.matchAll(/(\d{1,4})\s*(гб|gb|тб|tb)\s*(?:ssd|накопичувач|storage)/giu)]
       .map(match => Number(match[1]) * (/^(?:тб|tb)$/i.test(match[2]) ? 1024 : 1));
     return values.some(value => value >= required);
   }
@@ -123,7 +124,13 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   const lowerText = text.toLocaleLowerCase('uk-UA');
   const price = toPositiveInteger(listing?.price, 0);
 
-  if (criteria.includeTerms.length && !matchesTerms(lowerText, criteria.includeTerms, criteria.includeTermsMode)) {
+  if (criteria.includeTerms.length && !matchesTerms(lowerText, criteria.includeTerms, 'all')) {
+    return { matches: false, reason: 'missing_required_term', criteria };
+  }
+  if (criteria.anyTerms.length && !matchesTerms(lowerText, criteria.anyTerms, 'any')) {
+    return { matches: false, reason: 'missing_any_alternative', criteria };
+  }
+  if (criteria.includeTermsMode === 'any' && criteria.includeTerms.length && !matchesTerms(lowerText, criteria.includeTerms, 'any')) {
     return { matches: false, reason: 'missing_required_term', criteria };
   }
   if (expandDefectExclusions(criteria.excludeTerms).some(term => lowerText.includes(term.toLocaleLowerCase('uk-UA')))) {
@@ -234,8 +241,7 @@ function parseNaturalLanguageQuery(input) {
       .map(term => term.replace(/[.!?]+$/, '').trim())
       .filter(term => term.length >= 2);
     if (alternatives.length === 2) {
-      criteria.includeTerms = [...(criteria.includeTerms || []), ...alternatives];
-      criteria.includeTermsMode = 'any';
+      criteria.anyTerms = [...(criteria.anyTerms || []), ...alternatives];
       remaining = remaining.replace(alternativeMatch[0], ' ').trim();
     }
   }
@@ -284,6 +290,7 @@ function parseNaturalLanguageQuery(input) {
     .replace(/^(?:я\s+)?(?:хочу|хотів|хотіла|нужно)\s+(?:купити|купить|придбати|найти|знайти)\s+/iu, '')
     .replace(/^(?:шукаю|ищу|знайди|підбери|подбери)\s+/iu, '')
     .replace(/[;,]+/g, ' ')
+    .replace(/\b(?:с|и|та|й|and|with)\b/giu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
