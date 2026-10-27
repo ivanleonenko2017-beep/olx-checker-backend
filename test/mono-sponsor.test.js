@@ -32,5 +32,6 @@ test('normalizes a positive Monobank transaction with an exact ID comment', () =
 test('ignores outgoing, malformed, and non-matching transactions', () => {
   assert.equal(normalizeMonobankTransaction({ id: 'x', time: 1760000000, amount: -100, comment: '123' }, 'jar'), null);
   assert.equal(normalizeMonobankTransaction({ id: 'x', time: 1760000000, amount: 100, comment: 'donation 123' }, 'jar'), null);
-  assert.equal(normalizeMonobankTransaction({ id: 'x', time: 1760000000, amount: 100, comment: '123' }, 'jar'), null);
+  assert.equal(normalizeMonobankTransaction({ id: 'x', time: 1760000000, amount: 100, comment: 'not-an-id' }, 'jar'), null);
+  assert.equal(normalizeMonobankTransaction({ id: 'x', amount: 100, comment: '123' }, 'jar'), null);
 });
