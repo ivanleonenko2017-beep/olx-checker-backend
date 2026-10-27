@@ -1328,24 +1328,21 @@ async function runBackgroundWorker() {
           continue;
         }
         const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
-        const items = parsedItems
-          .filter(item => {
-            const link = String(item.link || '').trim().replace(/\/$/, '');
-            return isPublishedToday(item.locationDate) || knownLinks.has(link);
-          })
-          .filter(item => locationMatches(item.locationDate, requestedLocation))
-          .filter(item => {
-            // If the detail page could not be read, don't claim the item passed
-            // explicit required/excluded-word rules using incomplete card text.
-            if (needsFullDescription && !item.detailsLoaded) return false;
-            return applyCriteriaToListing({
-              ...item,
-              ageMinutes: getListingAgeMinutes(item.locationDate)
-            }, criteria).matches;
-          });
-        if (requestedLocation && !['всі міста', 'вся україна', 'уся україна'].includes(requestedLocation.toLocaleLowerCase('uk-UA')) && parsedItems.length > 0 && items.length === 0) {
-          console.log(`[Location Filter] Для фільтра ${filter.id} не знайдено карток із локацією "${requestedLocation}" серед ${parsedItems.length} результатів OLX.`);
-        }
+        const dateEligibleItems = parsedItems.filter(item => {
+          const link = String(item.link || '').trim().replace(/\/$/, '');
+          return isPublishedToday(item.locationDate) || knownLinks.has(link);
+        });
+        const locationEligibleItems = dateEligibleItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+        const items = locationEligibleItems.filter(item => {
+          // If the detail page could not be read, don't claim the item passed
+          // explicit required/excluded-word rules using incomplete card text.
+          if (needsFullDescription && !item.detailsLoaded) return false;
+          return applyCriteriaToListing({
+            ...item,
+            ageMinutes: getListingAgeMinutes(item.locationDate)
+          }, criteria).matches;
+        });
+        console.log(`[Worker Diagnostics] filter=${filter.id} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
         const { error: checkedAtError } = await supabase.from('filters')
           .update({ last_checked_at: new Date().toISOString() }).eq('id', filter.id);
         if (checkedAtError) {
