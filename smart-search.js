@@ -150,7 +150,8 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     if (/^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(normalizedTerm)) return false;
     return lowerText.includes(normalizedTerm);
   });
-  const hasScreenDamage = /(?:розбит|разбит|бит(?:ий|ое|ый)|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден).{0,24}(?:скло|стекл|екран|экран|диспле)|(?:скло|стекл|екран|экран|диспле).{0,24}(?:розбит|разбит|бит|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден)/iu.test(lowerText);\n  const screenDamageRequested = criteria.excludeTerms.some(term => /екран|экран|скло|стекл|диспле/iu.test(term));\n  if (((expandedExclusions.some(term => /^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(term.toLocaleLowerCase('uk-UA'))) && hasBlockedPhrase) || hasOtherExcludedTerm || (screenDamageRequested && hasScreenDamage))) {
+  const hasScreenDamage = /(?:розбит|разбит|бит(?:ий|ое|ый)|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден).{0,24}(?:скло|стекл|екран|экран|диспле)|(?:скло|стекл|екран|экран|диспле).{0,24}(?:розбит|разбит|бит|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден)/iu.test(lowerText);
+  const screenDamageRequested = criteria.excludeTerms.some(term => /екран|экран|скло|стекл|диспле/iu.test(term));\n  if (((expandedExclusions.some(term => /^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(term.toLocaleLowerCase('uk-UA'))) && hasBlockedPhrase) || hasOtherExcludedTerm || (screenDamageRequested && hasScreenDamage))) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
   if (criteria.minPrice && (!price || price < criteria.minPrice)) {
