@@ -931,6 +931,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
         Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) &&
         Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
       telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
+      sponsorJarUrl: /^https:\/\/send\.monobank\.ua\//i.test(process.env.MONOBANK_JAR_URL || '') ? process.env.MONOBANK_JAR_URL.trim() : null,
       user: userData,
       stats: { totalReferrals }
     });
