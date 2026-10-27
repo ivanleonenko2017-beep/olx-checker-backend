@@ -137,11 +137,11 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   // A broad OLX query may return adjacent phone models. Enforce the requested
   // iPhone generation against the title, while allowing suffixes such as Pro.
   if (criteria.modelTerm) {
-    const modelPattern = criteria.modelTerm.toLocaleLowerCase('uk-UA')
+      .split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
       .split(/\\s+/).map(part => part.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\  const lowerText = text.toLocaleLowerCase('uk-UA');
   const price = toPositiveInteger(listing?.price, 0);
 ')).join('\\\\s+');
-    const exactModel = new RegExp('(?:^|[^\\\\p{L}\\\\p{N}])' + modelPattern + '(?=$|[^\\\\p{L}\\\\p{N}])', 'iu');
+    const exactModel = new RegExp('(?:^|[^\\p{L}\\p{N}])' + modelPattern + '(?=$|[^\\p{L}\\p{N}])', 'iu');
     if (!exactModel.test(String(listing?.title || '').toLocaleLowerCase('uk-UA'))) {
       return { matches: false, reason: 'model_mismatch', criteria };
     }
@@ -352,11 +352,11 @@ function parseNaturalLanguageQuery(input) {
 
   // Preserve a structured model constraint so unrelated phone generations
   // returned by OLX's broad text search cannot leak into the results.
-  const phoneModelMatch = remaining.match(/(?:iphone|айфон)\\s*(\\d{1,2})(?:\\s*(pro\\s*max|pro|max|mini|plus))?/iu);
+  const phoneModelMatch = remaining.match(/(?:iphone|айфон)\s*(\d{1,2})(?:\s*(pro\s*max|pro|max|mini|plus))?/iu);
   if (phoneModelMatch) {
     const family = 'iPhone ' + phoneModelMatch[1];
     criteria.modelTerm = phoneModelMatch[2]
-      ? family + ' ' + phoneModelMatch[2].replace(/\\s+/g, ' ').replace(/\\b\\w/g, char => char.toUpperCase())
+      ? family + ' ' + phoneModelMatch[2].replace(/\s+/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
       : family;
   }
 
