@@ -22,4 +22,6 @@ jobs:
         with:
           node-version: 20
       - name: Run all unit and regression tests
-        run: npm test
+        run: |
+          npm test
+          node --check server.js
