@@ -469,6 +469,10 @@
             </select>
           </div>
           <div>
+            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Будь-яка з альтернатив (АБО)</label>
+            <input type="text" id="modalAnyTerms" placeholder="RTX 3060, RTX 4060" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+          </div>
+          <div>
             <label class="block text-[10px] text-gray-400 mb-1 font-medium">Не показувати слова</label>
             <input type="text" id="modalExcludeTerms" placeholder="зламаний, на запчастини" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
           </div>
@@ -919,6 +923,9 @@
         if (Array.isArray(criteria.includeTerms) && criteria.includeTerms.length) {
           document.getElementById('modalIncludeTerms').value = criteria.includeTerms.join(', ');
         }
+        if (Array.isArray(criteria.anyTerms) && criteria.anyTerms.length) {
+          document.getElementById('modalAnyTerms').value = criteria.anyTerms.join(', ');
+        }
         if (criteria.bargainHunter === true) {
           document.getElementById('modalBargainHunter').checked = true;
           document.getElementById('bargainOptions').classList.remove('hidden');
@@ -944,6 +951,7 @@
       const criteria = {
         includeTerms: document.getElementById('modalIncludeTerms').value,
         includeTermsMode: document.getElementById('modalIncludeTermsMode').value,
+        anyTerms: document.getElementById('modalAnyTerms').value,
         excludeTerms: document.getElementById('modalExcludeTerms').value,
         photosOnly: document.getElementById('modalPhotosOnly').checked,
         bargainHunter: document.getElementById('modalBargainHunter').checked,
@@ -1025,6 +1033,7 @@
       document.getElementById('modalCondition').value = 'all';
       document.getElementById('modalIncludeTerms').value = '';
       document.getElementById('modalIncludeTermsMode').value = 'all';
+      document.getElementById('modalAnyTerms').value = '';
       document.getElementById('modalExcludeTerms').value = '';
       document.getElementById('modalPhotosOnly').checked = false;
       document.getElementById('modalBargainHunter').checked = false;
