@@ -146,7 +146,7 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     .replace(/(?:не|not)\s+(?:заблокован\p{L}*|заблокирован\p{L}*)/giu, ' ')
     .replace(/(?:без|не|no|without)\s+(?:пошкоджен\p{L}*|поврежден\p{L}*|розбит\p{L}*|разбит\p{L}*|тріснут\p{L}*|треснут\p{L}*|трещин\p{L}*|тріщин\p{L}*)/giu, ' ');
   const screenDamageRequested = criteria.excludeTerms.some(term => /(?:скло|стекл|екран|экран|диспле)/iu.test(term));
-  const screenDamageDetected = /(?<!без\s)(?<!не\s)(?:розбит|разбит|бит(?:ий|ое|ый)|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден).{0,24}(?:скло|стекл|екран|экран|диспле)|(?:скло|стекл|екран|экран|диспле).{0,24}(?<!без\s)(?<!не\s)(?:розбит|разбит|бит|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден)/iu.test(exclusionText);
+  const screenDamageDetected = /(?<!без\s)(?<!не\s)(?:розбит(?:ий|ое|ый|е)?\s*(?:екран|экран|скло|стекло)|бит(?:ий|ый)\s*(?:екран|экран)|тріснут(?:ий|е)?\s*(?:екран|екран|скло)|треснут(?:ый|ое)?\s*(?:экран|стекло)|трещин\w*\s*(?:на\s*)?(?:екран|экран|стекло)|тріщин\w*\s*(?:на\s*)?(?:екран|скло)|пошкоджен\w*\s*(?:дисплей|екран)|поврежден\w*\s*(?:дисплей|экран))/iu.test(exclusionText);
   if (expandDefectExclusions(criteria.excludeTerms).some(term => exclusionText.includes(term.toLocaleLowerCase('uk-UA'))) || (screenDamageRequested && screenDamageDetected)) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
