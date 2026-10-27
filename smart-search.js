@@ -94,6 +94,14 @@ function termMatches(haystack, rawTerm) {
   const term = String(rawTerm || '').toLocaleLowerCase('uk-UA');
   if (haystack.includes(term)) return true;
 
+  // OLX sellers commonly write phone storage as "128GB", "128 GB", "128ГБ"
+  // or "128 ГБ". Treat these as equivalent for explicit capacity filters.
+  const phoneStorage = term.match(/^(\d{2,4})\s*(?:gb|гб)$/iu);
+  if (phoneStorage) {
+    const capacityPattern = new RegExp('(?:^|[^\\d])' + phoneStorage[1] + '\\s*(?:gb|гб)(?=$|[^\\p{L}])', 'iu');
+    if (capacityPattern.test(haystack)) return true;
+  }
+
   const ramRequirement = term.match(/(\d{1,3})\s*(?:гб|gb)/iu);
   if (ramRequirement && /(?:ram|озу|оператив|пам.?ят)/iu.test(term)) {
     const values = [...haystack.matchAll(/(\d{1,3})\s*(?:гб|gb)\s*(?:ram|озу|оператив\w*\s+пам\w*)/giu)]
