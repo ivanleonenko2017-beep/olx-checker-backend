@@ -663,7 +663,24 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       });
     }
 
-    const { query, categoryUrl, minPrice, maxPrice, city, condition } = req.query;
+    const { query: rawQuery, categoryUrl, minPrice: rawMinPrice, maxPrice: rawMaxPrice, city: rawCity, condition: rawCondition, smart: smartMode } = req.query;
+    const parsedNaturalQuery = smartMode === '1' && typeof rawQuery === 'string' &&
+      !/^https?:\/\//i.test(rawQuery.trim())
+      ? parseNaturalLanguageQuery(rawQuery)
+      : null;
+    const query = parsedNaturalQuery?.query || rawQuery;
+    const parsedCriteria = parsedNaturalQuery?.criteria || {};
+    const criteria = normalizeCriteria({
+      ...parsedCriteria,
+      minPrice: rawMinPrice !== undefined ? rawMinPrice : parsedCriteria.minPrice,
+      maxPrice: rawMaxPrice !== undefined ? rawMaxPrice : parsedCriteria.maxPrice,
+      city: rawCity || parsedCriteria.city,
+      condition: rawCondition || parsedCriteria.condition
+    });
+    const minPrice = rawMinPrice !== undefined && rawMinPrice !== '' ? rawMinPrice : criteria.minPrice || '';
+    const maxPrice = rawMaxPrice !== undefined && rawMaxPrice !== '' ? rawMaxPrice : criteria.maxPrice || '';
+    const city = rawCity || criteria.city || '';
+    const condition = rawCondition || criteria.condition || 'all';
     let targetUrl = categoryUrl;
 
     if (!targetUrl && query) {
@@ -686,14 +703,16 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const requestedLocation = String(city || '').trim();
     let items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
-    const conditionText = item => String(item.title || '') + ' ' + String(item.description || '');
-    if (requestedCondition === 'new') {
-      items = items.filter(item => /(?:^|[^\p{L}])(?:нове|новий|нова|нові|новый|новая|новое|новые|new)(?=$|[^\p{L}])/iu.test(conditionText(item)));
-    } else if (requestedCondition === 'used') {
-      items = items.filter(item => /б\/у|(?:^|[^\p{L}])бу(?=$|[^\p{L}])|вживан|уживан|після використання|used/iu.test(conditionText(item)));
-    }
-    console.log(`[API search] Completed: parsed=${parsedItems.length}, returned=${items.length}, durationMs=${Date.now() - startedAt}`);
-    res.json({ success: true, count: items.length, averagePrice, items });
+    if (requestedCondition !== 'all') criteria.condition = requestedCondition;
+    items = items.filter(item => applyCriteriaToListing(item, criteria).matches);
+    console.log(`[API search] Completed: parsed=${parsedItems.length}, returned=${items.length}, smart=${Boolean(parsedNaturalQuery)}, durationMs=${Date.now() - startedAt}`);
+    res.json({
+      success: true,
+      count: items.length,
+      averagePrice,
+      items,
+      ...(parsedNaturalQuery ? { parsedQuery: parsedNaturalQuery.query, criteria: parsedCriteria } : {})
+    });
   } catch (error) {
     console.error(`[API search] Failed: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}, message=${String(error.message || 'unknown').slice(0, 180)}, durationMs=${Date.now() - startedAt}`);
     if (error.code === 'OLX_BLOCKED') {
