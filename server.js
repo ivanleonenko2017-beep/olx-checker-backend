@@ -1925,7 +1925,7 @@ async function pollMonobankJarDonations() {
     }
 
     // Advance the durable cursor only after all transactions were processed successfully.
-    const nextCursor = Math.max(fromSeconds, ...transactions.map(tx => Number(tx.time) || fromSeconds));
+    const nextCursor = nowSeconds;
     const { error: cursorUpdateError } = await supabaseAdmin.from('mono_jar_sync_state')
       .upsert({ id: 1, last_time: Math.min(nextCursor, nowSeconds), updated_at: new Date().toISOString() }, { onConflict: 'id' });
     if (cursorUpdateError) throw cursorUpdateError;
