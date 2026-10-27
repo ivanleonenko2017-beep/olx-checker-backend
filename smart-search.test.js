@@ -130,6 +130,28 @@ test('parses common broken-glass and activation-lock exclusions', () => {
   assert.ok(parsed.criteria.excludeTerms.includes('iCloud'));
 });
 
+test('parses city, minimum hardware specs, and GPU alternatives from one natural-language query', () => {
+  const parsed = parseNaturalLanguageQuery('Найди игровой ноутбук до 20 тысяч в Чернигове, минимум 16 ГБ оперативной памяти, RTX 3060 или RTX 4060, не показывать сломанные');
+  assert.equal(parsed.criteria.maxPrice, 20000);
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.deepEqual(parsed.criteria.includeTerms, ['минимум 16 ГБ оперативной памяти']);
+  assert.deepEqual(parsed.criteria.anyTerms, ['RTX 3060', 'RTX 4060']);
+  assert.deepEqual(parsed.criteria.excludeTerms, ['сломанные']);
+  assert.equal(parsed.query, 'игровой ноутбук');
+});
+
+test('matches minimum RAM and SSD capacities rather than exact string spelling', () => {
+  const criteria = { includeTerms: ['минимум 16 ГБ оперативной памяти', '512 GB SSD'] };
+  assert.equal(applyCriteriaToListing({ title: 'Ноутбук 32 GB RAM, 1 TB SSD', price: 18000 }, criteria).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'Ноутбук 8 GB RAM, 256 GB SSD', price: 12000 }, criteria).reason, 'missing_required_term');
+});
+
+test('OR alternatives accept either model but reject listings with neither', () => {
+  const criteria = { anyTerms: ['RTX 3060', 'RTX 4060'] };
+  assert.equal(applyCriteriaToListing({ title: 'Ноутбук RTX 4060', price: 18000 }, criteria).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'Ноутбук GTX 1650', price: 12000 }, criteria).reason, 'missing_any_alternative');
+});
+
 test('calculates median robustly', () => {
   assert.equal(median([100, 500, 200, 300, 10000]), 300);
   assert.equal(median([100, 200, 300, 400]), 250);
