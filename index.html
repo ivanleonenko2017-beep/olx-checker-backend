@@ -686,6 +686,7 @@
           window.trialEndsAt = data.trialEndsAt || null;
           window.userAccess = data.access || {};
           window.paymentEnabled = data.paymentEnabled === true;
+          configureSponsorCard(data);
           const payButton = document.getElementById('premiumPayBtn');
           const payNote = document.getElementById('premiumPaymentNote');
           if (payButton) {
