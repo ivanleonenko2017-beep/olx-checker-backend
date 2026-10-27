@@ -1267,7 +1267,7 @@ app.post('/telegram-webhook', async (req, res) => {
   if (msg.successful_payment) {
     const payment = msg.successful_payment;
     const expectedStars = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
-    if (payment.currency !== 'XTR' || payment.invoice_payload !== 'olx_checker_premium_30d_v1' ||
+    if (payment.currency !== 'XTR' || payment.invoice_payload !== 'znaideno_premium_monthly_v1' ||
         Number(payment.total_amount) !== expectedStars || !payment.telegram_payment_charge_id) {
       console.error('Отримано платіж із неочікуваними параметрами; Premium не нараховано.');
       await sendTelegramMessage(chatId, 'Не вдалося автоматично підтвердити платіж. Напишіть на ivanleonenko2016@gmail.com.');
