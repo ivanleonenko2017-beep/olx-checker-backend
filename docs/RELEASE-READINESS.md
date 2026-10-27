@@ -8,6 +8,12 @@ Production service: Render `srv-dbcbps3rjlhs73bfunog`
 
 **NO-GO для повноцінного комерційного релізу з прийманням реальних платежів**, доки не пройдено перелічені нижче обов'язкові перевірки. Технічний реліз для обмеженого тестування можливий лише з вимкненими платежами, підтвердженим деплоєм і перевіркою доступу до даних.
 
+## Критичний факт із live Supabase (перевірено 2026-10-27)
+
+Supabase Security Advisor підтвердив RLS OFF для `users`, `filters`, `seen_ads`, `payments`, `referral_logs`, `ad_price_history`. Перевірка grants також показала, що ролі `anon` і `authenticated` мають table privileges на ці таблиці. Це означає, що прямий доступ через Supabase Data API може обходити авторизацію застосунку.
+
+Підготовлено SQL для закриття прямого доступу: [docs/sql/supabase-rls-lockdown.sql](sql/supabase-rls-lockdown.sql). **SQL не застосовано автоматично.** Перед виконанням потрібно підтвердити, що Render має `SUPABASE_SERVICE_ROLE_KEY`; потім застосувати скрипт у Supabase, перевірити всі основні сценарії та повторно запустити Security Advisor. Не залишати production із поточним станом.
+
 ## Виявлено та виправлено в коді цієї гілки
 
 - Telegram webhook тепер перевіряє заголовок `X-Telegram-Bot-Api-Secret-Token` у constant-time і відхиляє запити без правильного секрету.
