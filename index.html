@@ -480,6 +480,17 @@
             <input type="checkbox" id="modalPhotosOnly" class="accent-emerald-400">
             Лише оголошення з фото
           </label>
+          <div>
+            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Вік оголошення</label>
+            <select id="modalMaxAgeMinutes" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+              <option value="0">Без обмеження</option>
+              <option value="30">Не старше 30 хвилин</option>
+              <option value="60">Не старше 1 години</option>
+              <option value="180">Не старше 3 годин</option>
+              <option value="1440">Не старше 24 годин</option>
+            </select>
+            <p class="text-[9px] text-gray-500 mt-1">Застосовується лише коли OLX показує точний час публікації.</p>
+          </div>
           <label class="flex items-center gap-2 text-[11px] text-gray-300">
             <input type="checkbox" id="modalBargainHunter" class="accent-emerald-400">
             <span>Шукати вигідні пропозиції нижче ринку</span>
@@ -915,6 +926,7 @@
           document.getElementById('modalCondition').value = criteria.condition;
         }
         if (criteria.city) document.getElementById('modalCity').value = criteria.city;
+        if (criteria.maxAgeMinutes > 0) document.getElementById('modalMaxAgeMinutes').value = String(criteria.maxAgeMinutes);
         if (criteria.includeTermsMode) document.getElementById('modalIncludeTermsMode').value = criteria.includeTermsMode;
         if (criteria.photosOnly === true) document.getElementById('modalPhotosOnly').checked = true;
         if (Array.isArray(criteria.excludeTerms) && criteria.excludeTerms.length) {
@@ -954,6 +966,7 @@
         anyTerms: document.getElementById('modalAnyTerms').value,
         excludeTerms: document.getElementById('modalExcludeTerms').value,
         photosOnly: document.getElementById('modalPhotosOnly').checked,
+        maxAgeMinutes: Number(document.getElementById('modalMaxAgeMinutes').value) || 0,
         bargainHunter: document.getElementById('modalBargainHunter').checked,
         maxDiscountPercent: Number(document.getElementById('modalDiscountPercent').value) || 15,
         minComparableListings: Number(document.getElementById('modalComparableListings').value) || 5,
@@ -1036,6 +1049,7 @@
       document.getElementById('modalAnyTerms').value = '';
       document.getElementById('modalExcludeTerms').value = '';
       document.getElementById('modalPhotosOnly').checked = false;
+      document.getElementById('modalMaxAgeMinutes').value = '0';
       document.getElementById('modalBargainHunter').checked = false;
       document.getElementById('modalDiscountPercent').value = '15';
       document.getElementById('modalComparableListings').value = '5';
