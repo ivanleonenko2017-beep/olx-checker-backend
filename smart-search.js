@@ -33,7 +33,7 @@ function expandDefectExclusions(terms) {
     },
     {
       pattern: /заблок|icloud|айклауд|activation lock|блокуван.{0,15}активац/i,
-      terms: ['заблокований', 'заблокирован', 'icloud', 'айклауд', 'activation lock', 'блокування активації', 'активаційне блокування']
+      terms: ['заблокований', 'заблокирован', 'activation lock', 'блокування активації', 'активаційне блокування', 'icloud locked', 'icloud заблокований', 'icloud заблокирован']
     },
     {
       pattern: /(?:розбит|разбит|тріс|трес|трещин|тріщин|скол|бит(?:ий|ое|ый)).{0,20}(?:скло|стекл|екран|экран)?|(?:скло|стекл|екран|экран).{0,20}(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд)/i,
@@ -150,7 +150,7 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     if (/^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(normalizedTerm)) return false;
     return lowerText.includes(normalizedTerm);
   });
-  if ((expandedExclusions.some(term => /^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(term.toLocaleLowerCase('uk-UA'))) && hasBlockedPhrase) || hasOtherExcludedTerm) {
+  const hasScreenDamage = /(?:розбит|разбит|бит(?:ий|ое|ый)|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден).{0,24}(?:скло|стекл|екран|экран|диспле)|(?:скло|стекл|екран|экран|диспле).{0,24}(?:розбит|разбит|бит|тріснут|треснут|трещин|тріщин|пошкоджен|поврежден)/iu.test(lowerText);\n  const screenDamageRequested = criteria.excludeTerms.some(term => /екран|экран|скло|стекл|диспле/iu.test(term));\n  if (((expandedExclusions.some(term => /^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(term.toLocaleLowerCase('uk-UA'))) && hasBlockedPhrase) || hasOtherExcludedTerm || (screenDamageRequested && hasScreenDamage))) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
   if (criteria.minPrice && (!price || price < criteria.minPrice)) {
