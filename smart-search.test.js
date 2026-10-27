@@ -246,3 +246,43 @@ test('normal-screen filter does not exclude an unrelated body crack or chip', ()
     price: 7000
   }, parsed.criteria).matches, true);
 });
+
+test('iPhone 11 regression: Russian city name and explicit price range', () => {
+  const parsed = parseNaturalLanguageQuery('айфон 11 в Чернигове от 5000 до 10000');
+  assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.equal(parsed.criteria.minPrice, 5000);
+  assert.equal(parsed.criteria.maxPrice, 10000);
+});
+
+test('iPhone 11 regression: Ukrainian city name and explicit price range', () => {
+  const parsed = parseNaturalLanguageQuery('iPhone 11 у Чернігові від 5000 до 10000');
+  assert.equal(parsed.query, 'iPhone 11');
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.equal(parsed.criteria.minPrice, 5000);
+  assert.equal(parsed.criteria.maxPrice, 10000);
+});
+
+test('iPhone 11 regression: negative blocked phrase and normal screen do not pollute product query', () => {
+  const parsed = parseNaturalLanguageQuery('Куплю айфон 11 в Чернигове от 5 до 10к не заблокированный с норм экраном');
+  assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.equal(parsed.criteria.minPrice, 5000);
+  assert.equal(parsed.criteria.maxPrice, 10000);
+  assert.ok(parsed.criteria.excludeTerms.includes('заблокований'));
+  assert.ok(parsed.criteria.excludeTerms.includes('битий екран'));
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11 128GB',
+    description: 'iCloud чистый, не заблокирован, экран целый',
+    price: 7000
+  }, parsed.criteria).matches, true);
+});
+
+test('iPhone 11 regression: standalone Chernihiv after a comma and maximum price', () => {
+  const parsed = parseNaturalLanguageQuery('iPhone 11, Чернігів, до 10000 грн');
+  assert.equal(parsed.query, 'iPhone 11');
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.equal(parsed.criteria.minPrice, 0);
+  assert.equal(parsed.criteria.maxPrice, 10000);
+});
+
