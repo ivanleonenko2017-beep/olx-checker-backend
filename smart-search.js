@@ -143,14 +143,14 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     return { matches: false, reason: 'missing_any_alternative', criteria };
   }
   const expandedExclusions = expandDefectExclusions(criteria.excludeTerms);
-  const blockedPattern = /(?<!не\\s)(?<!not\\s)(?:заблокован\\p{L}*|заблокирован\\p{L}*|blocked|locked|activation\\s+lock|блокування\\s+активації)/iu;
+  const blockedPattern = /(?<!не\s)(?<!not\s)(?:заблокован\p{L}*|заблокирован\p{L}*|blocked|locked|activation\s+lock|блокування\s+активації)/iu;
   const hasBlockedPhrase = blockedPattern.test(lowerText);
   const hasOtherExcludedTerm = expandedExclusions.some(term => {
     const normalizedTerm = term.toLocaleLowerCase('uk-UA');
-    if (/^(?:заблокован\\p{L}*|заблокирован\\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(normalizedTerm)) return false;
+    if (/^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(normalizedTerm)) return false;
     return lowerText.includes(normalizedTerm);
   });
-  if ((expandedExclusions.some(term => /^(?:заблокован\\p{L}*|заблокирован\\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(term.toLocaleLowerCase('uk-UA'))) && hasBlockedPhrase) || hasOtherExcludedTerm) {
+  if ((expandedExclusions.some(term => /^(?:заблокован\p{L}*|заблокирован\p{L}*|activation lock|блокування активації|icloud locked|icloud заблокований|icloud заблокирован)$/iu.test(term.toLocaleLowerCase('uk-UA'))) && hasBlockedPhrase) || hasOtherExcludedTerm) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
   if (criteria.minPrice && (!price || price < criteria.minPrice)) {
