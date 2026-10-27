@@ -1279,7 +1279,8 @@ app.post('/telegram-webhook', async (req, res) => {
       await sendTelegramMessage(chatId, 'Не вдалося автоматично підтвердити платіж. Напишіть на ivanleonenko2016@gmail.com.');
       return;
     }
-    if (!supabase) {
+    const paymentDb = supabaseAdmin || supabase;
+    if (!paymentDb) {
       await sendTelegramMessage(chatId, 'Платіж отримано, але тимчасово недоступна база даних. Напишіть на ivanleonenko2016@gmail.com.');
       return;
     }
@@ -1304,7 +1305,7 @@ app.post('/telegram-webhook', async (req, res) => {
           const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
           const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
           premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
-          const { error: saveExpiryError } = await supabase.from('star_payments')
+          const { error: saveExpiryError } = await paymentDb.from('star_payments')
             .update({ premium_until: premiumUntil }).eq('telegram_payment_charge_id', payment.telegram_payment_charge_id);
           if (saveExpiryError) throw saveExpiryError;
         }
@@ -1315,7 +1316,7 @@ app.post('/telegram-webhook', async (req, res) => {
         const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
         const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
         premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
-        const { error: paymentInsertError } = await supabase.from('star_payments').insert([{
+        const { error: paymentInsertError } = await paymentDb.from('star_payments').insert([{
           telegram_payment_charge_id: payment.telegram_payment_charge_id,
           provider_payment_charge_id: payment.provider_payment_charge_id || null,
           telegram_id: chatId,
@@ -1330,14 +1331,14 @@ app.post('/telegram-webhook', async (req, res) => {
         if (paymentInsertError) throw paymentInsertError;
       }
 
-      const { error: grantError } = await supabase.from('users').upsert({
+      const { error: grantError } = await paymentDb.from('users').upsert({
         telegram_id: chatId,
         first_name: msg.from?.first_name || 'User',
         tariff: 'premium',
         premium_until: premiumUntil
       }, { onConflict: 'telegram_id' });
       if (grantError) throw grantError;
-      const { error: activateError } = await supabase.from('star_payments').update({
+      const { error: activateError } = await paymentDb.from('star_payments').update({
         activation_status: 'active',
         premium_until: premiumUntil,
         is_recurring: payment.is_recurring === true || existingPayment?.is_recurring === true,
@@ -1453,8 +1454,8 @@ app.post('/telegram-webhook', async (req, res) => {
 
   if (text.startsWith('/cancel_subscription')) {
     try {
-      if (!supabase || !TELEGRAM_BOT_TOKEN) throw new Error('Платіжний сервіс тимчасово недоступний');
-      const { data: lastRecurringPayment, error: recurringReadError } = await supabase
+      if (!(supabaseAdmin || supabase) || !TELEGRAM_BOT_TOKEN) throw new Error('Платіжний сервіс тимчасово недоступний');
+      const { data: lastRecurringPayment, error: recurringReadError } = await (supabaseAdmin || supabase)
         .from('star_payments')
         .select('telegram_payment_charge_id,premium_until')
         .eq('telegram_id', chatId)
