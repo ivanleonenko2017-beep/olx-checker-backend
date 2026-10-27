@@ -1272,7 +1272,7 @@ app.post('/telegram-webhook', async (req, res) => {
       !crypto.timingSafeEqual(receivedSecretBuffer, expectedSecretBuffer)) {
     return res.sendStatus(401);
   }
-  res.sendStatus(200);
+  try {
   const update = req.body;
   if (!update) return;
 
@@ -1548,6 +1548,13 @@ app.post('/telegram-webhook', async (req, res) => {
     };
     await sendTelegramMessage(chatId, `⚙️ <b>Панель Адміністратора</b>`, keyboard);
     return;
+  }
+  } catch (err) {
+    console.error('[Telegram Webhook] Непередбачена помилка обробки update:', err.message);
+    if (!res.headersSent) res.sendStatus(500);
+  } finally {
+    // Acknowledge only after processing finishes so Telegram can retry unexpected failures.
+    if (!res.headersSent) res.sendStatus(200);
   }
 });
 
