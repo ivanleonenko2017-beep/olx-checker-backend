@@ -183,3 +183,30 @@ test('flags a likely bargain only with enough comparable prices', () => {
   assert.equal(result.isBargain, true);
   assert.equal(result.reliable, true);
 });
+
+
+test('parses a complete Ukrainian buying request into a usable filter', () => {
+  const parsed = parseNaturalLanguageQuery('Куплю айфон 11 в Чернигове от 5 до 10к не заблокированный с норм экраном');
+  assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.equal(parsed.criteria.minPrice, 5000);
+  assert.equal(parsed.criteria.maxPrice, 10000);
+  assert.ok(parsed.criteria.excludeTerms.includes('заблокований'));
+  assert.ok(parsed.criteria.excludeTerms.includes('розбитий екран'));
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11 128GB, розбитий екран, iCloud locked',
+    description: '',
+    price: 7000
+  }, parsed.criteria).matches, false);
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11 128GB',
+    description: 'Стан добрий',
+    price: 7000
+  }, parsed.criteria).matches, true);
+});
+
+test('normal-screen request does not claim to verify listings with no damage wording', () => {
+  const parsed = parseNaturalLanguageQuery('Куплю iPhone 11 з норм екраном');
+  assert.equal(parsed.query, 'iPhone 11');
+  assert.ok(parsed.criteria.excludeTerms.includes('битий екран'));
+});
