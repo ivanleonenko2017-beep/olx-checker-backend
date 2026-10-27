@@ -863,10 +863,9 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
     }
 
     let totalReferrals = 0;
-    if (supabase) {
-      // Referral counts are backed by the optional referrals table added in the
-      // included migration. Keep profile loading usable before the migration runs.
-      const { count, error: referralCountError } = await supabase
+    if (supabaseAdmin || supabase) {
+      // Use the server-side database client because the referrals table is intentionally not public.
+      const { count, error: referralCountError } = await (supabaseAdmin || supabase)
         .from('referrals')
         .select('id', { count: 'exact', head: true })
         .eq('inviter_telegram_id', userId);
@@ -1346,12 +1345,23 @@ app.post('/telegram-webhook', async (req, res) => {
     return;
   }
 
-  if (supabase) {
-    const { error: userUpsertError } = await supabase.from('users').upsert({
-      telegram_id: chatId,
-      first_name: msg.from?.first_name || 'User'
-    }, { onConflict: 'telegram_id' });
-    if (userUpsertError) console.error('[Telegram] Не вдалося зберегти користувача для розсилок:', userUpsertError.message);
+  let isNewTelegramUser = false;
+  if (supabaseAdmin || supabase) {
+    const userDb = supabaseAdmin || supabase;
+    try {
+      const { data: previousUser, error: previousUserError } = await userDb.from('users')
+        .select('telegram_id').eq('telegram_id', chatId).maybeSingle();
+      if (previousUserError) throw previousUserError;
+      isNewTelegramUser = !previousUser;
+      const { error: userUpsertError } = await userDb.from('users').upsert({
+        telegram_id: chatId,
+        first_name: msg.from?.first_name || 'User',
+        ...(isNewTelegramUser ? { trial_started_at: new Date().toISOString() } : {})
+      }, { onConflict: 'telegram_id' });
+      if (userUpsertError) throw userUpsertError;
+    } catch (userError) {
+      console.error('[Telegram] Не вдалося зберегти користувача для розсилок:', userError.message);
+    }
   }
 
   if (text.startsWith('/start')) {
@@ -1381,7 +1391,7 @@ app.post('/telegram-webhook', async (req, res) => {
     }
     // Accept one referral attribution per Telegram account; never count self-referrals.
     const referralMatch = /^ref_(\d{1,20})$/.exec(startPayload);
-    if (referralMatch && (supabaseAdmin || supabase)) {
+    if (referralMatch && isNewTelegramUser && (supabaseAdmin || supabase)) {
       const inviterId = Number(referralMatch[1]);
       const inviteeId = Number(chatId);
       if (Number.isSafeInteger(inviterId) && inviterId > 0 &&
@@ -1396,13 +1406,13 @@ app.post('/telegram-webhook', async (req, res) => {
         } else if (!referralError && newReferral && newReferral.length > 0) {
           // Reward only when a new, unique referral row was actually inserted.
           // Extend an existing subscription rather than overwriting remaining days.
-          const { data: inviter, error: inviterReadError } = await supabase
+          const { data: inviter, error: inviterReadError } = await referralDb
             .from('users').select('tariff,premium_until').eq('telegram_id', inviterId).maybeSingle();
           if (!inviterReadError && inviter) {
             const currentExpiry = inviter.premium_until ? Date.parse(inviter.premium_until) : 0;
             const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
             const nextExpiry = new Date(rewardBase + 3 * 24 * 60 * 60 * 1000).toISOString();
-            const { error: rewardError } = await supabase.from('users').update({
+            const { error: rewardError } = await referralDb.from('users').update({
               tariff: 'premium',
               premium_until: nextExpiry
             }).eq('telegram_id', inviterId);
