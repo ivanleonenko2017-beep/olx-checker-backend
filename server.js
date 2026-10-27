@@ -527,6 +527,7 @@ async function fetchListingDescription(inputUrl) {
 
 app.get('/api/search', userAuthMiddleware, async (req, res) => {
   const startedAt = Date.now();
+  const testPremiumBypass = process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
   console.log(`[API search] Request received: queryProvided=${Boolean(req.query.query)}, categoryUrlProvided=${Boolean(req.query.categoryUrl)}, filters=${Boolean(req.query.minPrice || req.query.maxPrice || req.query.city || req.query.condition)}`);
   try {
     // Enforce trial/Premium access server-side for every search request.
@@ -573,7 +574,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const trialEndsMs = trialStartedMs > 0 ? trialStartedMs + 5 * 24 * 60 * 60 * 1000 : 0;
     const hasActiveTrial = trialEndsMs > Date.now();
 
-    if (!hasActivePremium && !hasActiveTrial) {
+    if (!hasActivePremium && !hasActiveTrial && !testPremiumBypass) {
       return res.status(403).json({
         success: false,
         error: 'Пробний період завершився. Для продовження користування потрібен Premium.',
@@ -674,6 +675,7 @@ app.get('/api/ad-details', async (req, res) => {
 
 app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
   try {
+    const testPremiumBypass = process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
     const userId = req.telegramUser.id;
     const isAdmin = await checkIsAdmin(userId);
     let userData = { tariff: 'free', premium_until: null, trial_started_at: null };
@@ -708,7 +710,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       }
     }
 
-    const hasActivePremium = isAdmin || (
+    const hasActivePremium = testPremiumBypass || isAdmin || (
       userData.tariff === 'premium' &&
       Boolean(userData.premium_until) &&
       Number.isFinite(Date.parse(userData.premium_until)) &&
@@ -716,7 +718,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
     );
     const trialStartedMs = userData.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
     const trialEndsAt = trialStartedMs > 0 ? new Date(trialStartedMs + 5 * 24 * 60 * 60 * 1000).toISOString() : null;
-    const hasActiveTrial = Boolean(trialEndsAt && Date.parse(trialEndsAt) > Date.now());
+    const hasActiveTrial = testPremiumBypass || Boolean(trialEndsAt && Date.parse(trialEndsAt) > Date.now());
     if (isAdmin) {
       userData.tariff = 'premium';
       userData.is_admin = true;
@@ -777,6 +779,7 @@ app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
 
 app.post('/api/filters', userAuthMiddleware, async (req, res) => {
   try {
+    const testPremiumBypass = process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
     if (!supabase) {
       return res.status(503).json({ success: false, error: 'Перевірка доступу тимчасово недоступна. Спробуйте пізніше.' });
     }
@@ -822,7 +825,7 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
         Number.isFinite(premiumExpiry) && premiumExpiry > Date.now());
       const trialStart = userData?.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
       const hasActiveTrial = trialStart > 0 && Date.now() < trialStart + 5 * 24 * 60 * 60 * 1000;
-      if (!isAdmin && !isPremium && !hasActiveTrial) {
+      if (!isAdmin && !isPremium && !hasActiveTrial && !testPremiumBypass) {
         return res.status(403).json({ success: false, error: 'TRIAL_EXPIRED' });
       }
 
