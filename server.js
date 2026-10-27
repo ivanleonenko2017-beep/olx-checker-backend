@@ -240,6 +240,31 @@ function isPublishedToday(locationDate) {
   return /(?:^|[\\s,·])(?:сьогодні|сегодня|today)(?=$|[\\s,·])/i.test(label);
 }
 
+function getListingAgeMinutes(locationDate) {
+  const label = String(locationDate || '').toLocaleLowerCase('uk-UA');
+  if (!isPublishedToday(label)) return null;
+  const timeMatch = label.match(/(?:сьогодні|сегодня|today)[^\d]{0,16}(\d{1,2})[:.](\d{2})/i);
+  if (!timeMatch) return null;
+  const publishedHour = Number(timeMatch[1]);
+  const publishedMinute = Number(timeMatch[2]);
+  if (publishedHour > 23 || publishedMinute > 59) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date());
+    const hour = Number(parts.find(part => part.type === 'hour')?.value);
+    const minute = Number(parts.find(part => part.type === 'minute')?.value);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    const currentMinutes = hour * 60 + minute;
+    const publishedMinutes = publishedHour * 60 + publishedMinute;
+    return currentMinutes >= publishedMinutes
+      ? currentMinutes - publishedMinutes
+      : currentMinutes - publishedMinutes + 1440;
+  } catch (_) {
+    return null;
+  }
+}
+
 function locationMatches(locationDate, requestedLocation) {
   const requested = String(requestedLocation || '').trim().toLocaleLowerCase('uk-UA');
   if (!requested || requested === 'всі міста' || requested === 'вся україна' || requested === 'уся україна') return true;
@@ -1310,7 +1335,10 @@ async function runBackgroundWorker() {
             // If the detail page could not be read, don't claim the item passed
             // explicit required/excluded-word rules using incomplete card text.
             if (needsFullDescription && !item.detailsLoaded) return false;
-            return applyCriteriaToListing(item, criteria).matches;
+            return applyCriteriaToListing({
+              ...item,
+              ageMinutes: getListingAgeMinutes(item.locationDate)
+            }, criteria).matches;
           });
         if (requestedLocation && !['всі міста', 'вся україна', 'уся україна'].includes(requestedLocation.toLocaleLowerCase('uk-UA')) && parsedItems.length > 0 && items.length === 0) {
           console.log(`[Location Filter] Для фільтра ${filter.id} не знайдено карток із локацією "${requestedLocation}" серед ${parsedItems.length} результатів OLX.`);
