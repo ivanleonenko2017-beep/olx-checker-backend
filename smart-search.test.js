@@ -226,6 +226,18 @@ test('does not reject clean iCloud wording or a listing that explicitly says not
   }, parsed.criteria).matches, true);
 });
 
+test('parses Russian целым экраном as a screen-condition filter, not part of the product query', () => {
+  const parsed = parseNaturalLanguageQuery('Куплю iPhone 11 в Чернигове от 5 до 10к не заблокированный с целым экраном');
+  assert.equal(parsed.query, 'iPhone 11');
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.equal(parsed.criteria.minPrice, 5000);
+  assert.equal(parsed.criteria.maxPrice, 10000);
+  assert.ok(parsed.criteria.excludeTerms.includes('битий екран'));
+  assert.ok(parsed.criteria.excludeTerms.includes('разбитый экран'));
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 11 128GB', description: 'Экран целый, iCloud чистый, не заблокирован', price: 7000 }, parsed.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 11', description: 'Разбитый экран', price: 7000 }, parsed.criteria).matches, false);
+});
+
 test('normal-screen filter does not exclude an unrelated body crack or chip', () => {
   const parsed = parseNaturalLanguageQuery('Куплю айфон 11 з норм екраном');
   assert.equal(applyCriteriaToListing({
