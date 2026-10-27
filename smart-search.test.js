@@ -234,3 +234,40 @@ test('normal-screen filter does not exclude an unrelated body crack or chip', ()
     price: 7000
   }, parsed.criteria).matches, true);
 });
+
+test('regression: parses Russian-language iPhone 11 query with intact screen and no activation lock', () => {
+  const parsed = parseNaturalLanguageQuery('Куплю айфон 11 в Чернигове от 5 до 10к не заблокированный с норм экраном');
+  assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.equal(parsed.criteria.minPrice, 5000);
+  assert.equal(parsed.criteria.maxPrice, 10000);
+  assert.ok(parsed.criteria.excludeTerms.includes('заблокований'));
+  assert.ok(parsed.criteria.excludeTerms.includes('битий екран'));
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11 128GB',
+    description: 'iCloud чистый, не заблокирован, экран целый',
+    price: 7000
+  }, parsed.criteria).matches, true);
+});
+
+test('regression: parses Ukrainian and Russian Chernihiv aliases with explicit price range', () => {
+  for (const query of [
+    'айфон 11 в Чернигове от 5000 до 10000',
+    'iPhone 11 у Чернігові від 5000 до 10000'
+  ]) {
+    const parsed = parseNaturalLanguageQuery(query);
+    assert.equal(parsed.criteria.city, 'Чернігів', query);
+    assert.equal(parsed.criteria.minPrice, 5000, query);
+    assert.equal(parsed.criteria.maxPrice, 10000, query);
+    assert.match(parsed.query, /^(?:айфон|iPhone) 11$/iu, query);
+  }
+});
+
+test('regression: extracts a standalone city after a comma and a maximum price', () => {
+  const parsed = parseNaturalLanguageQuery('iPhone 11, Чернігів, до 10000 грн');
+  assert.equal(parsed.query, 'iPhone 11');
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.equal(parsed.criteria.minPrice, 0);
+  assert.equal(parsed.criteria.maxPrice, 10000);
+});
+
