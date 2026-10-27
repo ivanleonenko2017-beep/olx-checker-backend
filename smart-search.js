@@ -234,7 +234,7 @@ function parseNaturalLanguageQuery(input) {
 
   // "Normal screen" filters explicit damage wording only; absent descriptions
   // cannot establish the physical condition of a device.
-  const normalScreenMatch = remaining.match(/(?:з\s+)?норм(?:альн)?\p{L}*\s+(?:[еэ]кран\p{L}*|диспле\p{L}*)|(?:[еэ]кран\p{L}*|диспле\p{L}*)\s+(?:в\s+)?нормальн\p{L}*/iu);
+  const normalScreenMatch = remaining.match(/(?:з\s+)?норм(?:альн)?\p{L}*\s+(?:[еэ]кран\p{L}*|диспле\p{L}*)|(?:[еэ]кран\p{L}*|диспле\p{L}*)\s+(?:в\s+)?нормальн\p{L}*|(?:с\s+)?цел(?:ый|ым|ая|ое|ые|ыми)\s+(?:[еэ]кран\p{L}*|диспле\p{L}*)|(?:[еэ]кран\p{L}*|диспле\p{L}*)\s+цел(?:ый|ым|ая|ое|ые)?/iu);
   if (normalScreenMatch) {
     criteria.excludeTerms = [...(criteria.excludeTerms || []), 'розбитий екран', 'битий екран', 'тріснутий екран', 'треснутый экран', 'разбитый экран', 'розбите скло', 'разбитое стекло', 'тріснуте скло', 'треснутое стекло', 'пошкоджений дисплей', 'поврежденный дисплей'];
     remaining = remaining.replace(normalScreenMatch[0], ' ').trim();
@@ -305,7 +305,7 @@ function parseNaturalLanguageQuery(input) {
   // names or arbitrary capitalized words for locations.
   const cityAliases = [
     { city: 'Київ', pattern: /(?:у|в|місто|город|г\.)\s*(?:києві|киеве|київ|киев)(?=$|[\s,.;!?])/iu },
-    { city: 'Чернігів', pattern: /(?:у|в|місто|город|г\.)\s*(?:чернігові|чернигове|чернігів|чернигов)(?=$|[\s,.;!?])/iu },
+    { city: 'Чернігів', pattern: /(?:(?:у|в|місто|город|г\.)\s*|(?:^|[,;]\s*))(?:чернігові|чернигове|чернігів|чернигов)(?=$|[\s,.;!?])/iu },
     { city: 'Одеса', pattern: /(?:у|в|місто|город|г\.)\s*(?:одесі|одессе|одеса|одесса)(?=$|[\s,.;!?])/iu },
     { city: 'Львів', pattern: /(?:у|в|місто|город|г\.)\s*(?:львові|львове|львів|львов)(?=$|[\s,.;!?])/iu },
     { city: 'Харків', pattern: /(?:у|в|місто|город|г\.)\s*(?:харкові|харькове|харків|харьков)(?=$|[\s,.;!?])/iu },
