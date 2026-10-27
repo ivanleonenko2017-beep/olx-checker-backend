@@ -15,4 +15,5 @@ jobs:
         with:
           node-version: 20
       - run: npm install --ignore-scripts
+      - run: node --check server.js
       - run: npm test
