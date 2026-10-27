@@ -202,13 +202,118 @@ function parseNaturalLanguageQuery(input) {
     if (minPrice !== null && maxPrice !== null) {
       criteria.minPrice = Math.min(minPrice, maxPrice);
       criteria.maxPrice = Math.max(minPrice, maxPrice);
-      remaining = remaining
-    .replace(/^(?:я\\s+)?(?:хочу|хотів|хотіла|нужно)\\s+(?:купити|купить|придбати|найти|знайти)\\s+/iu, '')
-    .replace(/^(?:я\\s+)?(?:куплю|купити|купить|придбаю|придбати|хочу|хотів|хотіла|нужно)\\s+/iu, '')
-    .replace(/^(?:шукаю|ищу|знайди|найди|підбери|подбери)\\s+/iu, '')
+      remaining = remaining.replace(rangeMatch[0], ' ').trim();
+    }
+  }
+
+  if (criteria.minPrice === undefined && criteria.maxPrice === undefined) {
+    const pricePatterns = [
+      { regex: new RegExp('(?:до|не дорожче|максимум|бюджет(?:ом)? до)\\s*' + amountPattern, 'i'), key: 'maxPrice' },
+      { regex: new RegExp('(?:від|от|мінімум)\\s*' + amountPattern, 'i'), key: 'minPrice' }
+    ];
+    for (const pattern of pricePatterns) {
+      const match = remaining.match(pattern.regex);
+      if (match) {
+        const amount = parseAmount(match[1]);
+        if (amount !== null) criteria[pattern.key] = amount;
+        remaining = remaining.replace(match[0], ' ').trim();
+      }
+    }
+  }
+
+  const exclusionMatch = remaining.match(/(?:^|[\s,;])(?:не показувати|не пропонувати|не пропоновать|не предлагать|не показывать|без|виключити|исключить)\s+([^.!?;]+)/i);
+  if (exclusionMatch) {
+    let exclusionText = exclusionMatch[1].trim();
+    exclusionText = exclusionText.replace(/\s+(?<!с )(?=(?:поломан\w*|слом\w*|зламан\w*|неисправ\w*|несправ\w*|заблок\w*|розбит\w*|разбит\w*|тріснут\w*|треснут\w*|трещин\w*|скол\w*|icloud|айклауд|на запчаст\w*|не працю\w*|не работа\w*|не включ\w*))/giu, ', ');
+    criteria.excludeTerms = normalizeTermList(exclusionText
+      .split(/[,;]|\s+(?:та|і|й|або|и|или|and|or)\s+/iu)
+      .map(term => term.trim().replace(/^(?:з|із|с|со)\s+/iu, ''))
+      .filter(Boolean));
+    remaining = remaining.replace(exclusionMatch[0], ' ').trim();
+  }
+
+  const newConditionMatch = remaining.match(/(?:^|[\s,;])(новий|нова|нове|нові|новый|новая|новое|новые|new)(?=$|[\s,;])/i);
+  const usedConditionMatch = remaining.match(/(?:^|[\s,;])(б\/у|б\.у\.|бу|вживаний|вживана|вживане|вживані|уживаний|уживана|used|бушний)(?=$|[\s,;])/i);
+  if (newConditionMatch) {
+    criteria.condition = 'new';
+    remaining = remaining.replace(newConditionMatch[0], ' ').trim();
+  } else if (usedConditionMatch) {
+    criteria.condition = 'used';
+    remaining = remaining.replace(usedConditionMatch[0], ' ').trim();
+  }
+
+  const ageMatch = remaining.match(/(?:за останні|за последние|не старше|не старіше|опубліковані за останні|опубликованные за последние)\s*(\d{1,4})\s*(хв(?:илин(?:у|и)?)?|мин(?:ут(?:ы)?)?|год(?:ину|ини|ин)?|час(?:а|ов)?|дн(?:і|я|ей|ів)?|день|дня|дней)/iu);
+  if (ageMatch) {
+    const amount = Number(ageMatch[1]);
+    const unit = ageMatch[2].toLocaleLowerCase('uk-UA');
+    criteria.maxAgeMinutes = /^(?:хв|мин)/iu.test(unit) ? amount : /^(?:год|час)/iu.test(unit) ? amount * 60 : amount * 1440;
+    remaining = remaining.replace(ageMatch[0], ' ').trim();
+  }
+
+  const photoMatch = remaining.match(/(?:^|[\s,;])(тільки з фото|лише з фото|з фото|с фото|with photos|photos only)(?=$|[\s,;])/i);
+  if (photoMatch) {
+    criteria.photosOnly = true;
+    remaining = remaining.replace(photoMatch[0], ' ').trim();
+  }
+
+  // Convert explicit alternatives into a structured OR condition.
+  const alternativeMatch = remaining.match(/((?:nvidia\s*)?(?:rtx|gtx|rx)\s*\d{3,4}(?:\s*ti|\s*super)?|(?:iphone|айфон)\s*\d{1,2}|(?:core\s*i[3579]|ryzen\s*[3579])\s*\d{3,5})\s+(?:або|чи|или|or)\s+((?:nvidia\s*)?(?:rtx|gtx|rx)\s*\d{3,4}(?:\s*ti|\s*super)?|(?:iphone|айфон)\s*\d{1,2}|(?:core\s*i[3579]|ryzen\s*[3579])\s*\d{3,5})/iu);
+  if (alternativeMatch) {
+    const alternatives = [alternativeMatch[1].trim(), alternativeMatch[2].trim()]
+      .map(term => term.replace(/[.!?]+$/, '').trim())
+      .filter(term => term.length >= 2);
+    if (alternatives.length === 2) {
+      criteria.anyTerms = [...(criteria.anyTerms || []), ...alternatives];
+      remaining = remaining.replace(alternativeMatch[0], ' ').trim();
+    }
+  }
+
+  // Keep hardware requirements as explicit criteria instead of leaving them
+  // buried in the broad OLX query.
+  const specPatterns = [
+    /(?:(?:мінімум|minimum|минимум|не менше|від)\s*)?(\d{1,3})\s*(?:гб|gb)\s*(?:оператив(?:ної|ной)? пам.?ят[іи]|озу|ram)/iu,
+    /(?:(?:мінімум|minimum|минимум|не менше|від)\s*)?(\d{1,4})\s*(?:гб|gb|тб|tb)\s*(?:ssd|накопичувач|пам.?ят[іи]|storage)/iu
+  ];
+  for (const pattern of specPatterns) {
+    const match = remaining.match(pattern);
+    if (match) {
+      criteria.includeTerms = [...(criteria.includeTerms || []), match[0].trim()];
+      remaining = remaining.replace(match[0], ' ').trim();
+    }
+  }
+
+  // Only recognize a small, explicit city dictionary; don't mistake product
+  // names or arbitrary capitalized words for locations.
+  const cityAliases = [
+    { city: 'Київ', pattern: /(?:у|в|місто|город|г\.)\s*(?:києві|киеве|київ|киев)(?=$|[\s,.;!?])/iu },
+    { city: 'Чернігів', pattern: /(?:у|в|місто|город|г\.)\s*(?:чернігові|чернигове|чернігів|чернигов)(?=$|[\s,.;!?])/iu },
+    { city: 'Одеса', pattern: /(?:у|в|місто|город|г\.)\s*(?:одесі|одессе|одеса|одесса)(?=$|[\s,.;!?])/iu },
+    { city: 'Львів', pattern: /(?:у|в|місто|город|г\.)\s*(?:львові|львове|львів|львов)(?=$|[\s,.;!?])/iu },
+    { city: 'Харків', pattern: /(?:у|в|місто|город|г\.)\s*(?:харкові|харькове|харків|харьков)(?=$|[\s,.;!?])/iu },
+    { city: 'Дніпро', pattern: /(?:у|в|місто|город|г\.)\s*(?:дніпрі|днепре|дніпро|днепр)(?=$|[\s,.;!?])/iu },
+    { city: 'Запоріжжя', pattern: /(?:у|в|місто|город|г\.)\s*(?:запоріжжі|запорожье|запоріжжя)(?=$|[\s,.;!?])/iu },
+    { city: 'Вінниця', pattern: /(?:у|в|місто|город|г\.)\s*(?:вінниці|виннице|вінниця|винница)(?=$|[\s,.;!?])/iu },
+    { city: 'Полтава', pattern: /(?:у|в|місто|город|г\.)\s*(?:полтаві|полтаве|полтава)(?=$|[\s,.;!?])/iu },
+    { city: 'Черкаси', pattern: /(?:у|в|місто|город|г\.)\s*(?:черкасах|черкаси|черкассы)(?=$|[\s,.;!?])/iu },
+    { city: 'Житомир', pattern: /(?:у|в|місто|город|г\.)\s*(?:житомирі|житомире|житомир)(?=$|[\s,.;!?])/iu },
+    { city: 'Івано-Франківськ', pattern: /(?:у|в|місто|город|г\.)\s*(?:івано-франківську|ивано-франковске|івано-франківськ)(?=$|[\s,.;!?])/iu },
+    { city: 'Ужгород', pattern: /(?:у|в|місто|город|г\.)\s*(?:ужгороді|ужгороде|ужгород)(?=$|[\s,.;!?])/iu }
+  ];
+  for (const entry of cityAliases) {
+    const match = remaining.match(entry.pattern);
+    if (match) {
+      criteria.city = entry.city;
+      remaining = remaining.replace(match[0], ' ').trim();
+      break;
+    }
+  }
+
+  remaining = remaining
+    .replace(/^(?:я\s+)?(?:хочу|хотів|хотіла|нужно)\s+(?:купити|купить|придбати|найти|знайти)\s+/iu, '')
+    .replace(/^(?:шукаю|ищу|знайди|найди|підбери|подбери)\s+/iu, '')
     .replace(/[;,]+/g, ' ')
-    .replace(/(?:^|\\s)(?:с|и|та|й|and|with)(?=\\s|$)/giu, ' ')
-    .replace(/\\s+/g, ' ')
+    .replace(/\b(?:с|и|та|й|and|with)\b/giu, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 
   criteria.query = remaining || original;
