@@ -1912,6 +1912,13 @@ async function pollMonobankJarDonations() {
         .select('telegram_id');
       if (updateError) throw updateError;
 
+      if (updatedUsers && updatedUsers.length > 0) {
+        const { error: sponsorSinceError } = await supabaseAdmin.from('users')
+          .update({ sponsor_since: donation.occurred_at })
+          .eq('telegram_id', donation.telegram_id).is('sponsor_since', null);
+        if (sponsorSinceError) throw sponsorSinceError;
+      }
+
       if (!updatedUsers || updatedUsers.length === 0) {
         // A donor may not have opened the bot yet. Create the minimal user row so the
         // sponsor marker is not lost; the normal profile flow can fill remaining fields.
