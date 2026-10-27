@@ -9,8 +9,29 @@ const { normalizeCriteria, applyCriteriaToListing, parseNaturalLanguageQuery, es
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.secure || req.get('x-forwarded-proto') === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+  }
+  next();
+});
+app.use(cors({
+  origin: (origin, callback) => {
+    const allowedOrigins = new Set([
+      (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\\/$/, ''),
+      ...(process.env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean)
+    ]);
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    return callback(new Error('CORS origin not allowed'));
+  },
+  credentials: false
+}));
+app.use(express.json({ limit: '100kb' }));
 
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 app.use(express.static(__dirname, {
@@ -28,6 +49,10 @@ const SUPABASE_URL = rawUrl;
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+// Telegram requires the secret to be configured at webhook registration and echoed
+// in X-Telegram-Bot-Api-Secret-Token. A runtime fallback keeps deployments functional;
+// set TELEGRAM_WEBHOOK_SECRET in Render for a stable secret across restarts.
+const TELEGRAM_WEBHOOK_SECRET = (process.env.TELEGRAM_WEBHOOK_SECRET || crypto.randomBytes(32).toString('hex')).trim();
 const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
@@ -1240,6 +1265,13 @@ app.post('/api/payments/stars/invoice-link', userAuthMiddleware, async (req, res
 });
 
 app.post('/telegram-webhook', async (req, res) => {
+  const receivedWebhookSecret = req.get('x-telegram-bot-api-secret-token') || '';
+  const receivedSecretBuffer = Buffer.from(receivedWebhookSecret);
+  const expectedSecretBuffer = Buffer.from(TELEGRAM_WEBHOOK_SECRET);
+  if (receivedSecretBuffer.length !== expectedSecretBuffer.length ||
+      !crypto.timingSafeEqual(receivedSecretBuffer, expectedSecretBuffer)) {
+    return res.sendStatus(401);
+  }
   res.sendStatus(200);
   const update = req.body;
   if (!update) return;
@@ -1781,8 +1813,13 @@ async function registerWebhook() {
   if (!TELEGRAM_BOT_TOKEN || !SERVER_URL) return;
   try {
     const targetWebhookUrl = `${SERVER_URL}/telegram-webhook`;
-    await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${encodeURIComponent(targetWebhookUrl)}`);
-    console.log(`✅ Telegram Webhook встановлено: ${targetWebhookUrl}`);
+    const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook`, {
+      url: targetWebhookUrl,
+      secret_token: TELEGRAM_WEBHOOK_SECRET,
+      allowed_updates: ['message', 'pre_checkout_query']
+    }, { timeout: 10000 });
+    if (!response.data?.ok) throw new Error(response.data?.description || 'Telegram відхилив реєстрацію webhook');
+    console.log(`✅ Telegram Webhook встановлено з перевіркою секретного заголовка: ${targetWebhookUrl}`);
   } catch (err) {
     console.error('Помилка встановлення Webhook:', err.message);
   }
