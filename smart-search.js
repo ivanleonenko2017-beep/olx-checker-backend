@@ -160,6 +160,14 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
     .replace(/не\s+заблокован\p{L}*/giu, ' ')
     .replace(/не\s+заблокирован\p{L}*/giu, ' ')
     .replace(/not\s+blocked/giu, ' ');
+  const requiresUndamagedScreen = criteria.excludeTerms.some(term =>
+    /(?:екран|диспле|скло|стекл)/iu.test(term) &&
+    /(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд|бит(?:ий|ый|ое))/iu.test(term)
+  );
+  const screenDamagePattern = /(?:екран|диспле|скло|стекл).{0,25}(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд|бит(?:ий|ый|ое))|(?:розбит|разбит|тріс|трес|трещин|тріщин|пошкодж|поврежд|бит(?:ий|ый|ое)).{0,25}(?:екран|диспле|скло|стекл)/iu;
+  if (requiresUndamagedScreen && screenDamagePattern.test(exclusionText)) {
+    return { matches: false, reason: 'excluded_term', criteria };
+  }
   if (expandDefectExclusions(criteria.excludeTerms).some(term => exclusionText.includes(term.toLocaleLowerCase('uk-UA')))) {
     return { matches: false, reason: 'excluded_term', criteria };
   }
