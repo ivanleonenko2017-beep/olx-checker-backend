@@ -699,7 +699,7 @@
           window.trialEndsAt = data.trialEndsAt || null;
           window.paymentEnabled = data.paymentEnabled === true;
           window.telegramStarsEnabled = data.telegramStarsEnabled === true;
-          window.telegramStarsPrice = Number(data.telegramStarsPrice || 100);
+          window.telegramStarsPrice = Number(data.telegramStarsPrice || 0);
           window.monobankJarUrl = typeof data.monobankJarUrl === 'string' ? data.monobankJarUrl : '';
           const jarButton = document.getElementById('premiumJarBtn');
           const jarClaimButton = document.getElementById('premiumJarClaimBtn');
@@ -717,9 +717,11 @@
             payButton.classList.toggle('text-black', window.paymentEnabled);
             payButton.innerText = window.paymentEnabled ? 'Оплатити 149 грн · Monobank' : 'Оплата Monobank ще налаштовується';
           }
-          if (payNote) payNote.innerText = window.paymentEnabled
-            ? '149 грн за 30 днів через захищену сторінку Monobank; продовження вручну. Також можна оплатити Telegram Stars.'
-            : 'Оплата карткою на Monobank-банку не підтверджується автоматично. Для автоматичної активації без ФОП доступна оплата Telegram Stars.';
+          if (payNote) payNote.innerText = [
+            window.paymentEnabled ? '149 грн за 30 днів через захищену сторінку Monobank; продовження вручну.' : '',
+            window.monobankJarUrl ? 'Переказ на банку підтверджується адміністратором вручну.' : '',
+            data.telegramStarsEnabled ? 'Telegram Stars активує Premium після автоматичного підтвердження Telegram.' : 'Telegram Stars з’явиться після підключення окремого тестового бота та webhook.'
+          ].filter(Boolean).join(' ');
           const starsButton = document.getElementById('premiumStarsBtn');
           if (starsButton) {
             starsButton.disabled = !data.telegramStarsEnabled;
@@ -857,7 +859,7 @@
         if (button) {
           button.disabled = !window.telegramStarsEnabled;
           button.innerText = window.telegramStarsEnabled
-            ? '★ Оплатити Telegram Stars · ' + Number(window.telegramStarsPrice || 100) + ' ⭐'
+            ? '★ Оплатити Telegram Stars · ' + Number(window.telegramStarsPrice || 0) + ' ⭐'
             : 'Оплата Telegram Stars недоступна';
         }
       }
