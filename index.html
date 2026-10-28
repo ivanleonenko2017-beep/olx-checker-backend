@@ -308,11 +308,27 @@
         </div>
 
         <div class="pt-2 flex flex-col items-center gap-2">
-          <button id="premiumPayBtn" type="button" onclick="payViaTelegramStars()" disabled class="inline-flex max-w-full px-4 py-2 bg-gray-700 text-gray-400 font-extrabold rounded-xl text-[11px] cursor-not-allowed items-center justify-center gap-2 text-center leading-tight">
-            <span>✦</span> Оплата вимкнена на час тестування
+          <button id="premiumPayBtn" type="button" onclick="payViaMonobank()" disabled class="inline-flex max-w-full px-4 py-2 bg-gray-700 text-gray-400 font-extrabold rounded-xl text-[11px] cursor-not-allowed items-center justify-center gap-2 text-center leading-tight">
+            <span>₴</span> Оплата Monobank — 149 грн
           </button>
-          <p id="premiumPaymentNote" class="text-[10px] text-gray-400 text-center">Після запуску оплата проходитиме через Telegram Stars. Фактичну суму в Stars буде показано перед підтвердженням платежу.</p>
+          <p id="premiumPaymentNote" class="text-[10px] text-gray-400 text-center">149 грн за 30 днів Premium. Оплата карткою через захищену платіжну сторінку Monobank; продовження вручну.</p>
         </div>
+      </div>
+
+      <!-- External supporter donation badge -->
+      <div class="p-4 rounded-3xl bg-gray-900 border border-emerald-500/30 space-y-3">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs font-bold text-emerald-300">Підтримати ЗНАЙДЕНО</div>
+            <div class="text-[10px] text-gray-400 mt-1">Добровільна підтримка проєкту. Після підтвердження переказу біля вашого профілю з’явиться статус спонсора.</div>
+          </div>
+          <span id="sponsorStatusBadge" class="shrink-0 text-[10px] bg-gray-800 text-gray-300 px-2 py-1 rounded-full border border-gray-700">Не спонсор</span>
+        </div>
+        <p id="sponsorStatusText" class="text-[11px] text-gray-300">Статус перевіряється…</p>
+        <button id="sponsorDonateBtn" type="button" onclick="openSponsorJar()" disabled class="w-full py-2.5 bg-gray-800 border border-gray-700 text-gray-400 font-bold rounded-xl text-xs cursor-not-allowed">
+          Посилання на банку ще не налаштовано
+        </button>
+        <p class="text-[10px] text-gray-500">Для автоматичного зарахування в коментарі до переказу вкажіть лише ваш Telegram ID: <span id="sponsorTelegramId">—</span>. Статус спонсора не змінює тариф або ліміти.</p>
       </div>
 
       <!-- Referral Banner -->
@@ -670,6 +686,7 @@
           window.trialEndsAt = data.trialEndsAt || null;
           window.userAccess = data.access || {};
           window.paymentEnabled = data.paymentEnabled === true;
+          configureSponsorCard(data);
           const payButton = document.getElementById('premiumPayBtn');
           const payNote = document.getElementById('premiumPaymentNote');
           if (payButton) {
@@ -679,11 +696,11 @@
             payButton.classList.toggle('text-gray-400', !window.paymentEnabled);
             payButton.classList.toggle('bg-emerald-400', window.paymentEnabled);
             payButton.classList.toggle('text-black', window.paymentEnabled);
-            payButton.innerText = window.paymentEnabled ? 'Оформити підписку · Telegram Stars' : 'Оплата вимкнена на час тестування';
+            payButton.innerText = window.paymentEnabled ? 'Оплатити 149 грн · Monobank' : 'Оплата Monobank ще налаштовується';
           }
           if (payNote) payNote.innerText = window.paymentEnabled
-            ? '149 грн/місяць — орієнтир ціни. Точну суму в Telegram Stars буде показано у рахунку до підтвердження.'
-            : 'Ціна Premium — 149 грн/місяць. Реальні списання вимкнені до завершення тестування та налаштування ціни в Telegram Stars.';
+            ? '149 грн за 30 днів Premium. Ви підтвердите платіж на захищеній сторінці Monobank; автоматичного повторного списання немає.'
+            : 'Для активації оплати потрібне налаштування Monobank acquiring на сервері. Поки це не завершено, гроші не списуються.';
           const usageInfo = document.getElementById('searchUsageInfo');
           if (usageInfo) {
             const limit = data.access?.searchLimit;
@@ -747,9 +764,94 @@
       }
     }
 
-    async function payViaTelegramStars() {
+    async function refreshSponsorStatus() {
+      if (!initDataRaw) return;
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/user/sponsor-status`, {
+          headers: { 'x-telegram-init-data': initDataRaw }
+        });
+        if (!response.ok) throw new Error('Sponsor status request failed');
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Status unavailable');
+        const badge = document.getElementById('sponsorStatusBadge');
+        const statusText = document.getElementById('sponsorStatusText');
+        if (badge) {
+          badge.innerText = data.isSponsor ? 'Спонсор ✓' : 'Не спонсор';
+          badge.className = data.isSponsor
+            ? 'shrink-0 text-[10px] bg-emerald-950 text-emerald-300 px-2 py-1 rounded-full border border-emerald-500/40'
+            : 'shrink-0 text-[10px] bg-gray-800 text-gray-300 px-2 py-1 rounded-full border border-gray-700';
+        }
+        if (statusText) statusText.innerText = data.isSponsor
+          ? 'Дякуємо за підтримку! Ваш статус спонсора активний.'
+          : 'Після підтвердження переказу статус оновиться автоматично.';
+      } catch (error) {
+        const statusText = document.getElementById('sponsorStatusText');
+        if (statusText) statusText.innerText = 'Не вдалося оновити статус. Спробуйте пізніше.';
+      }
+    }
+
+    function openSponsorJar() {
+      const url = window.sponsorJarUrl || '';
+      if (!/^https:\/\/send\.monobank\.ua\//i.test(url)) {
+        alert('Посилання на банку ще не налаштовано.');
+        return;
+      }
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    function configureSponsorCard(data) {
+      window.sponsorJarUrl = typeof data.sponsorJarUrl === 'string' ? data.sponsorJarUrl : '';
+      const button = document.getElementById('sponsorDonateBtn');
+      const id = document.getElementById('sponsorTelegramId');
+      if (id && userId) id.innerText = String(userId);
+      if (button) {
+        const enabled = /^https:\/\/send\.monobank\.ua\//i.test(window.sponsorJarUrl);
+        button.disabled = !enabled;
+        button.classList.toggle('cursor-not-allowed', !enabled);
+        button.classList.toggle('bg-gray-800', !enabled);
+        button.classList.toggle('text-gray-400', !enabled);
+        button.classList.toggle('bg-emerald-400', enabled);
+        button.classList.toggle('text-black', enabled);
+        button.innerText = enabled ? 'Відкрити банку Monobank' : 'Посилання на банку ще не налаштовано';
+      }
+    }
+
+    let monobankStatusCheckRunning = false;
+
+    async function checkMonobankPayment(invoiceId, attempts = 0) {
+      if (!invoiceId || monobankStatusCheckRunning || !initDataRaw) return;
+      monobankStatusCheckRunning = true;
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/payments/monobank/status/${encodeURIComponent(invoiceId)}`, {
+          headers: { 'x-telegram-init-data': initDataRaw }
+        });
+        const data = await response.json();
+        if (response.ok && data.success && data.paid) {
+          localStorage.removeItem('znaideno_pending_monobank_invoice');
+          alert('Оплату підтверджено! Premium активовано на 30 днів.');
+          await loadUserProfile();
+          return;
+        }
+        if (response.status === 404) {
+          localStorage.removeItem('znaideno_pending_monobank_invoice');
+          return;
+        }
+        if (attempts < 20) {
+          window.setTimeout(() => checkMonobankPayment(invoiceId, attempts + 1), 4000);
+        } else {
+          const note = document.getElementById('premiumPaymentNote');
+          if (note) note.innerText = 'Платіж ще перевіряється. Поверніться до застосунку трохи пізніше — Premium активується після підтвердження Monobank.';
+        }
+      } catch (_) {
+        if (attempts < 20) window.setTimeout(() => checkMonobankPayment(invoiceId, attempts + 1), 5000);
+      } finally {
+        monobankStatusCheckRunning = false;
+      }
+    }
+
+    async function payViaMonobank() {
       if (!window.paymentEnabled) {
-        alert('Оплата тимчасово вимкнена на час тестування.');
+        alert('Оплата Monobank ще не налаштована.');
         return;
       }
       if (!initDataRaw) {
@@ -757,36 +859,43 @@
         return;
       }
       const button = document.getElementById('premiumPayBtn');
-      if (button) { button.disabled = true; button.innerText = 'Створюємо рахунок…'; }
+      if (button) { button.disabled = true; button.innerText = 'Створюємо рахунок Monobank…'; }
       try {
-        const response = await fetch(`${BACKEND_URL}/api/payments/stars/invoice-link`, {
+        const response = await fetch(`${BACKEND_URL}/api/payments/monobank/invoice`, {
           method: 'POST',
           headers: { 'x-telegram-init-data': initDataRaw }
         });
         const data = await response.json();
-        if (!response.ok || !data.success || !data.invoiceLink) throw new Error(data.error || 'Не вдалося створити рахунок');
-        const webApp = window.Telegram && window.Telegram.WebApp;
-        if (webApp && typeof webApp.openInvoice === 'function') {
-          webApp.openInvoice(data.invoiceLink, async (status) => {
-            if (status === 'paid') {
-              alert('Оплату отримано. Оновлюємо ваш Premium…');
-              await loadUserProfile();
-            } else if (status === 'failed') {
-              alert('Платіж не завершився. Сервіс не активував Premium.');
-            }
-          });
-        } else {
-          window.open(data.invoiceLink, '_blank', 'noopener');
+        if (!response.ok || !data.success || !data.invoiceId || !data.pageUrl) {
+          throw new Error(data.error || 'Не вдалося створити рахунок Monobank');
         }
+        localStorage.setItem('znaideno_pending_monobank_invoice', data.invoiceId);
+        const webApp = window.Telegram && window.Telegram.WebApp;
+        if (webApp && typeof webApp.openLink === 'function') {
+          webApp.openLink(data.pageUrl);
+        } else {
+          window.open(data.pageUrl, '_blank', 'noopener,noreferrer');
+        }
+        window.setTimeout(() => checkMonobankPayment(data.invoiceId), 3000);
       } catch (error) {
-        alert(error.message || 'Не вдалося створити рахунок');
+        alert(error.message || 'Не вдалося створити рахунок Monobank');
       } finally {
         if (button) {
           button.disabled = !window.paymentEnabled;
-          button.innerText = window.paymentEnabled ? 'Оформити підписку · Telegram Stars' : 'Оплата вимкнена на час тестування';
+          button.innerText = window.paymentEnabled ? 'Оплатити 149 грн · Monobank' : 'Оплата Monobank ще налаштовується';
         }
       }
     }
+
+    window.addEventListener('focus', () => {
+      const pendingInvoice = localStorage.getItem('znaideno_pending_monobank_invoice');
+      if (pendingInvoice) checkMonobankPayment(pendingInvoice);
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      const pendingInvoice = localStorage.getItem('znaideno_pending_monobank_invoice');
+      if (pendingInvoice) checkMonobankPayment(pendingInvoice);
+    });
 
     function getFavorites() {
       return JSON.parse(localStorage.getItem('olx_favorites') || '[]');
@@ -1640,7 +1749,8 @@
 
     renderFavorites();
     loadActiveFilters();
-    loadUserProfile();
+    loadUserProfile().then(() => refreshSponsorStatus());
+    setInterval(refreshSponsorStatus, 60000);
   </script>
 </body>
 </html>
