@@ -298,7 +298,7 @@
             </div>
             <div class="text-[11px] text-gray-300 mt-1">Більше контролю над пошуком і менше ручної перевірки OLX</div>
           </div>
-          <span class="shrink-0 text-xs font-extrabold bg-amber-400 text-black px-2.5 py-1 rounded-xl">149 грн / 30 днів</span>
+          <span class="shrink-0 text-xs font-extrabold bg-amber-400 text-black px-2.5 py-1 rounded-xl">180 ⭐ / 30 днів</span>
         </div>
 
         <div class="rounded-2xl bg-black/25 border border-emerald-900/70 p-3 space-y-3">
@@ -355,16 +355,10 @@
           <button id="premiumPayBtn" type="button" onclick="payViaMonobank()" disabled class="hidden w-full py-3 bg-gray-700 text-gray-400 font-extrabold rounded-2xl text-xs cursor-not-allowed items-center justify-center gap-2">
             <span>₴</span> Оплата карткою Monobank
           </button>
-          <button id="premiumJarBtn" type="button" onclick="payViaMonobankJar()" class="w-full py-3 bg-gray-900 hover:bg-gray-800 border border-gray-700 text-white font-extrabold rounded-2xl text-xs flex items-center justify-center gap-2">
-            <span>₴</span> Переказати 149 грн на Monobank-банку
+          <button id="premiumStarsBtn" type="button" onclick="payViaTelegramStars()" class="w-full py-3 bg-gray-900 border border-emerald-500/40 text-emerald-300 font-extrabold rounded-2xl text-xs flex items-center justify-center gap-2 opacity-50">
+            <span>★</span> Оплатити Telegram Stars · 180 ⭐
           </button>
-          <button id="premiumJarClaimBtn" type="button" onclick="claimMonobankJarPayment()" class="w-full py-2.5 bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-300 font-bold rounded-2xl text-[11px] flex items-center justify-center gap-2">
-            Я оплатив — повідомити адміністратора
-          </button>
-          <button id="premiumStarsBtn" type="button" onclick="payViaTelegramStars()" disabled class="w-full py-3 bg-gray-900 border border-emerald-500/40 text-emerald-300 font-extrabold rounded-2xl text-xs flex items-center justify-center gap-2 opacity-50">
-            <span>★</span> Telegram Stars — налаштовується
-          </button>
-          <p id="premiumPaymentNote" class="text-[10px] leading-relaxed text-gray-400 text-center">Переказ на банку перевіряється адміністратором вручну. Telegram Stars активує Premium автоматично лише після підключення тестового Telegram webhook.</p>
+          <p id="premiumPaymentNote" class="text-[10px] leading-relaxed text-gray-400 text-center">У Telegram цифровий Premium оплачується лише в Telegram Stars. 180 ⭐ дають доступ на 30 днів без автоматичного продовження.</p>
         </div>
       </div>
 
@@ -604,7 +598,7 @@
           <p id="limitModalText" class="text-[11px] text-gray-300 mt-1">Збільште кількість активних фільтрів із Premium.</p>
         </div>
         <button onclick="goToPremiumTab()" class="w-full py-3 bg-emerald-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-emerald-950">
-          Premium · 149 грн/міс
+          Premium · 180 ⭐ / 30 днів
         </button>
       </div>
     </div>
@@ -708,10 +702,10 @@
           window.hasActiveTrial = data.hasActiveTrial === true;
           window.trialEndsAt = data.trialEndsAt || null;
           window.userAccess = data.access || {};
-          window.paymentEnabled = data.paymentEnabled === true;
+          window.paymentEnabled = false; // Digital Premium inside Telegram must be paid exclusively with Telegram Stars.
           window.telegramStarsEnabled = data.telegramStarsEnabled === true;
           window.telegramStarsPrice = Number(data.telegramStarsPrice || 0);
-          window.monobankJarUrl = typeof data.monobankJarUrl === 'string' ? data.monobankJarUrl : '';
+          window.monobankJarUrl = ''; // Do not expose bank-jar checkout inside Telegram Mini App.
           const jarButton = document.getElementById('premiumJarBtn');
           const jarClaimButton = document.getElementById('premiumJarClaimBtn');
           if (jarButton) jarButton.disabled = !window.monobankJarUrl;
@@ -726,12 +720,10 @@
             payButton.classList.toggle('text-gray-400', !window.paymentEnabled);
             payButton.classList.toggle('bg-emerald-400', window.paymentEnabled);
             payButton.classList.toggle('text-black', window.paymentEnabled);
-            payButton.innerText = window.paymentEnabled ? 'Оплатити 149 грн · Monobank' : 'Оплата Monobank ще налаштовується';
+            payButton.innerText = 'Оплата цифрового Premium у Telegram — лише Stars';
           }
           if (payNote) payNote.innerText = [
-            window.paymentEnabled ? '149 грн за 30 днів через захищену сторінку Monobank; продовження вручну.' : '',
-            window.monobankJarUrl ? 'Переказ на банку підтверджується адміністратором вручну.' : '',
-            data.telegramStarsEnabled ? 'Telegram Stars активує Premium після автоматичного підтвердження Telegram.' : 'Telegram Stars буде доступна після налаштування ціни в Stars і підтвердження платежу Telegram.'
+            data.telegramStarsEnabled ? '180 ⭐ за 30 днів. Одноразова оплата без автоматичного продовження; Premium активується після підтвердження платежу Telegram.' : 'Оплата Telegram Stars наразі вимкнена. Спробуйте пізніше.'
           ].filter(Boolean).join(' ');
           const starsButton = document.getElementById('premiumStarsBtn');
           if (starsButton) {
@@ -814,7 +806,7 @@
       if (webApp && typeof webApp.openLink === 'function') webApp.openLink(window.monobankJarUrl);
       else window.open(window.monobankJarUrl, '_blank', 'noopener,noreferrer');
       const note = document.getElementById('premiumPaymentNote');
-      if (note) note.innerText = 'Переказ на банку не підтверджується автоматично. Після переказу натисніть «Я оплатив — повідомити адміністратора». Premium активують після ручної перевірки зарахування.';
+      if (note) note.innerText = 'У Telegram цифровий Premium можна оплатити лише в Telegram Stars.';
     }
 
     async function claimMonobankJarPayment() {
@@ -1618,7 +1610,7 @@
           title: "Публічна оферта та Умови використання ЗНАЙДЕНО",
           content: [
             "ПУБЛІЧНА ОФЕРТА ЗНАЙДЕНО",
-            "Версія: 1.1. Редакцію оновлено 28 жовтня 2026 року. Документ описує фактичну модель сервісу та оплат, але не є юридичним висновком. До публічного комерційного запуску потрібно заповнити підтверджені реєстраційні реквізити постачальника та перевірити податкові й розрахункові обов’язки.",
+            "Версія: 1.2. Редакцію оновлено 28 жовтня 2026 року. Цей текст залишається проєктом до підтвердження постачальника, його реквізитів і правової/податкової моделі.",
             "",
             "1. Дані постачальника",
             "Контакт для підтримки та звернень щодо договору: Telegram @esqide. До публічного продажу постачальник має вказати своє підтверджене повне ім’я або найменування, правовий статус, реєстраційні/податкові реквізити, якщо вони застосовні, та адресу для офіційних звернень. Ці дані наразі не підтверджені в застосунку; контакт у Telegram сам по собі не замінює обов’язкових реквізитів.",
@@ -1630,7 +1622,7 @@
             "Користувач взаємодіє із сервісом через Telegram. Користувач відповідає за збереження доступу до свого акаунта, законність запитів і дотримання правил Telegram та сторонніх платформ. Заборонено використовувати сервіс для спаму, шахрайства, незаконного збору даних, втручання в роботу сервісу або обходу технічних обмежень.",
             "",
             "4. Тарифи, оплата та доступ Premium",
-            "Тариф Premium: 149 грн за 30 днів при оплаті переказом на Monobank-банку; доступ активується лише після фактичної перевірки надходження адміністратором. Альтернативний одноразовий платіж у Telegram Stars: 180 ⭐ за 30 днів; повторне автоматичне списання не передбачене, а доступ надається після підтвердження платежу Telegram. До оплати користувач має ознайомитися з ціною, валютою, строком доступу та функціями, показаними в застосунку. Банківський переказ на банку не означає автоматичної перевірки оплати чи автоматичного надання Premium. Не надсилайте паролі або повні дані банківської картки.",
+            "Для придбання цифрових функцій усередині Telegram Mini App доступний одноразовий платіж у Telegram Stars: 180 ⭐ за 30 днів без автоматичного продовження. Premium активується лише після підтвердження успішного платежу Telegram. Оплата цифрових функцій у межах Telegram здійснюється в Stars відповідно до правил Telegram. Не надсилайте паролі або повні дані банківської картки.",
             "",
             "5. Скасування та повернення коштів",
             "Якщо платіж помилковий, повторний, Premium не активувався після підтвердженої оплати або користувач просить повернення, зверніться до підтримки через Telegram @esqide та надайте дату, суму й підтвердження платежу без передавання паролів чи повних даних картки. Кожне звернення розглядається індивідуально відповідно до застосовного законодавства; цей документ не встановлює загальної заборони на повернення та не обмежує обов’язкових прав споживача. До комерційного запуску постачальник має затвердити та опублікувати процедуру, строки розгляду й порядок повернення коштів.",
@@ -1639,9 +1631,9 @@
             "Сервіс надається в поточному стані з урахуванням технічних обмежень. Можливі перерви через оновлення, помилки, недоступність Telegram, OLX, хостингу чи інших постачальників. Це положення не обмежує відповідальність, яку не можна обмежити законом.",
             "",
             "7. Зміни умов і звернення",
-            "Про істотні зміни умов слід повідомляти користувачів у сервісі. Для питань щодо тестового сервісу використовуйте Telegram @esqide. Дата редакції: 25 жовтня 2026 року. Ця дата є датою редакції, а не підтвердженням юридичного затвердження документа.",
+            "Про істотні зміни умов слід повідомляти користувачів у сервісі. Для звернень використовуйте Telegram @esqide. Дата редакції: 28 жовтня 2026 року; це не підтверджує юридичного затвердження документа.",
             "",
-            "ВАЖЛИВО ПЕРЕД ПУБЛІЧНИМ КОМЕРЦІЙНИМ ЗАПУСКОМ: підтвердити правовий статус і реквізити постачальника; з’ясувати з бухгалтером/юристом порядок реєстрації діяльності, оподаткування, фіскалізації та надання розрахункового документа для кожного способу оплати; затвердити процедуру повернень і розгляду претензій. Факт переказу на банку сам по собі не підтверджує виконання цих обов’язків. До завершення перевірки цей документ слід вважати проєктом, а не підтвердженням юридичної готовності до продажів."
+            "ВАЖЛИВО ПЕРЕД ПУБЛІЧНИМ КОМЕРЦІЙНИМ ЗАПУСКОМ: підтвердити правовий статус і реквізити постачальника; з’ясувати з бухгалтером/юристом порядок реєстрації діяльності, оподаткування, фіскалізації та надання розрахункового документа для кожного способу оплати; затвердити процедуру повернень і розгляду претензій. Продажі не можна починати, доки не підтверджено законну модель діяльності, реквізити постачальника, податкові та розрахункові обов’язки. До завершення перевірки цей документ є проєктом, а не підтвердженням юридичної готовності до продажів."
           ].join("\n")
         },
         privacy: {
@@ -1663,7 +1655,7 @@
             "Обробляються лише дані, потрібні для відповідної функції, на підставі, застосовної до конкретної обробки, зокрема надання замовленої послуги, виконання юридичних обов’язків або законного інтересу, коли це дозволено законом. Власник має перевірити та документувати правові підстави для фактичних процесів.",
             "",
             "5. Кому можуть передаватися дані",
-            "Для роботи сервісу дані можуть оброблятися Telegram (бот і Mini App), Render (хостинг застосунку) та Supabase (база даних), а також платіжними сервісами — у межах їхньої фактичної ролі. Під час переходу за посиланням на Monobank-банку або відкриття рахунку Telegram Stars користувач взаємодіє також із відповідним платіжним сервісом за його правилами. Дані не продаються як самостійний товар. Інфраструктурні постачальники можуть обробляти дані в інших країнах; перед публічним запуском потрібно перевірити актуальні договірні умови, регіони зберігання та міжнародні передавання.",
+            "Для роботи сервісу дані можуть оброблятися Telegram (бот і Mini App), Render (хостинг застосунку) та Supabase (база даних), а також платіжними сервісами — у межах їхньої фактичної ролі. Для оплати цифрових функцій у Telegram використовується Telegram Stars. Інші способи оплати не пропонуються всередині Mini App. Дані не продаються як самостійний товар. Інфраструктурні постачальники можуть обробляти дані в інших країнах; перед публічним запуском потрібно перевірити актуальні договірні умови, регіони зберігання та міжнародні передавання.",
             "",
             "6. Строки зберігання та безпека",
             "Дані зберігаються лише стільки, скільки потрібно для роботи сервісу, виконання юридичних обов’язків, вирішення спорів і захисту від зловживань. Конкретні строки для профілю, фільтрів, платіжних записів і журналів має визначити власник відповідно до фактичної системи. Застосовуються розумні технічні й організаційні заходи захисту, однак абсолютна безпека передавання даних не може бути гарантована.",
