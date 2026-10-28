@@ -288,7 +288,7 @@
             </div>
             <div class="text-[11px] text-gray-300 mt-0.5">Миттєві сповіщення без затримок</div>
           </div>
-          <span class="text-xs font-extrabold bg-amber-400 text-black px-2.5 py-1 rounded-xl">ТЕСТ · оплата вимкнена</span>
+          <span class="text-xs font-extrabold bg-amber-400 text-black px-2.5 py-1 rounded-xl">149 грн / 30 днів</span>
         </div>
 
         <div class="space-y-2 pt-1 border-t border-emerald-800/60 text-xs text-gray-200">
@@ -298,10 +298,10 @@
         </div>
 
         <div class="pt-2 space-y-2">
-          <button type="button" disabled class="w-full py-3 bg-gray-700 text-gray-400 font-extrabold rounded-2xl text-xs cursor-not-allowed flex items-center justify-center gap-2">
-            <span></span> Оплата вимкнена на час тестування
+          <button id="premiumPayBtn" type="button" onclick="payViaMonobank()" disabled class="w-full py-3 bg-gray-700 text-gray-400 font-extrabold rounded-2xl text-xs cursor-not-allowed flex items-center justify-center gap-2">
+            <span>₴</span> Оплата Monobank ще налаштовується
           </button>
-          <p class="text-[10px] text-gray-400 text-center">Реальні платежі не приймаються. Суму та спосіб оплати буде відкрито після окремого запуску.</p>
+          <p id="premiumPaymentNote" class="text-[10px] text-gray-400 text-center">149 грн за 30 днів Premium. Оплата одноразова; продовження вручну.</p>
         </div>
       </div>
 
@@ -658,6 +658,21 @@
           window.hasActivePremium = data.hasActivePremium === true || data.isAdmin === true;
           window.hasActiveTrial = data.hasActiveTrial === true || data.isAdmin === true;
           window.trialEndsAt = data.trialEndsAt || null;
+          window.paymentEnabled = data.paymentEnabled === true;
+          const payButton = document.getElementById('premiumPayBtn');
+          const payNote = document.getElementById('premiumPaymentNote');
+          if (payButton) {
+            payButton.disabled = !window.paymentEnabled;
+            payButton.classList.toggle('cursor-not-allowed', !window.paymentEnabled);
+            payButton.classList.toggle('bg-gray-700', !window.paymentEnabled);
+            payButton.classList.toggle('text-gray-400', !window.paymentEnabled);
+            payButton.classList.toggle('bg-emerald-400', window.paymentEnabled);
+            payButton.classList.toggle('text-black', window.paymentEnabled);
+            payButton.innerText = window.paymentEnabled ? 'Оплатити 149 грн · Monobank' : 'Оплата Monobank ще налаштовується';
+          }
+          if (payNote) payNote.innerText = window.paymentEnabled
+            ? '149 грн за 30 днів Premium. Оплата через захищену сторінку Monobank; автоматичного повторного списання немає.'
+            : 'Для запуску оплати потрібен токен Monobank acquiring. Поки він не налаштований, гроші не списуються.';
           const trialBanner = document.getElementById('trialUrgencyBanner');
           if (trialBanner) {
             if (window.hasActiveTrial && !window.hasActivePremium && window.trialEndsAt) {
@@ -714,10 +729,74 @@
       }
     }
 
-    function payViaTelegramStars() {
-      alert('Оплата вимкнена на час тестування ЗНАЙДЕНО. Реальні платежі не приймаються.');
-      return;
+    let monobankStatusCheckRunning = false;
+
+    async function checkMonobankPayment(invoiceId, attempts = 0) {
+      if (!invoiceId || monobankStatusCheckRunning || !initDataRaw) return;
+      monobankStatusCheckRunning = true;
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/payments/monobank/status/${encodeURIComponent(invoiceId)}`, {
+          headers: { 'x-telegram-init-data': initDataRaw }
+        });
+        const data = await response.json();
+        if (response.ok && data.success && data.paid) {
+          localStorage.removeItem('znaideno_pending_monobank_invoice');
+          alert('Оплату підтверджено! Premium активовано на 30 днів.');
+          await loadUserProfile();
+          return;
+        }
+        if (response.status === 404) {
+          localStorage.removeItem('znaideno_pending_monobank_invoice');
+          return;
+        }
+        if (attempts < 20) window.setTimeout(() => checkMonobankPayment(invoiceId, attempts + 1), 4000);
+        else {
+          const note = document.getElementById('premiumPaymentNote');
+          if (note) note.innerText = 'Платіж ще перевіряється. Поверніться до застосунку трохи пізніше.';
+        }
+      } catch (_) {
+        if (attempts < 20) window.setTimeout(() => checkMonobankPayment(invoiceId, attempts + 1), 5000);
+      } finally {
+        monobankStatusCheckRunning = false;
+      }
     }
+
+    async function payViaMonobank() {
+      if (!window.paymentEnabled) { alert('Оплата Monobank ще не налаштована.'); return; }
+      if (!initDataRaw) { alert('Відкрийте ЗНАЙДЕНО через Telegram, щоб оформити Premium.'); return; }
+      const button = document.getElementById('premiumPayBtn');
+      if (button) { button.disabled = true; button.innerText = 'Створюємо рахунок Monobank…'; }
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/payments/monobank/invoice`, {
+          method: 'POST', headers: { 'x-telegram-init-data': initDataRaw }
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success || !data.invoiceId || !data.pageUrl) throw new Error(data.error || 'Не вдалося створити рахунок Monobank');
+        localStorage.setItem('znaideno_pending_monobank_invoice', data.invoiceId);
+        const webApp = window.Telegram && window.Telegram.WebApp;
+        if (webApp && typeof webApp.openLink === 'function') webApp.openLink(data.pageUrl);
+        else window.open(data.pageUrl, '_blank', 'noopener,noreferrer');
+        window.setTimeout(() => checkMonobankPayment(data.invoiceId), 3000);
+      } catch (error) {
+        alert(error.message || 'Не вдалося створити рахунок Monobank');
+      } finally {
+        if (button) {
+          button.disabled = !window.paymentEnabled;
+          button.innerText = window.paymentEnabled ? 'Оплатити 149 грн · Monobank' : 'Оплата Monobank ще налаштовується';
+        }
+      }
+    }
+
+    window.addEventListener('focus', () => {
+      const invoiceId = localStorage.getItem('znaideno_pending_monobank_invoice');
+      if (invoiceId) checkMonobankPayment(invoiceId);
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        const invoiceId = localStorage.getItem('znaideno_pending_monobank_invoice');
+        if (invoiceId) checkMonobankPayment(invoiceId);
+      }
+    });
 
     function getFavorites() {
       return JSON.parse(localStorage.getItem('olx_favorites') || '[]');
