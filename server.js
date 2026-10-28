@@ -28,6 +28,10 @@ const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
+const TELEGRAM_WEBHOOK_SECRET = (process.env.TELEGRAM_WEBHOOK_SECRET ||
+  (TELEGRAM_BOT_TOKEN
+    ? crypto.createHmac('sha256', TELEGRAM_BOT_TOKEN).update('znaideno-telegram-webhook-v1').digest('hex')
+    : '')).trim();
 const MONOBANK_ACQUIRING_TOKEN = (process.env.MONOBANK_ACQUIRING_TOKEN || '').trim();
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
@@ -750,8 +754,8 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       access: { premiumPriceUah: 149 },
       paymentEnabled: process.env.PAYMENTS_ENABLED === 'true' && Boolean(MONOBANK_ACQUIRING_TOKEN),
       paymentProvider: 'monobank',
-      telegramStarsEnabled: Boolean(TELEGRAM_BOT_TOKEN && supabase),
-      telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100),
+      telegramStarsEnabled: process.env.PAYMENTS_ENABLED === 'true' && (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() !== 'false' && Boolean(TELEGRAM_BOT_TOKEN && supabase && supabaseAdmin) && Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) && Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
+      telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
       monobankJarUrl: (process.env.MONOBANK_JAR_URL || '').trim(),
       user: userData,
       stats: { totalReferrals }
@@ -1089,11 +1093,14 @@ async function updateMonobankNonSuccessStatus(invoiceId, status) {
 
 app.post('/api/payments/stars/invoice', userAuthMiddleware, async (req, res) => {
   try {
-    if (!TELEGRAM_BOT_TOKEN || !supabase) {
-      return res.status(503).json({ success: false, error: 'Оплата Telegram Stars тимчасово недоступна.' });
+    const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+    if (process.env.PAYMENTS_ENABLED !== 'true' ||
+        (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() === 'false' ||
+        !TELEGRAM_BOT_TOKEN || !supabase || !supabaseAdmin ||
+        !Number.isSafeInteger(starsPrice) || starsPrice <= 0) {
+      return res.status(503).json({ success: false, error: 'Оплата Telegram Stars недоступна: спочатку потрібно підключити окремий тестовий Telegram webhook і вказати ціну.' });
     }
     const userId = Number(req.telegramUser.id);
-    const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
     if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(starsPrice) || starsPrice <= 0) {
       return res.status(503).json({ success: false, error: 'Налаштування оплати Telegram Stars некоректні.' });
     }
@@ -1275,6 +1282,13 @@ app.get('/payment/monobank/return', (req, res) => {
 });
 
 app.post('/telegram-webhook', async (req, res) => {
+  const receivedWebhookSecret = req.get('x-telegram-bot-api-secret-token') || '';
+  const receivedSecretBuffer = Buffer.from(receivedWebhookSecret);
+  const expectedSecretBuffer = Buffer.from(TELEGRAM_WEBHOOK_SECRET);
+  if (!TELEGRAM_WEBHOOK_SECRET || receivedSecretBuffer.length !== expectedSecretBuffer.length ||
+      !crypto.timingSafeEqual(receivedSecretBuffer, expectedSecretBuffer)) {
+    return res.sendStatus(401);
+  }
   res.sendStatus(200);
   const update = req.body;
   if (!update) return;
@@ -1729,8 +1743,13 @@ async function registerWebhook() {
   if (!TELEGRAM_BOT_TOKEN || !SERVER_URL) return;
   try {
     const targetWebhookUrl = `${SERVER_URL}/telegram-webhook`;
-    await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${encodeURIComponent(targetWebhookUrl)}`);
-    console.log(`✅ Telegram Webhook встановлено: ${targetWebhookUrl}`);
+    const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook`, {
+      url: targetWebhookUrl,
+      secret_token: TELEGRAM_WEBHOOK_SECRET,
+      allowed_updates: ['message', 'pre_checkout_query']
+    }, { timeout: 10000 });
+    if (!response.data?.ok) throw new Error(response.data?.description || 'Telegram відхилив реєстрацію webhook');
+    console.log(`✅ Telegram Webhook встановлено з перевіркою секретного заголовка: ${targetWebhookUrl}`);
   } catch (err) {
     console.error('Помилка встановлення Webhook:', err.message);
   }
