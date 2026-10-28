@@ -1858,7 +1858,8 @@ if (ENABLE_BACKGROUND_WORKER) {
 if (MONOBANK_TOKEN && MONOBANK_JAR_ID) {
   // Initial check after startup, then no more than once per minute.
   setTimeout(pollMonobankJarDonations, 5000);
-  setInterval(pollMonobankJarDonations, 60000);
+  // Start the recurring timer 60 seconds after the initial delayed poll.
+  setInterval(pollMonobankJarDonations, 65000);
   console.log('Monobank Jar sponsor watcher configured');
 } else {
   console.log('Monobank Jar sponsor watcher disabled (MONOBANK_TOKEN / MONOBANK_JAR_ID not configured)');
@@ -1880,8 +1881,13 @@ async function pollMonobankJarDonations() {
     if (cursorError) throw cursorError;
 
     const nowSeconds = Math.floor(Date.now() / 1000);
-    const fromSeconds = Number.isSafeInteger(Number(cursorRow?.last_time)) && Number(cursorRow.last_time) > 0
-      ? Number(cursorRow.last_time) : Math.max(nowSeconds - 120, 0);
+    const lastProcessedTime = Number(cursorRow?.last_time);
+    // Re-read a small overlap window to avoid missing transactions sharing the
+    // cursor's second or arriving at the cursor boundary. The unique transaction
+    // ledger makes this replay safe and idempotent.
+    const fromSeconds = Number.isSafeInteger(lastProcessedTime) && lastProcessedTime > 0
+      ? Math.max(lastProcessedTime - 120, 0)
+      : Math.max(nowSeconds - 120, 0);
     if (fromSeconds >= nowSeconds) return;
 
     const url = 'https://api.monobank.ua/personal/statement/' +
