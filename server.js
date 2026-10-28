@@ -32,7 +32,7 @@ app.use(cors({
   },
   credentials: false
 }));
-app.use(express.json({ limit: '100kb' }));
+app.use(express.json({ limit: '100kb', verify: (req, res, buffer) => { req.rawBody = Buffer.from(buffer); } }));
 
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 app.use(express.static(__dirname, {
@@ -61,6 +61,8 @@ const TELEGRAM_WEBHOOK_SECRET = (process.env.TELEGRAM_WEBHOOK_SECRET ||
     : '')).trim();
 const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
 const MONOBANK_TOKEN = (process.env.MONOBANK_TOKEN || '').trim();
+// This must be a Monobank Acquiring merchant token; the personal API token above is not interchangeable.
+const MONOBANK_ACQUIRING_TOKEN = (process.env.MONOBANK_ACQUIRING_TOKEN || '').trim();
 const MONOBANK_JAR_ID = (process.env.MONOBANK_JAR_ID || '').trim();
 const MONOBANK_JAR_URL = (process.env.MONOBANK_JAR_URL || '').trim();
 
@@ -930,9 +932,8 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
         premiumPriceUah: PREMIUM_PRICE_UAH
       },
       searchesUsedToday: (await getDailySearchUsage(userId)).used,
-      paymentEnabled: process.env.PAYMENTS_ENABLED === 'true' &&
-        Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) &&
-        Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
+      paymentEnabled: process.env.PAYMENTS_ENABLED === 'true' && Boolean(MONOBANK_ACQUIRING_TOKEN),
+      paymentProvider: 'monobank',
       telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
       sponsorJarUrl: /^https:\/\/send\.monobank\.ua\//i.test(MONOBANK_JAR_URL) ? MONOBANK_JAR_URL : null,
       user: userData,
@@ -1286,6 +1287,211 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
     console.error('[Broadcast] Не вдалося виконати розсилку:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+
+const MONOBANK_PREMIUM_AMOUNT = 14900;
+const MONOBANK_CURRENCY_UAH = 980;
+const MONOBANK_PREMIUM_REFERENCE_PREFIX = 'znaideno-premium-';
+
+async function getMonobankInvoiceStatus(invoiceId) {
+  const response = await axios.post('https://api.monobank.ua/api/merchant/invoice/status', {
+    invoiceId
+  }, {
+    headers: { 'X-Token': MONOBANK_ACQUIRING_TOKEN, 'Accept': 'application/json' },
+    timeout: 12000
+  });
+  return response.data || {};
+}
+
+async function activateConfirmedMonobankPayment(invoiceId, amountMinor, currencyCode) {
+  if (!supabaseAdmin) throw new Error('Supabase service-role client is required for payment activation');
+  const { data, error } = await supabaseAdmin.rpc('activate_monobank_premium', {
+    p_invoice_id: String(invoiceId),
+    p_amount_minor: Number(amountMinor),
+    p_currency_code: Number(currencyCode)
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error('Unexpected Premium activation response');
+  return row;
+}
+
+async function updateMonobankNonSuccessStatus(invoiceId, status) {
+  const allowed = new Set(['created', 'processing', 'failure', 'expired', 'reversed']);
+  if (!allowed.has(status) || !supabaseAdmin) return;
+  const { error } = await supabaseAdmin.from('monobank_payments')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('invoice_id', invoiceId)
+    .neq('status', 'success');
+  if (error) throw error;
+}
+
+app.post('/api/payments/monobank/invoice', userAuthMiddleware, async (req, res) => {
+  try {
+    if (process.env.PAYMENTS_ENABLED !== 'true' || !MONOBANK_ACQUIRING_TOKEN) {
+      return res.status(503).json({
+        success: false,
+        code: 'MONOBANK_ACQUIRING_NOT_CONFIGURED',
+        error: 'Оплата Monobank ще не налаштована. Потрібен токен еквайрингу Monobank.'
+      });
+    }
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Платіжна база тимчасово недоступна.' });
+
+    const userId = Number(req.telegramUser.id);
+    const { error: userError } = await supabaseAdmin.from('users').upsert({
+      telegram_id: userId,
+      first_name: req.telegramUser.first_name || 'Користувач',
+      is_admin: false
+    }, { onConflict: 'telegram_id', ignoreDuplicates: true });
+    if (userError) throw userError;
+
+    const reference = MONOBANK_PREMIUM_REFERENCE_PREFIX + crypto.randomUUID();
+    const redirectUrl = `${SERVER_URL}/payment/monobank/return?reference=${encodeURIComponent(reference)}`;
+    const webhookUrl = `${SERVER_URL}/api/payments/monobank/webhook`;
+    const invoiceResponse = await axios.post('https://api.monobank.ua/api/merchant/invoice/create', {
+      amount: MONOBANK_PREMIUM_AMOUNT,
+      ccy: MONOBANK_CURRENCY_UAH,
+      merchantPaymInfo: {
+        reference,
+        destination: 'ЗНАЙДЕНО Premium на 30 днів',
+        comment: `Premium 30 днів, Telegram ID ${userId}`,
+        basketOrder: [{
+          name: 'ЗНАЙДЕНО Premium · 30 днів',
+          qty: 1,
+          sum: MONOBANK_PREMIUM_AMOUNT,
+          total: MONOBANK_PREMIUM_AMOUNT,
+          unit: 'послуга',
+          code: 'ZNAIDENO-PREMIUM-30D'
+        }]
+      },
+      redirectUrl,
+      webHookUrl: webhookUrl,
+      validity: 3600
+    }, {
+      headers: { 'X-Token': MONOBANK_ACQUIRING_TOKEN, 'Accept': 'application/json' },
+      timeout: 12000
+    });
+
+    const invoice = invoiceResponse.data || {};
+    if (typeof invoice.invoiceId !== 'string' || typeof invoice.pageUrl !== 'string' ||
+        !/^https:\/\//i.test(invoice.pageUrl)) {
+      throw new Error('Monobank did not return a valid invoiceId/pageUrl');
+    }
+
+    const { error: insertError } = await supabaseAdmin.from('monobank_payments').insert({
+      invoice_id: invoice.invoiceId,
+      reference,
+      telegram_id: userId,
+      amount_minor: MONOBANK_PREMIUM_AMOUNT,
+      currency_code: MONOBANK_CURRENCY_UAH,
+      status: 'created',
+      page_url: invoice.pageUrl
+    });
+    if (insertError) throw insertError;
+
+    return res.json({
+      success: true,
+      provider: 'monobank',
+      invoiceId: invoice.invoiceId,
+      pageUrl: invoice.pageUrl,
+      amountUah: MONOBANK_PREMIUM_AMOUNT / 100,
+      currency: 'UAH',
+      periodDays: 30
+    });
+  } catch (error) {
+    console.error('[Monobank Acquiring] Invoice creation failed:', error.response?.status || error.code || error.message);
+    return res.status(502).json({
+      success: false,
+      error: 'Не вдалося створити рахунок Monobank. Перевірте налаштування еквайрингу та спробуйте ще раз.'
+    });
+  }
+});
+
+app.get('/api/payments/monobank/status/:invoiceId', userAuthMiddleware, async (req, res) => {
+  try {
+    if (!MONOBANK_ACQUIRING_TOKEN || !supabaseAdmin) {
+      return res.status(503).json({ success: false, error: 'Перевірка платежу тимчасово недоступна.' });
+    }
+    const invoiceId = String(req.params.invoiceId || '').slice(0, 200);
+    const { data: payment, error: paymentError } = await supabaseAdmin.from('monobank_payments')
+      .select('invoice_id,telegram_id,amount_minor,currency_code,status,premium_until')
+      .eq('invoice_id', invoiceId).eq('telegram_id', Number(req.telegramUser.id)).maybeSingle();
+    if (paymentError) throw paymentError;
+    if (!payment) return res.status(404).json({ success: false, error: 'Рахунок не знайдено.' });
+
+    if (payment.status !== 'success') {
+      const statusData = await getMonobankInvoiceStatus(invoiceId);
+      const status = String(statusData.status || '').toLowerCase();
+      if (status === 'success') {
+        if (Number(statusData.amount) !== payment.amount_minor ||
+            Number(statusData.ccy) !== payment.currency_code) {
+          return res.status(409).json({ success: false, error: 'Сума або валюта платежу не збігається.' });
+        }
+        await activateConfirmedMonobankPayment(invoiceId, statusData.amount, statusData.ccy);
+      } else {
+        await updateMonobankNonSuccessStatus(invoiceId, status);
+      }
+    }
+
+    const { data: refreshed, error: refreshError } = await supabaseAdmin.from('monobank_payments')
+      .select('status,premium_until').eq('invoice_id', invoiceId).maybeSingle();
+    if (refreshError) throw refreshError;
+    return res.json({
+      success: true,
+      status: refreshed?.status || payment.status,
+      paid: refreshed?.status === 'success',
+      premiumUntil: refreshed?.premium_until || null
+    });
+  } catch (error) {
+    console.error('[Monobank Acquiring] Status check failed:', error.response?.status || error.code || error.message);
+    return res.status(502).json({ success: false, error: 'Не вдалося перевірити платіж. Спробуйте ще раз.' });
+  }
+});
+
+app.post('/api/payments/monobank/webhook', async (req, res) => {
+  try {
+    if (!MONOBANK_ACQUIRING_TOKEN || !supabaseAdmin) return res.sendStatus(503);
+    const signature = req.get('x-sign') || '';
+    if (!signature || !req.rawBody) return res.sendStatus(401);
+
+    const keyResponse = await axios.get('https://api.monobank.ua/api/merchant/pubkey', {
+      headers: { 'X-Token': MONOBANK_ACQUIRING_TOKEN, 'Accept': 'application/json' },
+      timeout: 10000
+    });
+    const publicKey = keyResponse.data?.key || keyResponse.data?.pubkey || keyResponse.data;
+    if (typeof publicKey !== 'string' || !publicKey.includes('PUBLIC KEY')) return res.sendStatus(401);
+    const validSignature = crypto.verify(
+      'sha256',
+      req.rawBody,
+      publicKey,
+      Buffer.from(signature, 'base64')
+    );
+    if (!validSignature) return res.sendStatus(401);
+
+    const event = req.body || {};
+    if (typeof event.invoiceId !== 'string' || typeof event.status !== 'string') return res.sendStatus(400);
+    const status = event.status.toLowerCase();
+    if (status === 'success') {
+      const { data: payment, error } = await supabaseAdmin.from('monobank_payments')
+        .select('amount_minor,currency_code').eq('invoice_id', event.invoiceId).maybeSingle();
+      if (error) throw error;
+      if (!payment || Number(event.amount) !== payment.amount_minor || Number(event.ccy) !== payment.currency_code) {
+        return res.sendStatus(409);
+      }
+      await activateConfirmedMonobankPayment(event.invoiceId, event.amount, event.ccy);
+    } else {
+      await updateMonobankNonSuccessStatus(event.invoiceId, status);
+    }
+    return res.sendStatus(200);
+  } catch (error) {
+    console.error('[Monobank Acquiring] Webhook failed:', error.response?.status || error.code || error.message);
+    return res.sendStatus(500);
+  }
+});
+
+app.get('/payment/monobank/return', (req, res) => {
+  res.type('html').send(`<!doctype html><html lang="uk"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ЗНАЙДЕНО — оплата</title><body style="font-family:system-ui;background:#0b0d0c;color:#f5f7f3;padding:28px;max-width:480px;margin:12vh auto;text-align:center"><h1 style="color:#34d399">ЗНАЙДЕНО</h1><h2>Дякуємо!</h2><p>Monobank повернув вас із платіжної сторінки. Поверніться до Telegram та відкрийте ЗНАЙДЕНО — статус Premium оновиться після підтвердження платежу.</p><p style="color:#9ca69d;font-size:13px">Не закривайте застосунок, доки платіж не буде підтверджено.</p></body></html>`);
 });
 
 app.post('/api/payments/stars/invoice-link', userAuthMiddleware, async (req, res) => {
