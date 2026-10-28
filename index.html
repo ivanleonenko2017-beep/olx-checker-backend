@@ -662,6 +662,8 @@
           window.hasActiveTrial = data.hasActiveTrial === true || data.isAdmin === true;
           window.trialEndsAt = data.trialEndsAt || null;
           window.paymentEnabled = data.paymentEnabled === true;
+          window.telegramStarsEnabled = data.telegramStarsEnabled === true;
+          window.telegramStarsPrice = Number(data.telegramStarsPrice || 100);
           const payButton = document.getElementById('premiumPayBtn');
           const payNote = document.getElementById('premiumPaymentNote');
           if (payButton) {
