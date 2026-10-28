@@ -301,6 +301,12 @@
           <button id="premiumPayBtn" type="button" onclick="payViaMonobank()" disabled class="w-full py-3 bg-gray-700 text-gray-400 font-extrabold rounded-2xl text-xs cursor-not-allowed flex items-center justify-center gap-2">
             <span>₴</span> Оплата Monobank ще налаштовується
           </button>
+          <button id="premiumJarBtn" type="button" onclick="payViaMonobankJar()" class="w-full py-3 bg-gray-900 hover:bg-gray-800 border border-gray-700 text-white font-extrabold rounded-2xl text-xs flex items-center justify-center gap-2">
+            <span>₴</span> Переказати 149 грн на Monobank-банку
+          </button>
+          <button id="premiumJarClaimBtn" type="button" onclick="claimMonobankJarPayment()" class="w-full py-2.5 bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-300 font-bold rounded-2xl text-[11px] flex items-center justify-center gap-2">
+            Я оплатив — повідомити адміністратора
+          </button>
           <button id="premiumStarsBtn" type="button" onclick="payViaTelegramStars()" class="w-full py-3 bg-gray-900 hover:bg-gray-800 border border-emerald-500/40 text-emerald-300 font-extrabold rounded-2xl text-xs flex items-center justify-center gap-2">
             <span>★</span> Оплатити Telegram Stars
           </button>
@@ -664,9 +670,15 @@
           window.paymentEnabled = data.paymentEnabled === true;
           window.telegramStarsEnabled = data.telegramStarsEnabled === true;
           window.telegramStarsPrice = Number(data.telegramStarsPrice || 100);
+          window.monobankJarUrl = typeof data.monobankJarUrl === 'string' ? data.monobankJarUrl : '';
+          const jarButton = document.getElementById('premiumJarBtn');
+          const jarClaimButton = document.getElementById('premiumJarClaimBtn');
+          if (jarButton) jarButton.disabled = !window.monobankJarUrl;
+          if (jarClaimButton) jarClaimButton.disabled = !window.monobankJarUrl;
           const payButton = document.getElementById('premiumPayBtn');
           const payNote = document.getElementById('premiumPaymentNote');
           if (payButton) {
+            payButton.classList.toggle('hidden', !window.paymentEnabled);
             payButton.disabled = !window.paymentEnabled;
             payButton.classList.toggle('cursor-not-allowed', !window.paymentEnabled);
             payButton.classList.toggle('bg-gray-700', !window.paymentEnabled);
@@ -739,6 +751,50 @@
         }
       } catch (err) {
         console.error('Profile load error; preserving current tariff display:', err);
+      }
+    }
+
+    function payViaMonobankJar() {
+      if (!window.monobankJarUrl) {
+        alert('Посилання на Monobank-банку тимчасово недоступне.');
+        return;
+      }
+      const webApp = window.Telegram && window.Telegram.WebApp;
+      if (webApp && typeof webApp.openLink === 'function') webApp.openLink(window.monobankJarUrl);
+      else window.open(window.monobankJarUrl, '_blank', 'noopener,noreferrer');
+      const note = document.getElementById('premiumPaymentNote');
+      if (note) note.innerText = 'Переказ на банку не підтверджується автоматично. Після переказу натисніть «Я оплатив — повідомити адміністратора». Premium активують після ручної перевірки зарахування.';
+    }
+
+    async function claimMonobankJarPayment() {
+      if (!initDataRaw) {
+        alert('Відкрийте ЗНАЙДЕНО через Telegram.');
+        return;
+      }
+      if (!window.monobankJarUrl) {
+        alert('Посилання на Monobank-банку тимчасово недоступне.');
+        return;
+      }
+      const button = document.getElementById('premiumJarClaimBtn');
+      if (button) {
+        button.disabled = true;
+        button.innerText = 'Надсилаємо запит…';
+      }
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/payments/jar/claim`, {
+          method: 'POST',
+          headers: { 'x-telegram-init-data': initDataRaw }
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Не вдалося повідомити адміністратора');
+        alert('Запит передано адміністратору. Premium буде активовано вручну після перевірки фактичного зарахування коштів.');
+      } catch (error) {
+        alert(error.message || 'Не вдалося повідомити адміністратора');
+      } finally {
+        if (button) {
+          button.disabled = !window.monobankJarUrl;
+          button.innerText = 'Я оплатив — повідомити адміністратора';
+        }
       }
     }
 
