@@ -1289,8 +1289,16 @@ app.post('/telegram-webhook', async (req, res) => {
       !crypto.timingSafeEqual(receivedSecretBuffer, expectedSecretBuffer)) {
     return res.sendStatus(401);
   }
-  res.sendStatus(200);
-  const update = req.body;
+  try {
+    await processTelegramWebhookUpdate(req.body);
+    return res.sendStatus(200);
+  } catch (error) {
+    console.error('[Telegram Webhook] Update processing failed:', error.message);
+    return res.sendStatus(500);
+  }
+});
+
+async function processTelegramWebhookUpdate(update) {
   if (!update) return;
 
   // Telegram Stars checkout: approve only the expected digital Premium product.
@@ -1495,7 +1503,8 @@ app.post('/telegram-webhook', async (req, res) => {
     await sendTelegramMessage(chatId, `⚙️ <b>Панель Адміністратора</b>`, keyboard);
     return;
   }
-});
+
+}
 
 let isWorkerRunning = false;
 async function runBackgroundWorker() {
