@@ -6,10 +6,32 @@ const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { normalizeCriteria, applyCriteriaToListing, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
+const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 
 const app = express();
-app.use(cors());
-app.use(express.json({ verify: (req, res, buffer) => { req.rawBody = Buffer.from(buffer); } }));
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.secure || req.get('x-forwarded-proto') === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+  }
+  next();
+});
+app.use(cors({
+  origin: (origin, callback) => {
+    const allowedOrigins = new Set([
+      (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, ''),
+      ...(process.env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean)
+    ]);
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    return callback(new Error('CORS origin not allowed'));
+  },
+  credentials: false
+}));
+app.use(express.json({ limit: '100kb' }));
 
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 app.use(express.static(__dirname, {
@@ -24,15 +46,19 @@ if (rawUrl.endsWith('/rest/v1')) rawUrl = rawUrl.slice(0, -8);
 if (rawUrl.endsWith('/')) rawUrl = rawUrl.slice(0, -1);
 
 const SUPABASE_URL = rawUrl;
-const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+// All database access originates on this server. Prefer the service-role key when
+// configured so RLS can be enabled without granting public API roles data access.
+const SUPABASE_KEY = (SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
-const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
+// All instances registering the same bot webhook must use the same secret.
+// Prefer an explicit Render secret; derive a stable fallback from the bot token rather
+// than generating a different random secret on each instance/restart.
 const TELEGRAM_WEBHOOK_SECRET = (process.env.TELEGRAM_WEBHOOK_SECRET ||
   (TELEGRAM_BOT_TOKEN
     ? crypto.createHmac('sha256', TELEGRAM_BOT_TOKEN).update('znaideno-telegram-webhook-v1').digest('hex')
     : '')).trim();
-const MONOBANK_ACQUIRING_TOKEN = (process.env.MONOBANK_ACQUIRING_TOKEN || '').trim();
+const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
   .split(',')
@@ -110,6 +136,27 @@ async function checkIsAdmin(userId) {
   } catch (e) {
     return false;
   }
+}
+
+async function consumeDailySearchQuota(userId, dailyLimit) {
+  if (!supabaseAdmin) throw new Error('Service-role database client is required for atomic search quota checks');
+  const { data, error } = await supabaseAdmin.rpc('consume_daily_search', {
+    p_telegram_id: Number(userId),
+    p_daily_limit: Number(dailyLimit)
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row.allowed !== 'boolean') throw new Error('Unexpected search quota response');
+  return { allowed: row.allowed, used: Number(row.used_count || 0), remaining: Number(row.remaining_count || 0) };
+}
+
+async function getDailySearchUsage(userId) {
+  if (!supabaseAdmin) return { used: 0, date: null };
+  const { data, error } = await supabaseAdmin.from('user_daily_usage')
+    .select('search_count,usage_date').eq('telegram_id', Number(userId)).maybeSingle();
+  if (error) throw error;
+  if (!data || data.usage_date !== new Date().toISOString().slice(0, 10)) return { used: 0, date: null };
+  return { used: Number(data.search_count || 0), date: data.usage_date };
 }
 
 function userAuthMiddleware(req, res, next) {
@@ -192,7 +239,7 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) 
 app.get('/api/proxy-image', async (req, res) => {
   // Only proxy HTTPS images from OLX-owned domains. Never accept arbitrary URLs:
   // this endpoint is public and must not be usable to reach internal services.
-  const fallback = () => res.redirect(`${SERVER_URL}/assets/no-photo.svg`);
+  const fallback = () => res.redirect(`${SERVER_URL}/assets/no-photo.png`);
   try {
     const imageUrl = typeof req.query.url === 'string' ? req.query.url : '';
     if (!imageUrl || imageUrl.length > 2048) return fallback();
@@ -242,7 +289,7 @@ app.get('/', (req, res) => {
 
 function isPublishedToday(locationDate) {
   const label = String(locationDate || '').toLocaleLowerCase('uk-UA');
-  return /(?:^|[\\s,·])(?:сьогодні|сегодня|today)(?=$|[\\s,·])/i.test(label);
+  return /(?:^|[\s,·])(?:сьогодні|сегодня|today)(?=$|[\s,·])/i.test(label);
 }
 
 function getListingAgeMinutes(locationDate) {
@@ -270,13 +317,75 @@ function getListingAgeMinutes(locationDate) {
   }
 }
 
+function normalizeLocationText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’']/g, '')
+    .toLocaleLowerCase('uk-UA')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function getOlxCitySlug(city) {
+  const normalized = normalizeLocationText(city);
+  const knownSlugs = {
+    'чернигов': 'chernigov',
+    'чернігів': 'chernigov',
+    'київ': 'kiev',
+    'киев': 'kiev',
+    'львів': 'lvov',
+    'львов': 'lvov',
+    'харків': 'kharkov',
+    'харьков': 'kharkov',
+    'одеса': 'odessa',
+    'одесса': 'odessa',
+    'дніпро': 'dnepr',
+    'днепр': 'dnepr',
+    'запоріжжя': 'zaporozhye',
+    'запорожье': 'zaporozhye',
+    'полтава': 'poltava',
+    'сумі': 'sumy',
+    'суми': 'sumy',
+    'рівне': 'rovno',
+    'ровно': 'rovno',
+    'житомир': 'zhitomir',
+    'чернівці': 'chernovtsy',
+    'черновцы': 'chernovtsy'
+  };
+  if (knownSlugs[normalized]) return knownSlugs[normalized];
+  const transliteration = {
+    а:'a', б:'b', в:'v', г:'g', ґ:'g', д:'d', е:'e', є:'ye', ж:'zh', з:'z',
+    и:'y', і:'i', ї:'yi', й:'y', к:'k', л:'l', м:'m', н:'n', о:'o', п:'p',
+    р:'r', с:'s', т:'t', у:'u', ф:'f', х:'kh', ц:'ts', ч:'ch', ш:'sh',
+    щ:'shch', ь:'', ю:'yu', я:'ya'
+  };
+  return normalized.split('').map(char => transliteration[char] ?? char).join('')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 function locationMatches(locationDate, requestedLocation) {
-  const requested = String(requestedLocation || '').trim().toLocaleLowerCase('uk-UA');
-  if (!requested || requested === 'всі міста' || requested === 'вся україна' || requested === 'уся україна') return true;
-  const actual = String(locationDate || '').toLocaleLowerCase('uk-UA');
-  // OLX cards usually expose the city in their location/date label. Match the
-  // requested place only against that label; never pretend a broad search is local.
-  return actual.includes(requested);
+  const requestedRaw = String(requestedLocation || '').trim();
+  const requested = normalizeLocationText(requestedRaw);
+  if (!requested || ['всі міста', 'вся україна', 'уся україна'].some(value => normalizeLocationText(value) === requested)) return true;
+  const actual = normalizeLocationText(locationDate);
+  if (actual.includes(requested)) return true;
+  const aliases = {
+    'чернігів': ['чернигов', 'chernigov'],
+    'чернигов': ['чернігів', 'chernigov'],
+    'київ': ['киев', 'kiev'],
+    'киев': ['київ', 'kiev'],
+    'львів': ['львов', 'lvov'],
+    'львов': ['львів', 'lvov'],
+    'харків': ['харьков', 'kharkov'],
+    'харьков': ['харків', 'kharkov'],
+    'одеса': ['одесса', 'odessa'],
+    'одесса': ['одеса', 'odessa'],
+    'дніпро': ['днепр', 'dnepr'],
+    'днепр': ['дніпро', 'dnepr']
+  };
+  return (aliases[requestedRaw.toLocaleLowerCase('uk-UA')] || aliases[requested] || [])
+    .some(alias => actual.includes(normalizeLocationText(alias)));
 }
 
 async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
@@ -406,13 +515,13 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     const srcset = imgEl.attr('srcset') || imgEl.attr('data-srcset') || '';
     const candidates = [
       lazySrc,
-      srcset && !srcset.startsWith('data:') ? srcset.split(',').pop().trim().split(/\\s+/)[0] : '',
+      srcset && !srcset.startsWith('data:') ? srcset.split(',').pop().trim().split(/\s+/)[0] : '',
       src,
       imgEl.attr('content') || ''
     ];
 
     let candidate = candidates.find(value =>
-      value && !value.startsWith('data:') && !/placeholder|no-photo|noimage|blank\\.gif/i.test(value)
+      value && !value.startsWith('data:') && !/placeholder|no-photo|noimage|blank\.gif/i.test(value)
     ) || '';
 
     if (candidate) {
@@ -422,7 +531,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
       try {
         const imageUrl = new URL(candidate);
         if (imageUrl.protocol === 'https:' &&
-            /(^|\\.)olx\.(ua|pl|bg|ro|pt|kz|uz|az|ge|md|by)$|olxcdn\.com$|olxstatic\.com$/i.test(imageUrl.hostname)) {
+            /(^|\.)olx\.(ua|pl|bg|ro|pt|kz|uz|az|ge|md|by)$|olxcdn\.com$|olxstatic\.com$/i.test(imageUrl.hostname)) {
           rawImgUrl = imageUrl.toString();
         }
       } catch (_) {
@@ -495,24 +604,43 @@ async function fetchListingDescription(inputUrl) {
     });
     const $ = cheerio.load(String(response.data || ''));
     let description = $('[data-testid="ad-description"], [data-cy="ad-description"], [data-testid*="description"], [class*="description"]').first().text().trim();
+    let conditionMarker = '';
 
-    if (!description) {
-      $('script[type="application/ld+json"]').each((_, el) => {
-        if (description) return;
-        try {
-          const json = JSON.parse($(el).contents().text());
-          const candidates = Array.isArray(json) ? json : [json];
-          for (const item of candidates) {
-            if (item && typeof item.description === 'string' && item.description.trim()) {
-              description = item.description.trim();
-              break;
-            }
+    // OLX often exposes condition as structured metadata rather than in the
+    // seller's description. Preserve it as matching context for Smart Search.
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const json = JSON.parse($(el).contents().text());
+        const candidates = Array.isArray(json) ? json : [json];
+        for (const item of candidates) {
+          if (!item || typeof item !== 'object') continue;
+          const rawCondition = item.itemCondition ?? item.condition ??
+            (Array.isArray(item.additionalProperty)
+              ? item.additionalProperty.find(prop => /condition|стан/i.test(String(prop?.name || '')))?.value
+              : '');
+          const conditionValue = typeof rawCondition === 'string'
+            ? rawCondition
+            : String(rawCondition?.name || rawCondition?.['@id'] || '');
+          if (/UsedCondition|pre.?owned|вживан|уживан|б\/?у/i.test(conditionValue)) {
+            conditionMarker = ' Стан оголошення: вживаний.';
+          } else if (/NewCondition|brand.?new|новий|нова|нове/i.test(conditionValue)) {
+            conditionMarker = ' Стан оголошення: новий.';
           }
-        } catch (_) {}
-      });
+          if (!description && typeof item.description === 'string' && item.description.trim()) {
+            description = item.description.trim();
+          }
+        }
+      } catch (_) {}
+    });
+    const visibleCondition = $('[data-testid*="condition"], [data-cy*="condition"], [class*="condition"]').text().trim();
+    if (!conditionMarker && /вживан|уживан|б\/?у|used|pre.?owned/i.test(visibleCondition)) {
+      conditionMarker = ' Стан оголошення: вживаний.';
+    } else if (!conditionMarker && /новий|нова|нове|new/i.test(visibleCondition)) {
+      conditionMarker = ' Стан оголошення: новий.';
     }
     if (!description) description = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '';
     description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
+    if (description && conditionMarker) description = (description + conditionMarker).slice(0, 5000);
     if (description && !/verify you are human|access denied|robot check|підтверд.{0,20}що ви людина/i.test(description)) {
       listingDescriptionCache.set(key, { description, expiresAt: Date.now() + 10 * 60 * 1000 });
       if (listingDescriptionCache.size > 500) {
@@ -569,38 +697,63 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       }
     }
 
-    const hasActivePremium = isAdmin || (
-      accessUser?.tariff === 'premium' &&
-      Boolean(accessUser.premium_until) &&
-      Number.isFinite(Date.parse(accessUser.premium_until)) &&
-      Date.parse(accessUser.premium_until) > Date.now()
-    );
-    const trialStartedMs = accessUser?.trial_started_at ? Date.parse(accessUser.trial_started_at) : 0;
-    const trialEndsMs = trialStartedMs > 0 ? trialStartedMs + 5 * 24 * 60 * 60 * 1000 : 0;
-    const hasActiveTrial = trialEndsMs > Date.now();
-
-    if (!hasActivePremium && !hasActiveTrial && !testPremiumBypass) {
-      return res.status(403).json({
-        success: false,
-        error: 'Пробний період завершився. Для продовження користування потрібен Premium.',
-        code: 'TRIAL_EXPIRED'
-      });
+    let access = deriveAccess(accessUser || {}, isAdmin);
+    if (testPremiumBypass) access = { ...access, plan: 'premium', hasActivePremium: true, hasActiveTrial: false, searchLimit: Infinity };
+    let searchQuota = { used: 0, remaining: access.searchLimit };
+    if (!isAdmin && !testPremiumBypass) {
+      const quota = await consumeDailySearchQuota(userId, access.searchLimit);
+      if (!quota.allowed) {
+        return res.status(429).json({
+          success: false,
+          code: 'DAILY_SEARCH_LIMIT',
+          error: access.plan === 'free'
+            ? 'Ви використали 5 безкоштовних пошуків на сьогодні. Ліміт оновиться опівночі.'
+            : 'Ви використали денний ліміт пошуку. Спробуйте завтра.',
+          plan: access.plan,
+          searchesUsedToday: quota.used,
+          searchesLimitToday: access.searchLimit,
+          searchesRemainingToday: 0
+        });
+      }
+      searchQuota = { used: quota.used, remaining: quota.remaining };
     }
 
-    const { query, categoryUrl, minPrice, maxPrice, city, condition } = req.query;
+    const { query: rawQuery, categoryUrl, minPrice: rawMinPrice, maxPrice: rawMaxPrice, city: rawCity, condition: rawCondition, smart: smartMode } = req.query;
+    const parsedNaturalQuery = smartMode === '1' && typeof rawQuery === 'string' &&
+      !/^https?:\/\//i.test(rawQuery.trim())
+      ? parseNaturalLanguageQuery(rawQuery)
+      : null;
+    const query = parsedNaturalQuery?.query || rawQuery;
+    const parsedCriteria = parsedNaturalQuery?.criteria || {};
+    const criteria = normalizeCriteria({
+      ...parsedCriteria,
+      minPrice: rawMinPrice !== undefined ? rawMinPrice : parsedCriteria.minPrice,
+      maxPrice: rawMaxPrice !== undefined ? rawMaxPrice : parsedCriteria.maxPrice,
+      city: rawCity || parsedCriteria.city,
+      condition: rawCondition || parsedCriteria.condition
+    });
+    const minPrice = rawMinPrice !== undefined && rawMinPrice !== '' ? rawMinPrice : criteria.minPrice || '';
+    const maxPrice = rawMaxPrice !== undefined && rawMaxPrice !== '' ? rawMaxPrice : criteria.maxPrice || '';
+    const city = rawCity || criteria.city || '';
+    const condition = rawCondition || criteria.condition || 'all';
     let targetUrl = categoryUrl;
 
     if (!targetUrl && query) {
       const cleanQ = query.trim();
       if (cleanQ.startsWith('http://') || cleanQ.startsWith('https://')) {
         targetUrl = cleanQ;
-      } else if (minPrice || maxPrice) {
+      } else {
+        // Smart Search must ask OLX for the selected city before applying
+        // client-side location matching; otherwise the first national page
+        // can contain no listings from the requested city at all.
+        const citySlug = parsedNaturalQuery && city ? getOlxCitySlug(city) : '';
+        const searchPath = citySlug
+          ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(cleanQ)}/`
+          : `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/`;
         const searchMin = minPrice ? `search%5Bfilter_float_price%3Afrom%5D=${minPrice}` : '';
         const searchMax = maxPrice ? `search%5Bfilter_float_price%3Ato%5D=${maxPrice}` : '';
         const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
-        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/?${queryParams}`;
-      } else {
-        targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/`;
+        targetUrl = queryParams ? `${searchPath}?${queryParams}` : searchPath;
       }
     }
 
@@ -608,16 +761,27 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
 
     const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query);
     const requestedLocation = String(city || '').trim();
-    let items = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+    const locationItems = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
-    const conditionText = item => String(item.title || '') + ' ' + String(item.description || '');
-    if (requestedCondition === 'new') {
-      items = items.filter(item => /(?:^|[^\p{L}])(?:нове|новий|нова|нові|новый|новая|новое|новые|new)(?=$|[^\p{L}])/iu.test(conditionText(item)));
-    } else if (requestedCondition === 'used') {
-      items = items.filter(item => /б\/у|(?:^|[^\p{L}])бу(?=$|[^\p{L}])|вживан|уживан|після використання|used/iu.test(conditionText(item)));
-    }
-    console.log(`[API search] Completed: parsed=${parsedItems.length}, returned=${items.length}, durationMs=${Date.now() - startedAt}`);
-    res.json({ success: true, count: items.length, averagePrice, items });
+    if (requestedCondition !== 'all') criteria.condition = requestedCondition;
+    const rejectionReasons = {};
+    const items = locationItems.filter(item => {
+      const result = applyCriteriaToListing(item, criteria);
+      if (!result.matches) rejectionReasons[result.reason] = (rejectionReasons[result.reason] || 0) + 1;
+      return result.matches;
+    });
+    console.log(`[API search] Completed: parsed=${parsedItems.length}, cityMatched=${locationItems.length}, returned=${items.length}, rejected=${JSON.stringify(rejectionReasons)}, city=${JSON.stringify(requestedLocation)}, url=${targetUrl}, smart=${Boolean(parsedNaturalQuery)}, durationMs=${Date.now() - startedAt}`);
+    res.json({
+      success: true,
+      count: items.length,
+      averagePrice,
+      items,
+      plan: access.plan,
+      searchesUsedToday: searchQuota.used,
+      searchesLimitToday: Number.isFinite(access.searchLimit) ? access.searchLimit : null,
+      searchesRemainingToday: Number.isFinite(searchQuota.remaining) ? searchQuota.remaining : null,
+      ...(parsedNaturalQuery ? { parsedQuery: parsedNaturalQuery.query, criteria: parsedCriteria } : {})
+    });
   } catch (error) {
     console.error(`[API search] Failed: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}, message=${String(error.message || 'unknown').slice(0, 180)}, durationMs=${Date.now() - startedAt}`);
     if (error.code === 'OLX_BLOCKED') {
@@ -651,10 +815,13 @@ app.get('/api/ad-details', async (req, res) => {
       validateStatus: status => status >= 200 && status < 400
     });
     const $ = cheerio.load(String(response.data || ''));
-    let description = $('meta[name="description"]').attr('content') ||
-      $('meta[property="og:description"]').attr('content') ||
+    // Prefer listing-specific seller text and structured listing metadata over
+    // generic site-wide meta descriptions, which otherwise look identical on every ad.
+    let description =
       $('[data-testid="ad-description"]').text() ||
-      $('[data-cy="ad-description"]').text() || '';
+      $('[data-cy="ad-description"]').text() ||
+      $('[data-testid*="ad-description"]').text() ||
+      $('[data-cy*="description"]').text() || '';
     if (!String(description).trim()) {
       $('script[type="application/ld+json"]').each((_, el) => {
         if (String(description).trim()) return;
@@ -669,7 +836,11 @@ app.get('/api/ad-details', async (req, res) => {
         } catch (_) {}
       });
     }
-    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();
+    if (!String(description).trim()) {
+      description = $('meta[property="og:description"]').attr('content') ||
+        $('meta[name="description"]').attr('content') || '';
+    }
+    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     if (description.length > 500) description = description.slice(0, 497).trimEnd() + '...';
     res.json({ success: true, description });
   } catch (err) {
@@ -715,27 +886,23 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       }
     }
 
-    const hasActivePremium = testPremiumBypass || isAdmin || (
-      userData.tariff === 'premium' &&
-      Boolean(userData.premium_until) &&
-      Number.isFinite(Date.parse(userData.premium_until)) &&
-      Date.parse(userData.premium_until) > Date.now()
-    );
-    const trialStartedMs = userData.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
-    const trialEndsAt = trialStartedMs > 0 ? new Date(trialStartedMs + 5 * 24 * 60 * 60 * 1000).toISOString() : null;
-    const hasActiveTrial = testPremiumBypass || Boolean(trialEndsAt && Date.parse(trialEndsAt) > Date.now());
+    let access = deriveAccess(userData, isAdmin);
+    if (testPremiumBypass) access = { ...access, plan: 'premium', hasActivePremium: true, hasActiveTrial: false };
+    const hasActivePremium = access.hasActivePremium || testPremiumBypass;
+    const hasActiveTrial = access.hasActiveTrial;
+    const trialEndsAt = access.trialEndsAt;
     if (isAdmin) {
       userData.tariff = 'premium';
       userData.is_admin = true;
-    } else if (!hasActivePremium) {
+    } else if (!hasActivePremium && userData.tariff === 'premium' && userData.premium_until &&
+      Date.parse(userData.premium_until) <= Date.now()) {
       userData.tariff = 'free';
     }
 
     let totalReferrals = 0;
-    if (supabase) {
-      // Referral counts are backed by the optional referrals table added in the
-      // included migration. Keep profile loading usable before the migration runs.
-      const { count, error: referralCountError } = await supabase
+    if (supabaseAdmin || supabase) {
+      // Use the server-side database client because the referrals table is intentionally not public.
+      const { count, error: referralCountError } = await (supabaseAdmin || supabase)
         .from('referrals')
         .select('id', { count: 'exact', head: true })
         .eq('inviter_telegram_id', userId);
@@ -751,10 +918,22 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       hasActivePremium,
       hasActiveTrial,
       trialEndsAt,
-      access: { premiumPriceUah: 149 },
-      paymentEnabled: process.env.PAYMENTS_ENABLED === 'true' && Boolean(MONOBANK_ACQUIRING_TOKEN),
-      paymentProvider: 'monobank',
-      telegramStarsEnabled: process.env.PAYMENTS_ENABLED === 'true' && (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() !== 'false' && Boolean(TELEGRAM_BOT_TOKEN && supabase && supabaseAdmin) && Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) && Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
+      access: {
+        plan: access.plan,
+        filterLimit: Number.isFinite(access.filterLimit) ? access.filterLimit : null,
+        searchLimit: Number.isFinite(access.searchLimit) ? access.searchLimit : null,
+        checkIntervalMinutes: access.checkIntervalMinutes,
+        premiumPriceUah: PREMIUM_PRICE_UAH
+      },
+      searchesUsedToday: (await getDailySearchUsage(userId)).used,
+      // Card acquiring is intentionally disabled for this no-FOP test release.
+      paymentEnabled: false,
+      paymentProvider: 'manual-jar-and-stars',
+      telegramStarsEnabled: process.env.PAYMENTS_ENABLED === 'true' &&
+        (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() !== 'false' &&
+        Boolean(TELEGRAM_BOT_TOKEN && supabase && supabaseAdmin) &&
+        Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) &&
+        Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
       telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
       monobankJarUrl: (process.env.MONOBANK_JAR_URL || '').trim(),
       user: userData,
@@ -811,8 +990,15 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
 
     if (supabase) {
       try {
-        await supabase.from('users').upsert({ telegram_id: userId }, { onConflict: 'telegram_id' });
-      } catch (uErr) {}
+        await supabase.from('users').upsert({
+          telegram_id: userId,
+          trial_started_at: new Date().toISOString()
+        }, { onConflict: 'telegram_id', ignoreDuplicates: true });
+        await supabase.from('users').update({ trial_started_at: new Date().toISOString() })
+          .eq('telegram_id', userId).is('trial_started_at', null);
+      } catch (uErr) {
+        console.warn('[Filter access] Не вдалося ініціалізувати пробний період:', uErr.message);
+      }
 
       const { data: existingFilters, error: filtersError } = await supabase
         .from('filters')
@@ -831,13 +1017,21 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
       const { data: userData, error: userError } = await supabase.from('users')
         .select('tariff,premium_until,trial_started_at').eq('telegram_id', userId).maybeSingle();
       if (userError) throw userError;
-      const premiumExpiry = userData?.premium_until ? Date.parse(userData.premium_until) : 0;
-      const isPremium = isAdmin || Boolean(userData && userData.tariff === 'premium' &&
-        Number.isFinite(premiumExpiry) && premiumExpiry > Date.now());
-      const trialStart = userData?.trial_started_at ? Date.parse(userData.trial_started_at) : 0;
-      const hasActiveTrial = trialStart > 0 && Date.now() < trialStart + 5 * 24 * 60 * 60 * 1000;
-      if (!isAdmin && !isPremium && !hasActiveTrial && !testPremiumBypass) {
-        return res.status(403).json({ success: false, error: 'TRIAL_EXPIRED' });
+      let access = deriveAccess(userData || {}, isAdmin);
+      if (testPremiumBypass) access = { ...access, plan: 'premium', filterLimit: 20 };
+      if (!canCreateFilter(access, (existingFilters || []).length)) {
+        return res.status(403).json({
+          success: false,
+          error: 'LIMIT_EXCEEDED',
+          code: 'LIMIT_EXCEEDED',
+          plan: access.plan,
+          filterLimit: access.filterLimit,
+          message: access.plan === 'free'
+            ? 'На безкоштовному тарифі можна мати 1 активний фільтр. Видаліть старий або оформіть Premium.'
+            : access.plan === 'trial'
+              ? 'Під час пробного періоду можна мати до 3 активних фільтрів.'
+              : 'На Premium можна мати до 20 активних фільтрів.'
+        });
       }
 
       const { data, error } = await supabase.from('filters').insert([{
@@ -932,17 +1126,33 @@ app.delete('/api/filters/:id', userAuthMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/legal/terms', (req, res) => {
+app.get('/api/legal/terms', (_req, res) => {
   res.json({
-    title: "Публічна оферта та Умови використання ЗНАЙДЕНО",
-    content: "Дана Оферта є офіційною пропозицією сервісу ЗНАЙДЕНО для фізичних осіб щодо надання доступу до функцій автоматичного моніторингу оголошень. Оплата послуг або використання Telegram Mini App означає повне прийняття цих умов."
+    title: 'Умови використання ЗНАЙДЕНО — передрелізна редакція',
+    status: 'draft',
+    paymentsEnabled: process.env.PAYMENTS_ENABLED === 'true',
+    content: [
+      'ЗНАЙДЕНО надає програмні функції пошуку й моніторингу оголошень, збереження фільтрів та сповіщень.',
+      'Поточна серверна політика передбачає 4-денний пробний період, після нього безкоштовний тариф з обмеженнями та Premium за 149 грн за 30 днів. Фактичні умови потрібно звіряти з інтерфейсом і підтверджувати до покупки.',
+      'Реальні платежі вважаються доступними лише якщо платіжний сценарій увімкнений сервером і рахунок успішно створюється. Premium активується лише після підтвердження успішного платежу.',
+      'Сервіс не гарантує виявлення кожного оголошення, точність даних сторонніх джерел або безперервну доступність.',
+      'Ця передрелізна редакція не замінює остаточну публічну оферту. До комерційного запуску потрібно опублікувати перевірені реквізити постачальника, умови поновлення/скасування, повернення та права споживача.',
+      'Питання: ivanleonenko2016@gmail.com.'
+    ].join('\n')
   });
 });
 
-app.get('/api/legal/privacy', (req, res) => {
+app.get('/api/legal/privacy', (_req, res) => {
   res.json({
-    title: "Політика конфіденційності",
-    content: "Сервіс ЗНАЙДЕНО обробляє тільки публічні дані Telegram (ID, ім'я) та збережені параметри фільтрів. Платіжні дані обробляються виключно ліцензованими провайдерами (Telegram Stars)."
+    title: 'Політика конфіденційності ЗНАЙДЕНО — передрелізна редакція',
+    status: 'draft',
+    content: [
+      'Залежно від використаних функцій сервіс обробляє Telegram ID та доступні поля профілю, пошукові запити й фільтри, тариф і строк доступу, ідентифікатори платіжних транзакцій Telegram Stars, ідентифікатори оголошень для запобігання дублюванню, звернення до підтримки та технічні журнали.',
+      'Дані використовуються для входу, збереження фільтрів, пошуку, сповіщень, обліку підписки/платежів, підтримки, діагностики та захисту від зловживань.',
+      'Інфраструктура поточної версії включає Telegram, Render і Supabase. Доступність сторонніх платіжних методів залежить від фактично підключеної інтеграції. Сервіс не призначений для збору даних платіжної картки.',
+      'Строки зберігання, порядок видалення, правові підстави, реквізити володільця даних і міжнародні передавання мають бути підтверджені до публічного запуску. Не вважайте цей передрелізний текст остаточною політикою.',
+      'Запити щодо даних: ivanleonenko2016@gmail.com.'
+    ].join('\n')
   });
 });
 
@@ -1058,87 +1268,6 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
   }
 });
 
-
-const MONOBANK_PREMIUM_AMOUNT = 14900;
-const MONOBANK_CURRENCY_UAH = 980;
-
-async function getMonobankInvoiceStatus(invoiceId) {
-  const response = await axios.post('https://api.monobank.ua/api/merchant/invoice/status', { invoiceId }, {
-    headers: { 'X-Token': MONOBANK_ACQUIRING_TOKEN, 'Accept': 'application/json' },
-    timeout: 12000
-  });
-  return response.data || {};
-}
-
-async function activateConfirmedMonobankPayment(invoiceId, amountMinor, currencyCode) {
-  if (!supabaseAdmin) throw new Error('Supabase service-role client is required for payment activation');
-  const { data, error } = await supabaseAdmin.rpc('activate_monobank_premium', {
-    p_invoice_id: String(invoiceId),
-    p_amount_minor: Number(amountMinor),
-    p_currency_code: Number(currencyCode)
-  });
-  if (error) throw error;
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) throw new Error('Unexpected Premium activation response');
-  return row;
-}
-
-async function updateMonobankNonSuccessStatus(invoiceId, status) {
-  if (!new Set(['created', 'processing', 'failure', 'expired', 'reversed']).has(status) || !supabaseAdmin) return;
-  const { error } = await supabaseAdmin.from('monobank_payments')
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq('invoice_id', invoiceId).neq('status', 'success');
-  if (error) throw error;
-}
-
-app.post('/api/payments/stars/invoice', userAuthMiddleware, async (req, res) => {
-  try {
-    const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
-    if (process.env.PAYMENTS_ENABLED !== 'true' ||
-        (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() === 'false' ||
-        !TELEGRAM_BOT_TOKEN || !supabase || !supabaseAdmin ||
-        !Number.isSafeInteger(starsPrice) || starsPrice <= 0) {
-      return res.status(503).json({ success: false, error: 'Оплата Telegram Stars недоступна: спочатку потрібно підключити окремий тестовий Telegram webhook і вказати ціну.' });
-    }
-    const userId = Number(req.telegramUser.id);
-    if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(starsPrice) || starsPrice <= 0) {
-      return res.status(503).json({ success: false, error: 'Налаштування оплати Telegram Stars некоректні.' });
-    }
-
-    const { error: userError } = await supabase.from('users').upsert({
-      telegram_id: userId,
-      first_name: req.telegramUser.first_name || 'Користувач',
-      is_admin: false
-    }, { onConflict: 'telegram_id', ignoreDuplicates: true });
-    if (userError) throw userError;
-
-    const [invoiceResponse, botResponse] = await Promise.all([
-      axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendInvoice`, {
-        chat_id: userId,
-        title: 'ЗНАЙДЕНО Premium — 30 днів',
-        description: '30 днів Premium: безлімітні фільтри та швидкі сповіщення.',
-        payload: 'olx_checker_premium_30d_v1',
-        provider_token: '',
-        currency: 'XTR',
-        prices: [{ label: 'Premium на 30 днів', amount: starsPrice }]
-      }, { timeout: 12000 }),
-      axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe`, { timeout: 8000 })
-    ]);
-
-    if (!invoiceResponse.data?.ok || !botResponse.data?.ok || !botResponse.data?.result?.username) {
-      throw new Error('Telegram did not confirm invoice delivery');
-    }
-    return res.json({
-      success: true,
-      priceStars: starsPrice,
-      botUrl: 'https://t.me/' + botResponse.data.result.username
-    });
-  } catch (error) {
-    console.error('[Telegram Stars] Invoice creation failed:', error.response?.status || error.code || error.message);
-    return res.status(502).json({ success: false, error: 'Не вдалося надіслати рахунок у Telegram. Відкрийте чат бота й спробуйте ще раз.' });
-  }
-});
-
 const jarPaymentClaimCooldown = new Map();
 
 app.post('/api/payments/jar/claim', userAuthMiddleware, async (req, res) => {
@@ -1176,109 +1305,36 @@ app.post('/api/payments/jar/claim', userAuthMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/payments/monobank/invoice', userAuthMiddleware, async (req, res) => {
+app.post('/api/payments/stars/invoice-link', userAuthMiddleware, async (req, res) => {
   try {
-    if (process.env.PAYMENTS_ENABLED !== 'true' || !MONOBANK_ACQUIRING_TOKEN) {
-      return res.status(503).json({ success: false, code: 'MONOBANK_ACQUIRING_NOT_CONFIGURED', error: 'Оплата Monobank ще не налаштована.' });
+    const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+    if (process.env.PAYMENTS_ENABLED !== 'true' ||
+        (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() === 'false' ||
+        !TELEGRAM_BOT_TOKEN || !supabase || !supabaseAdmin ||
+        !Number.isSafeInteger(starsPrice) || starsPrice < 1) {
+      return res.status(503).json({
+        success: false,
+        code: 'PAYMENTS_DISABLED',
+        error: 'Оплата ще не активована. Зараз триває тестування; доступ до Premium можна буде придбати після фінального налаштування.'
+      });
     }
-    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Платіжна база тимчасово недоступна.' });
-    const userId = Number(req.telegramUser.id);
-    const { error: userError } = await supabaseAdmin.from('users').upsert({
-      telegram_id: userId, first_name: req.telegramUser.first_name || 'Користувач', is_admin: false
-    }, { onConflict: 'telegram_id', ignoreDuplicates: true });
-    if (userError) throw userError;
-
-    const reference = 'znaideno-premium-' + crypto.randomUUID();
-    const invoiceResponse = await axios.post('https://api.monobank.ua/api/merchant/invoice/create', {
-      amount: MONOBANK_PREMIUM_AMOUNT,
-      ccy: MONOBANK_CURRENCY_UAH,
-      merchantPaymInfo: {
-        reference,
-        destination: 'ЗНАЙДЕНО Premium на 30 днів',
-        comment: 'Premium 30 днів, Telegram ID ' + userId,
-        basketOrder: [{ name: 'ЗНАЙДЕНО Premium · 30 днів', qty: 1, sum: MONOBANK_PREMIUM_AMOUNT, total: MONOBANK_PREMIUM_AMOUNT, unit: 'послуга', code: 'ZNAIDENO-PREMIUM-30D' }]
-      },
-      redirectUrl: SERVER_URL + '/payment/monobank/return?reference=' + encodeURIComponent(reference),
-      webHookUrl: SERVER_URL + '/api/payments/monobank/webhook',
-      validity: 3600
-    }, { headers: { 'X-Token': MONOBANK_ACQUIRING_TOKEN, 'Accept': 'application/json' }, timeout: 12000 });
-
-    const invoice = invoiceResponse.data || {};
-    if (typeof invoice.invoiceId !== 'string' || typeof invoice.pageUrl !== 'string' || !/^https:\/\//i.test(invoice.pageUrl)) {
-      throw new Error('Monobank did not return a valid invoiceId/pageUrl');
+    if (!TELEGRAM_BOT_TOKEN) return res.status(503).json({ success: false, error: 'Платіжний бот тимчасово недоступний.' });
+    const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createInvoiceLink`, {
+      title: 'ЗНАЙДЕНО Premium — 30 днів',
+      description: 'Premium: до 20 активних фільтрів, перевірка кожні 2 хвилини та розширені можливості пошуку.',
+      payload: 'znaideno_premium_monthly_v1',
+      provider_token: '',
+      currency: 'XTR',
+      prices: [{ label: 'ЗНАЙДЕНО Premium · 30 днів', amount: starsPrice }],
+    }, { timeout: 10000 });
+    if (!response.data?.ok || typeof response.data.result !== 'string') {
+      throw new Error(response.data?.description || 'Telegram не повернув платіжне посилання');
     }
-    const { error: insertError } = await supabaseAdmin.from('monobank_payments').insert({
-      invoice_id: invoice.invoiceId, reference, telegram_id: userId, amount_minor: MONOBANK_PREMIUM_AMOUNT,
-      currency_code: MONOBANK_CURRENCY_UAH, status: 'created', page_url: invoice.pageUrl
-    });
-    if (insertError) throw insertError;
-    return res.json({ success: true, provider: 'monobank', invoiceId: invoice.invoiceId, pageUrl: invoice.pageUrl, amountUah: 149, currency: 'UAH', periodDays: 30 });
+    res.json({ success: true, invoiceLink: response.data.result, starsPrice, priceUah: PREMIUM_PRICE_UAH });
   } catch (error) {
-    console.error('[Monobank Acquiring] Invoice creation failed:', error.response?.status || error.code || error.message);
-    return res.status(502).json({ success: false, error: 'Не вдалося створити рахунок Monobank. Перевірте налаштування еквайрингу.' });
+    console.error('[Stars] Не вдалося створити invoice link:', error.response?.data?.description || error.message);
+    res.status(502).json({ success: false, error: 'Не вдалося створити рахунок. Спробуйте пізніше.' });
   }
-});
-
-app.get('/api/payments/monobank/status/:invoiceId', userAuthMiddleware, async (req, res) => {
-  try {
-    if (!MONOBANK_ACQUIRING_TOKEN || !supabaseAdmin) return res.status(503).json({ success: false, error: 'Перевірка платежу недоступна.' });
-    const invoiceId = String(req.params.invoiceId || '').slice(0, 200);
-    const { data: payment, error } = await supabaseAdmin.from('monobank_payments')
-      .select('invoice_id,telegram_id,amount_minor,currency_code,status,premium_until')
-      .eq('invoice_id', invoiceId).eq('telegram_id', Number(req.telegramUser.id)).maybeSingle();
-    if (error) throw error;
-    if (!payment) return res.status(404).json({ success: false, error: 'Рахунок не знайдено.' });
-
-    if (payment.status !== 'success') {
-      const remote = await getMonobankInvoiceStatus(invoiceId);
-      const status = String(remote.status || '').toLowerCase();
-      if (status === 'success') {
-        if (Number(remote.amount) !== payment.amount_minor || Number(remote.ccy) !== payment.currency_code) {
-          return res.status(409).json({ success: false, error: 'Сума або валюта платежу не збігається.' });
-        }
-        await activateConfirmedMonobankPayment(invoiceId, remote.amount, remote.ccy);
-      } else await updateMonobankNonSuccessStatus(invoiceId, status);
-    }
-    const { data: refreshed, error: refreshError } = await supabaseAdmin.from('monobank_payments')
-      .select('status,premium_until').eq('invoice_id', invoiceId).maybeSingle();
-    if (refreshError) throw refreshError;
-    return res.json({ success: true, status: refreshed?.status || payment.status, paid: refreshed?.status === 'success', premiumUntil: refreshed?.premium_until || null });
-  } catch (error) {
-    console.error('[Monobank Acquiring] Status check failed:', error.response?.status || error.code || error.message);
-    return res.status(502).json({ success: false, error: 'Не вдалося перевірити платіж. Спробуйте пізніше.' });
-  }
-});
-
-app.post('/api/payments/monobank/webhook', async (req, res) => {
-  try {
-    if (!MONOBANK_ACQUIRING_TOKEN || !supabaseAdmin) return res.sendStatus(503);
-    const signature = req.get('x-sign') || '';
-    if (!signature || !req.rawBody) return res.sendStatus(401);
-    const keyResponse = await axios.get('https://api.monobank.ua/api/merchant/pubkey', {
-      headers: { 'X-Token': MONOBANK_ACQUIRING_TOKEN, 'Accept': 'application/json' }, timeout: 10000
-    });
-    const publicKey = keyResponse.data?.key || keyResponse.data?.pubkey || keyResponse.data;
-    if (typeof publicKey !== 'string' || !publicKey.includes('PUBLIC KEY')) return res.sendStatus(401);
-    if (!crypto.verify('sha256', req.rawBody, publicKey, Buffer.from(signature, 'base64'))) return res.sendStatus(401);
-
-    const event = req.body || {};
-    if (typeof event.invoiceId !== 'string' || typeof event.status !== 'string') return res.sendStatus(400);
-    const status = event.status.toLowerCase();
-    if (status === 'success') {
-      const { data: payment, error } = await supabaseAdmin.from('monobank_payments').select('amount_minor,currency_code').eq('invoice_id', event.invoiceId).maybeSingle();
-      if (error) throw error;
-      if (!payment || Number(event.amount) !== payment.amount_minor || Number(event.ccy) !== payment.currency_code) return res.sendStatus(409);
-      await activateConfirmedMonobankPayment(event.invoiceId, event.amount, event.ccy);
-    } else await updateMonobankNonSuccessStatus(event.invoiceId, status);
-    return res.sendStatus(200);
-  } catch (error) {
-    console.error('[Monobank Acquiring] Webhook failed:', error.response?.status || error.code || error.message);
-    return res.sendStatus(500);
-  }
-});
-
-app.get('/payment/monobank/return', (req, res) => {
-  res.type('html').send('<!doctype html><html lang="uk"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ЗНАЙДЕНО — оплата</title><body style="font-family:system-ui;background:#0b0d0c;color:#f5f7f3;padding:28px;max-width:480px;margin:12vh auto;text-align:center"><h1 style="color:#34d399">ЗНАЙДЕНО</h1><h2>Дякуємо!</h2><p>Поверніться до Telegram та відкрийте ЗНАЙДЕНО — статус Premium оновиться після підтвердження платежу Monobank.</p></body></html>');
 });
 
 app.post('/telegram-webhook', async (req, res) => {
@@ -1290,22 +1346,17 @@ app.post('/telegram-webhook', async (req, res) => {
     return res.sendStatus(401);
   }
   try {
-    await processTelegramWebhookUpdate(req.body);
-    return res.sendStatus(200);
-  } catch (error) {
-    console.error('[Telegram Webhook] Update processing failed:', error.message);
-    return res.sendStatus(500);
-  }
-});
-
-async function processTelegramWebhookUpdate(update) {
+  const update = req.body;
   if (!update) return;
 
   // Telegram Stars checkout: approve only the expected digital Premium product.
   if (update.pre_checkout_query) {
     const query = update.pre_checkout_query;
-    const valid = query.currency === 'XTR' && query.invoice_payload === 'olx_checker_premium_30d_v1' &&
-      Number(query.total_amount) === Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
+    const configuredStarsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+    const valid = process.env.PAYMENTS_ENABLED === 'true' &&
+      Number.isSafeInteger(configuredStarsPrice) && configuredStarsPrice > 0 &&
+      query.currency === 'XTR' && query.invoice_payload === 'znaideno_premium_monthly_v1' &&
+      Number(query.total_amount) === configuredStarsPrice;
     try {
       await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery`, {
         pre_checkout_query_id: query.id,
@@ -1326,68 +1377,79 @@ async function processTelegramWebhookUpdate(update) {
   // Grant Premium only after Telegram confirms a successful Stars payment.
   if (msg.successful_payment) {
     const payment = msg.successful_payment;
-    const expectedStars = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
-    if (payment.currency !== 'XTR' || payment.invoice_payload !== 'olx_checker_premium_30d_v1' ||
+    const expectedStars = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+    if (payment.currency !== 'XTR' || payment.invoice_payload !== 'znaideno_premium_monthly_v1' ||
         Number(payment.total_amount) !== expectedStars || !payment.telegram_payment_charge_id) {
       console.error('Отримано платіж із неочікуваними параметрами; Premium не нараховано.');
       await sendTelegramMessage(chatId, 'Не вдалося автоматично підтвердити платіж. Напишіть на ivanleonenko2016@gmail.com.');
       return;
     }
-    if (!supabase) {
+    const paymentDb = supabaseAdmin || supabase;
+    if (!paymentDb) {
       await sendTelegramMessage(chatId, 'Платіж отримано, але тимчасово недоступна база даних. Напишіть на ivanleonenko2016@gmail.com.');
       return;
     }
     try {
-      const { data: existingPayment, error: paymentReadError } = await supabase
-        .from('star_payments').select('telegram_payment_charge_id')
+      const { data: existingPayment, error: paymentReadError } = await paymentDb
+        .from('star_payments')
+        .select('telegram_payment_charge_id,activation_status,premium_until,is_recurring,is_first_recurring')
         .eq('telegram_payment_charge_id', payment.telegram_payment_charge_id).maybeSingle();
       if (paymentReadError) throw paymentReadError;
+
+      let premiumUntil;
       if (existingPayment) {
-        // Recover an interrupted activation if the ledger row exists but Premium was not granted.
-        const { data: existingUser, error: existingUserError } = await supabase
-          .from('users').select('premium_until,tariff').eq('telegram_id', chatId).maybeSingle();
-        if (existingUserError) throw existingUserError;
-        const existingExpiry = existingUser && existingUser.premium_until ? Date.parse(existingUser.premium_until) : 0;
-        if (!Number.isFinite(existingExpiry) || existingExpiry <= Date.now()) {
-          const repairedUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-          const { error: repairError } = await supabase.from('users').upsert({
-            telegram_id: chatId,
-            first_name: msg.from && msg.from.first_name ? msg.from.first_name : 'User',
-            tariff: 'premium',
-            premium_until: repairedUntil
-          }, { onConflict: 'telegram_id' });
-          if (repairError) throw repairError;
-          await sendTelegramMessage(chatId, 'Знайшли незавершену активацію платежу та відновили Premium на 30 днів. Дякуємо за підтримку ЗНАЙДЕНО.');
-        } else {
-          await sendTelegramMessage(chatId, 'Цей платіж уже оброблено, Premium активний. Дякуємо за підтримку ЗНАЙДЕНО.');
+        if (existingPayment.activation_status === 'active' && existingPayment.premium_until) {
+          await sendTelegramMessage(chatId, 'Цей платіж уже оброблено. Premium залишається активним до вказаної дати.');
+          return;
         }
-        return;
+        premiumUntil = existingPayment.premium_until;
+        if (!premiumUntil) {
+          const { data: currentUser, error: userReadError } = await paymentDb
+            .from('users').select('premium_until').eq('telegram_id', chatId).maybeSingle();
+          if (userReadError) throw userReadError;
+          const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
+          const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
+          premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
+          const { error: saveExpiryError } = await paymentDb.from('star_payments')
+            .update({ premium_until: premiumUntil }).eq('telegram_payment_charge_id', payment.telegram_payment_charge_id);
+          if (saveExpiryError) throw saveExpiryError;
+        }
+      } else {
+        const { data: currentUser, error: userReadError } = await paymentDb
+          .from('users').select('premium_until').eq('telegram_id', chatId).maybeSingle();
+        if (userReadError) throw userReadError;
+        const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
+        const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
+        premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
+        const { error: paymentInsertError } = await paymentDb.from('star_payments').insert([{
+          telegram_payment_charge_id: payment.telegram_payment_charge_id,
+          provider_payment_charge_id: payment.provider_payment_charge_id || null,
+          telegram_id: chatId,
+          currency: payment.currency,
+          total_amount: payment.total_amount,
+          invoice_payload: payment.invoice_payload,
+          activation_status: 'pending',
+          premium_until: premiumUntil,
+          is_recurring: payment.is_recurring === true,
+          is_first_recurring: payment.is_first_recurring === true
+        }]);
+        if (paymentInsertError) throw paymentInsertError;
       }
 
-      const { data: currentUser, error: userReadError } = await supabase
-        .from('users').select('premium_until,tariff').eq('telegram_id', chatId).maybeSingle();
-      if (userReadError) throw userReadError;
-      const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
-      const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
-      const premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-      const { error: paymentInsertError } = await supabase.from('star_payments').insert([{
-        telegram_payment_charge_id: payment.telegram_payment_charge_id,
-        provider_payment_charge_id: payment.provider_payment_charge_id || null,
-        telegram_id: chatId,
-        currency: payment.currency,
-        total_amount: payment.total_amount,
-        invoice_payload: payment.invoice_payload
-      }]);
-      if (paymentInsertError) throw paymentInsertError;
-
-      const { error: grantError } = await supabase.from('users').upsert({
+      const { error: grantError } = await paymentDb.from('users').upsert({
         telegram_id: chatId,
         first_name: msg.from?.first_name || 'User',
         tariff: 'premium',
         premium_until: premiumUntil
       }, { onConflict: 'telegram_id' });
       if (grantError) throw grantError;
+      const { error: activateError } = await paymentDb.from('star_payments').update({
+        activation_status: 'active',
+        premium_until: premiumUntil,
+        is_recurring: payment.is_recurring === true || existingPayment?.is_recurring === true,
+        is_first_recurring: payment.is_first_recurring === true || existingPayment?.is_first_recurring === true
+      }).eq('telegram_payment_charge_id', payment.telegram_payment_charge_id);
+      if (activateError) throw activateError;
       await sendTelegramMessage(chatId, 'Оплату Telegram Stars підтверджено! Premium активовано на 30 днів. Дякуємо за підтримку ЗНАЙДЕНО.');
     } catch (err) {
       console.error('Помилка обробки Telegram Stars платежу:', err.message);
@@ -1396,24 +1458,39 @@ async function processTelegramWebhookUpdate(update) {
     return;
   }
 
-  if (supabase) {
-    const { error: userUpsertError } = await supabase.from('users').upsert({
-      telegram_id: chatId,
-      first_name: msg.from?.first_name || 'User'
-    }, { onConflict: 'telegram_id' });
-    if (userUpsertError) console.error('[Telegram] Не вдалося зберегти користувача для розсилок:', userUpsertError.message);
+  let isNewTelegramUser = false;
+  if (supabaseAdmin || supabase) {
+    const userDb = supabaseAdmin || supabase;
+    try {
+      const { data: previousUser, error: previousUserError } = await userDb.from('users')
+        .select('telegram_id').eq('telegram_id', chatId).maybeSingle();
+      if (previousUserError) throw previousUserError;
+      isNewTelegramUser = !previousUser;
+      const { error: userUpsertError } = await userDb.from('users').upsert({
+        telegram_id: chatId,
+        first_name: msg.from?.first_name || 'User',
+        ...(isNewTelegramUser ? { trial_started_at: new Date().toISOString() } : {})
+      }, { onConflict: 'telegram_id' });
+      if (userUpsertError) throw userUpsertError;
+    } catch (userError) {
+      console.error('[Telegram] Не вдалося зберегти користувача для розсилок:', userError.message);
+    }
   }
 
   if (text.startsWith('/start')) {
     const startPayload = text.trim().split(/\s+/, 2)[1] || '';
     if (startPayload === 'buy_premium') {
-      const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
+      const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+      if (process.env.PAYMENTS_ENABLED !== 'true' || !Number.isSafeInteger(starsPrice) || starsPrice < 1) {
+        await sendTelegramMessage(chatId, 'Оплата Premium ще вимкнена на час тестування. Вартість для користувача — 149 грн/місяць; точну суму в Telegram Stars буде показано перед запуском.');
+        return;
+      }
       try {
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendInvoice`, {
           chat_id: chatId,
           title: 'ЗНАЙДЕНО Premium — 30 днів',
-          description: '30 днів Premium: до 1 перевірки кожні 2 хвилини та безлімітні фільтри.',
-          payload: 'olx_checker_premium_30d_v1',
+          description: 'Premium на 30 днів: до 20 активних фільтрів та перевірка кожні 2 хвилини.',
+          payload: 'znaideno_premium_monthly_v1',
           provider_token: '',
           currency: 'XTR',
           prices: [{ label: 'Premium на 30 днів', amount: starsPrice }]
@@ -1426,7 +1503,7 @@ async function processTelegramWebhookUpdate(update) {
     }
     // Accept one referral attribution per Telegram account; never count self-referrals.
     const referralMatch = /^ref_(\d{1,20})$/.exec(startPayload);
-    if (referralMatch && (supabaseAdmin || supabase)) {
+    if (process.env.ENABLE_REFERRALS === 'true' && referralMatch && isNewTelegramUser && (supabaseAdmin || supabase)) {
       const inviterId = Number(referralMatch[1]);
       const inviteeId = Number(chatId);
       if (Number.isSafeInteger(inviterId) && inviterId > 0 &&
@@ -1441,13 +1518,13 @@ async function processTelegramWebhookUpdate(update) {
         } else if (!referralError && newReferral && newReferral.length > 0) {
           // Reward only when a new, unique referral row was actually inserted.
           // Extend an existing subscription rather than overwriting remaining days.
-          const { data: inviter, error: inviterReadError } = await supabase
+          const { data: inviter, error: inviterReadError } = await referralDb
             .from('users').select('tariff,premium_until').eq('telegram_id', inviterId).maybeSingle();
           if (!inviterReadError && inviter) {
             const currentExpiry = inviter.premium_until ? Date.parse(inviter.premium_until) : 0;
             const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
-            const nextExpiry = new Date(rewardBase + 1 * 24 * 60 * 60 * 1000).toISOString();
-            const { error: rewardError } = await supabase.from('users').update({
+            const nextExpiry = new Date(rewardBase + 3 * 24 * 60 * 60 * 1000).toISOString();
+            const { error: rewardError } = await referralDb.from('users').update({
               tariff: 'premium',
               premium_until: nextExpiry
             }).eq('telegram_id', inviterId);
@@ -1459,23 +1536,64 @@ async function processTelegramWebhookUpdate(update) {
       }
     }
 
-    const welcomeText = 
-      `👋 <b>Ласкаво просимо до ЗНАЙДЕНО 1.0.0!</b>\n\n` +
-      `⚡️ <b>Твій персональний інструмент для швидкого перекупу та вигідних покупок на OLX.</b>\n\n` +
-      `🎯 <b>Що вміє бот:</b>\n` +
-      `• <b>Авто-моніторинг:</b> перевіряє нові оголошення за розкладом тарифу.\n` +
-      `• <b>Аналітика ринку:</b> розраховує середню ціну та підказує знижки від 20%.\n` +
-      `• <b>Розумні фільтри:</b> відсіює чохли, запчастини, коробки та спам.\n\n` +
-      `👑 <b>Переваги PREMIUM:</b>\n` +
-      `✓ Перевірка нових товарів кожні <b>2 хвилини</b>.\n` +
-      `✓ <b>Безлімітні</b> активні відстеження.\n` +
-      `✓ Пріоритетне надсилання сповіщень.\n\n` +
-      `👇 <i>Натисніть кнопку нижче, щоб відкрити додаток та налаштувати пошук:</i>`;
+    const welcomeText =
+      `👋 <b>Вітаємо у ЗНАЙДЕНО 1.0.0!</b>\n\n` +
+      `🔎 <b>Розумний пошук, який працює за тебе.</b>\n` +
+      `Створи фільтр — і отримуй сповіщення, коли з’являються нові оголошення, що відповідають твоїм критеріям. Менше ручних перевірок, більше часу на важливе.\n\n` +
+      `<b>Що вміє ЗНАЙДЕНО:</b>\n` +
+      `🧠 <b>Пошук своїми словами:</b> опиши потрібний товар, бюджет, місто та стан.\n` +
+      `🎯 <b>Гнучкі фільтри:</b> уточнюй критерії та відсіюй небажані варіанти.\n` +
+      `🔔 <b>Автоматичні сповіщення:</b> отримуй ціну, опис, доступне фото та посилання на знайдену пропозицію.\n` +
+      `📊 <b>Аналітика цін:</b> порівнюй пропозиції та переглядай орієнтовну медіанну ціну, коли достатньо схожих оголошень.\n` +
+      `📉 <b>Контроль ціни:</b> отримуй сповіщення, якщо ціна вже відстежуваного оголошення знизилася.\n\n` +
+      `🎁 <b>4 дні пробного періоду</b>\n` +
+      `• До <b>3 фільтрів</b> одночасно.\n` +
+      `• До <b>30 пошукових перевірок на день</b>.\n` +
+      `• Перевірка приблизно кожні <b>5 хвилин</b>.\n\n` +
+      `💎 <b>PREMIUM — 149 грн/місяць</b>\n` +
+      `• До <b>20 фільтрів</b> і до <b>100 пошукових перевірок на день</b>.\n` +
+      `• Перевірка приблизно кожні <b>2 хвилини</b>.\n\n` +
+      `Після пробного періоду можна продовжити користуватися безкоштовним тарифом: <b>1 фільтр</b>, до <b>5 перевірок на день</b> і перевірка приблизно кожні <b>15 хвилин</b>.\n\n` +
+      `👇 <i>Натисни кнопку нижче, відкрий ЗНАЙДЕНО та створи свій перший пошук.</i>\n\n` +
+      `<i>Сервіс не гарантує виявлення кожного оголошення. Частота перевірок залежить від тарифу та доступності джерела.</i>`;
 
     const keyboard = {
       inline_keyboard: [[{ text: 'Відкрити ЗНАЙДЕНО', web_app: { url: SERVER_URL } }]]
     };
     await sendTelegramMessage(chatId, welcomeText, keyboard);
+    return;
+  }
+
+  if (text.startsWith('/cancel_subscription')) {
+    try {
+      if (!(supabaseAdmin || supabase) || !TELEGRAM_BOT_TOKEN) throw new Error('Платіжний сервіс тимчасово недоступний');
+      const { data: lastRecurringPayment, error: recurringReadError } = await (supabaseAdmin || supabase)
+        .from('star_payments')
+        .select('telegram_payment_charge_id,premium_until')
+        .eq('telegram_id', chatId)
+        .eq('activation_status', 'active')
+        .eq('is_recurring', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (recurringReadError) throw recurringReadError;
+      if (!lastRecurringPayment) {
+        await sendTelegramMessage(chatId, 'Не знайшли активної автопродовжуваної підписки для скасування. Якщо потрібна допомога, напишіть у підтримку платежів.');
+        return;
+      }
+      const cancelResponse = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editUserStarSubscription`, {
+        user_id: chatId,
+        telegram_payment_charge_id: lastRecurringPayment.telegram_payment_charge_id,
+        is_canceled: true
+      }, { timeout: 10000 });
+      if (!cancelResponse.data?.ok) throw new Error(cancelResponse.data?.description || 'Telegram не підтвердив скасування');
+      await sendTelegramMessage(chatId, 'Автопродовження скасовано. Premium залишиться доступним до ' +
+        new Date(lastRecurringPayment.premium_until || Date.now()).toLocaleDateString('uk-UA') +
+        '. Повторного списання не буде.');
+    } catch (err) {
+      console.error('[Stars] Не вдалося скасувати підписку:', err.response?.data?.description || err.message);
+      await sendTelegramMessage(chatId, 'Не вдалося скасувати автопродовження автоматично. Напишіть у підтримку платежів: ivanleonenko2016@gmail.com.');
+    }
     return;
   }
 
@@ -1503,8 +1621,14 @@ async function processTelegramWebhookUpdate(update) {
     await sendTelegramMessage(chatId, `⚙️ <b>Панель Адміністратора</b>`, keyboard);
     return;
   }
-
-}
+  } catch (err) {
+    console.error('[Telegram Webhook] Непередбачена помилка обробки update:', err.message);
+    if (!res.headersSent) res.sendStatus(500);
+  } finally {
+    // Acknowledge only after processing finishes so Telegram can retry unexpected failures.
+    if (!res.headersSent) res.sendStatus(200);
+  }
+});
 
 let isWorkerRunning = false;
 async function runBackgroundWorker() {
@@ -1512,7 +1636,8 @@ async function runBackgroundWorker() {
 
   try {
     isWorkerRunning = true;
-    const { data: filters, error: filtersError } = await supabase.from('filters').select('*');
+    const { data: filters, error: filtersError } = await supabase.from('filters').select('*').order('created_at', { ascending: true });
+    const freeFilterProcessed = new Set();
     if (filtersError) throw filtersError;
     if (!filters || filters.length === 0) return;
 
@@ -1524,29 +1649,33 @@ async function runBackgroundWorker() {
           console.error(`Не вдалося перевірити тариф користувача для фільтра ${filter.id}:`, ownerError.message);
           continue;
         }
-        const ownerPremium = Boolean(filterOwner && (
-          filterOwner.is_admin === true ||
-          (filterOwner.tariff === 'premium' && filterOwner.premium_until &&
-            Number.isFinite(Date.parse(filterOwner.premium_until)) && Date.parse(filterOwner.premium_until) > Date.now())
-        ));
-        const trialStart = filterOwner?.trial_started_at ? Date.parse(filterOwner.trial_started_at) : 0;
-        const ownerTrial = trialStart > 0 && Date.now() < trialStart + 5 * 24 * 60 * 60 * 1000;
-        if (!ownerPremium && !ownerTrial && filterOwner?.is_admin !== true) continue;
-        const intervalMs = (ownerPremium || ownerTrial ? 2 : 15) * 60 * 1000;
+        const access = deriveAccess(filterOwner || {}, filterOwner?.is_admin === true);
+        const ownerTrial = access.hasActiveTrial;
+        const ownerPremium = access.hasActivePremium;
+        if (!ownerPremium && !ownerTrial && filterOwner?.is_admin !== true) {
+          if (freeFilterProcessed.has(String(filter.user_id))) continue;
+          freeFilterProcessed.add(String(filter.user_id));
+        }
+        const intervalMs = access.checkIntervalMinutes * 60 * 1000;
         const lastCheckedAt = filter.last_checked_at ? Date.parse(filter.last_checked_at) : 0;
         if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0 && Date.now() - lastCheckedAt < intervalMs) continue;
 
         let targetUrl = filter.query ? filter.query.trim() : '';
 
         if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+          const citySlug = getOlxCitySlug(filter.city);
+          const searchPath = citySlug
+            ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(targetUrl)}/`
+            : `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/`;
           if (filter.min_price || filter.max_price) {
             const searchMin = filter.min_price ? `search%5Bfilter_float_price%3Afrom%5D=${filter.min_price}` : '';
             const searchMax = filter.max_price ? `search%5Bfilter_float_price%3Ato%5D=${filter.max_price}` : '';
             const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
-            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/?${queryParams}`;
+            targetUrl = `${searchPath}?${queryParams}`;
           } else {
-            targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/`;
+            targetUrl = searchPath;
           }
+          console.log(`[OLX search] filter=${filter.id} cityScope=${citySlug || 'all'}`);
         }
 
         const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
@@ -1559,15 +1688,9 @@ async function runBackgroundWorker() {
         });
         const requestedLocation = String(filter.city || '').trim();
         // Advanced term filters need the listing page, not just the often-incomplete
-        // search card. Cache successful descriptions and short-lived misses.
+        // search card. Fetch full descriptions only after date and city filtering below,
+        // avoiding up to 30 unnecessary sequential network requests for unrelated ads.
         const needsFullDescription = criteria.includeTerms.length > 0 || criteria.anyTerms.length > 0 || criteria.excludeTerms.length > 0;
-        if (needsFullDescription) {
-          for (const item of parsedItems) {
-            const fullDescription = await fetchListingDescription(item.link);
-            item.detailsLoaded = Boolean(fullDescription);
-            if (fullDescription) item.description = fullDescription;
-          }
-        }
         // Load seen links before date filtering. New notifications should be limited
         // to today's listings, but previously seen listings must remain eligible for
         // price-drop checks even after OLX stops labeling them as "today".
@@ -1578,24 +1701,41 @@ async function runBackgroundWorker() {
           continue;
         }
         const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
-        const items = parsedItems
-          .filter(item => {
-            const link = String(item.link || '').trim().replace(/\/$/, '');
-            return isPublishedToday(item.locationDate) || knownLinks.has(link);
-          })
-          .filter(item => locationMatches(item.locationDate, requestedLocation))
-          .filter(item => {
-            // If the detail page could not be read, don't claim the item passed
-            // explicit required/excluded-word rules using incomplete card text.
-            if (needsFullDescription && !item.detailsLoaded) return false;
-            return applyCriteriaToListing({
-              ...item,
-              ageMinutes: getListingAgeMinutes(item.locationDate)
-            }, criteria).matches;
-          });
-        if (requestedLocation && !['всі міста', 'вся україна', 'уся україна'].includes(requestedLocation.toLocaleLowerCase('uk-UA')) && parsedItems.length > 0 && items.length === 0) {
-          console.log(`[Location Filter] Для фільтра ${filter.id} не знайдено карток із локацією "${requestedLocation}" серед ${parsedItems.length} результатів OLX.`);
+        const dateEligibleItems = parsedItems.filter(item => {
+          const link = String(item.link || '').trim().replace(/\/$/, '');
+          return isPublishedToday(item.locationDate) || knownLinks.has(link);
+        });
+        const locationEligibleItems = dateEligibleItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+        if (needsFullDescription) {
+          // Limit detail-page requests to ads that could actually be notified.
+          // A small concurrency cap keeps the worker responsive without hammering OLX.
+          for (let i = 0; i < locationEligibleItems.length; i += 3) {
+            const batch = locationEligibleItems.slice(i, i + 3);
+            await Promise.all(batch.map(async item => {
+              const fullDescription = await fetchListingDescription(item.link);
+              item.detailsLoaded = Boolean(fullDescription);
+              if (fullDescription) item.description = fullDescription;
+            }));
+          }
         }
+        const criteriaEvaluations = locationEligibleItems.map(item => {
+          // If the detail page could not be read, don't claim the item passed
+          // explicit required/excluded-word rules using incomplete card text.
+          if (needsFullDescription && !item.detailsLoaded) {
+            return { item, matches: false, reason: 'description_unavailable' };
+          }
+          const result = applyCriteriaToListing({
+            ...item,
+            ageMinutes: getListingAgeMinutes(item.locationDate)
+          }, criteria);
+          return { item, matches: result.matches, reason: result.reason || 'matched' };
+        });
+        const items = criteriaEvaluations.filter(result => result.matches).map(result => result.item);
+        const rejectionCounts = criteriaEvaluations.reduce((counts, result) => {
+          if (!result.matches) counts[result.reason] = (counts[result.reason] || 0) + 1;
+          return counts;
+        }, {});
+        console.log(`[Worker Diagnostics] filter=${filter.id} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} rejected=${JSON.stringify(rejectionCounts)} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
         const { error: checkedAtError } = await supabase.from('filters')
           .update({ last_checked_at: new Date().toISOString() }).eq('id', filter.id);
         if (checkedAtError) {
@@ -1680,7 +1820,7 @@ async function runBackgroundWorker() {
 
           const photoToSend = item.rawImgUrl
             ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(item.rawImgUrl)}`
-            : `${SERVER_URL}/assets/no-photo.svg`;
+            : `${SERVER_URL}/assets/no-photo.png`;
           
           const delivered = await sendTelegramPhoto(filter.user_id, photoToSend, notificationText, keyboard);
           if (delivered) {
@@ -1739,6 +1879,7 @@ app.get('/health', (_req, res) => {
     service: 'znaideno-smart-search',
     databaseConfigured: Boolean(supabase),
     adminDatabaseConfigured: Boolean(supabaseAdmin),
+    serverDatabaseUsesServiceRole: Boolean(SUPABASE_SERVICE_ROLE_KEY),
     backgroundWorkerEnabled: ENABLE_BACKGROUND_WORKER,
     webhookRegistrationEnabled: (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() !== 'false'
   });
