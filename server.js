@@ -750,6 +750,8 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       access: { premiumPriceUah: 149 },
       paymentEnabled: process.env.PAYMENTS_ENABLED === 'true' && Boolean(MONOBANK_ACQUIRING_TOKEN),
       paymentProvider: 'monobank',
+      telegramStarsEnabled: Boolean(TELEGRAM_BOT_TOKEN && supabase),
+      telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100),
       user: userData,
       stats: { totalReferrals }
     });
@@ -1083,6 +1085,51 @@ async function updateMonobankNonSuccessStatus(invoiceId, status) {
     .eq('invoice_id', invoiceId).neq('status', 'success');
   if (error) throw error;
 }
+
+app.post('/api/payments/stars/invoice', userAuthMiddleware, async (req, res) => {
+  try {
+    if (!TELEGRAM_BOT_TOKEN || !supabase) {
+      return res.status(503).json({ success: false, error: 'Оплата Telegram Stars тимчасово недоступна.' });
+    }
+    const userId = Number(req.telegramUser.id);
+    const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100);
+    if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(starsPrice) || starsPrice <= 0) {
+      return res.status(503).json({ success: false, error: 'Налаштування оплати Telegram Stars некоректні.' });
+    }
+
+    const { error: userError } = await supabase.from('users').upsert({
+      telegram_id: userId,
+      first_name: req.telegramUser.first_name || 'Користувач',
+      is_admin: false
+    }, { onConflict: 'telegram_id', ignoreDuplicates: true });
+    if (userError) throw userError;
+
+    const [invoiceResponse, botResponse] = await Promise.all([
+      axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendInvoice`, {
+        chat_id: userId,
+        title: 'ЗНАЙДЕНО Premium — 30 днів',
+        description: '30 днів Premium: безлімітні фільтри та швидкі сповіщення.',
+        payload: 'olx_checker_premium_30d_v1',
+        provider_token: '',
+        currency: 'XTR',
+        prices: [{ label: 'Premium на 30 днів', amount: starsPrice }]
+      }, { timeout: 12000 }),
+      axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe`, { timeout: 8000 })
+    ]);
+
+    if (!invoiceResponse.data?.ok || !botResponse.data?.ok || !botResponse.data?.result?.username) {
+      throw new Error('Telegram did not confirm invoice delivery');
+    }
+    return res.json({
+      success: true,
+      priceStars: starsPrice,
+      botUrl: 'https://t.me/' + botResponse.data.result.username
+    });
+  } catch (error) {
+    console.error('[Telegram Stars] Invoice creation failed:', error.response?.status || error.code || error.message);
+    return res.status(502).json({ success: false, error: 'Не вдалося надіслати рахунок у Telegram. Відкрийте чат бота й спробуйте ще раз.' });
+  }
+});
 
 app.post('/api/payments/monobank/invoice', userAuthMiddleware, async (req, res) => {
   try {
