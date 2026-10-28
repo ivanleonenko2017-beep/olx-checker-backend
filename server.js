@@ -752,6 +752,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       paymentProvider: 'monobank',
       telegramStarsEnabled: Boolean(TELEGRAM_BOT_TOKEN && supabase),
       telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 100),
+      monobankJarUrl: (process.env.MONOBANK_JAR_URL || '').trim(),
       user: userData,
       stats: { totalReferrals }
     });
@@ -1128,6 +1129,43 @@ app.post('/api/payments/stars/invoice', userAuthMiddleware, async (req, res) => 
   } catch (error) {
     console.error('[Telegram Stars] Invoice creation failed:', error.response?.status || error.code || error.message);
     return res.status(502).json({ success: false, error: 'Не вдалося надіслати рахунок у Telegram. Відкрийте чат бота й спробуйте ще раз.' });
+  }
+});
+
+const jarPaymentClaimCooldown = new Map();
+
+app.post('/api/payments/jar/claim', userAuthMiddleware, async (req, res) => {
+  try {
+    const jarUrl = (process.env.MONOBANK_JAR_URL || '').trim();
+    if (!jarUrl || !/^https:\/\/send\.monobank\.ua\/jar\/[A-Za-z0-9]+$/i.test(jarUrl)) {
+      return res.status(503).json({ success: false, error: 'Посилання на Monobank-банку не налаштовано.' });
+    }
+    const userId = Number(req.telegramUser.id);
+    const now = Date.now();
+    const lastClaim = jarPaymentClaimCooldown.get(userId) || 0;
+    if (now - lastClaim < 10 * 60 * 1000) {
+      return res.status(429).json({ success: false, error: 'Запит уже надіслано. Дочекайтеся перевірки адміністратором.' });
+    }
+    jarPaymentClaimCooldown.set(userId, now);
+    const firstName = String(req.telegramUser.first_name || 'Користувач').slice(0, 80);
+    const username = String(req.telegramUser.username || '').slice(0, 64);
+    const message = [
+      'ЗНАЙДЕНО: запит на ручну перевірку переказу на Monobank-банку.',
+      'Telegram ID: ' + userId,
+      'Ім’я: ' + firstName,
+      username ? 'Username: @' + username : '',
+      'Очікувана сума: 149 грн за Premium на 30 днів.',
+      'Перевірте фактичне зарахування в Monobank перед активацією Premium.'
+    ].filter(Boolean).join('\n');
+    const delivered = await Promise.all(ADMIN_IDS.map(adminId => sendTelegramMessage(adminId, message, null, false)));
+    if (!delivered.some(Boolean)) {
+      jarPaymentClaimCooldown.delete(userId);
+      return res.status(503).json({ success: false, error: 'Не вдалося повідомити адміністратора. Спробуйте пізніше.' });
+    }
+    return res.json({ success: true, manualReview: true });
+  } catch (error) {
+    console.error('[Monobank Jar] Payment claim failed:', error.message);
+    return res.status(500).json({ success: false, error: 'Не вдалося надіслати запит на перевірку.' });
   }
 });
 
