@@ -731,7 +731,7 @@
           if (payNote) payNote.innerText = [
             window.paymentEnabled ? '149 грн за 30 днів через захищену сторінку Monobank; продовження вручну.' : '',
             window.monobankJarUrl ? 'Переказ на банку підтверджується адміністратором вручну.' : '',
-            data.telegramStarsEnabled ? 'Telegram Stars активує Premium після автоматичного підтвердження Telegram.' : 'Telegram Stars з’явиться після підключення окремого тестового бота та webhook.'
+            data.telegramStarsEnabled ? 'Telegram Stars активує Premium після автоматичного підтвердження Telegram.' : 'Telegram Stars буде доступна після налаштування ціни в Stars і підтвердження платежу Telegram.'
           ].filter(Boolean).join(' ');
           const starsButton = document.getElementById('premiumStarsBtn');
           if (starsButton) {
@@ -868,10 +868,21 @@
         if (!response.ok || !data.success || !data.invoiceLink) {
           throw new Error(data.error || 'Не вдалося створити рахунок Telegram Stars');
         }
-        alert('Відкриваємо рахунок Telegram Stars. Завершіть оплату у Telegram; Premium активується після підтвердження платежу.');
         const webApp = window.Telegram && window.Telegram.WebApp;
-        if (webApp && typeof webApp.openTelegramLink === 'function') webApp.openTelegramLink(data.invoiceLink);
-        else window.open(data.invoiceLink, '_blank', 'noopener,noreferrer');
+        if (webApp && typeof webApp.openInvoice === 'function') {
+          webApp.openInvoice(data.invoiceLink, async (status) => {
+            if (status === 'paid') {
+              alert('Оплату отримано. Оновлюємо Premium…');
+              await loadUserProfile();
+            } else if (status === 'failed') {
+              alert('Платіж не завершився. Premium не активовано.');
+            }
+          });
+        } else if (webApp && typeof webApp.openTelegramLink === 'function') {
+          webApp.openTelegramLink(data.invoiceLink);
+        } else {
+          window.open(data.invoiceLink, '_blank', 'noopener,noreferrer');
+        }
       } catch (error) {
         alert(error.message || 'Не вдалося створити рахунок Telegram Stars');
       } finally {
