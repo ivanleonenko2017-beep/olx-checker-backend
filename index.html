@@ -841,18 +841,18 @@
         button.innerText = 'Створюємо рахунок…';
       }
       try {
-        const response = await fetch(`${BACKEND_URL}/api/payments/stars/invoice`, {
+        const response = await fetch(`${BACKEND_URL}/api/payments/stars/invoice-link`, {
           method: 'POST',
           headers: { 'x-telegram-init-data': initDataRaw }
         });
         const data = await response.json();
-        if (!response.ok || !data.success || !data.botUrl) {
+        if (!response.ok || !data.success || !data.invoiceLink) {
           throw new Error(data.error || 'Не вдалося створити рахунок Telegram Stars');
         }
-        alert('Рахунок надіслано в чат бота. Відкрийте чат і завершіть оплату там. Після підтвердження Telegram Premium активується автоматично.');
+        alert('Відкриваємо рахунок Telegram Stars. Завершіть оплату у Telegram; Premium активується після підтвердження платежу.');
         const webApp = window.Telegram && window.Telegram.WebApp;
-        if (webApp && typeof webApp.openTelegramLink === 'function') webApp.openTelegramLink(data.botUrl);
-        else window.open(data.botUrl, '_blank', 'noopener,noreferrer');
+        if (webApp && typeof webApp.openTelegramLink === 'function') webApp.openTelegramLink(data.invoiceLink);
+        else window.open(data.invoiceLink, '_blank', 'noopener,noreferrer');
       } catch (error) {
         alert(error.message || 'Не вдалося створити рахунок Telegram Stars');
       } finally {
