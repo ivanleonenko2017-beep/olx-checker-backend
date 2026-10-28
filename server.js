@@ -926,10 +926,16 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
         premiumPriceUah: PREMIUM_PRICE_UAH
       },
       searchesUsedToday: (await getDailySearchUsage(userId)).used,
-      paymentEnabled: process.env.PAYMENTS_ENABLED === 'true' &&
+      // Card acquiring stays disabled until a dedicated compliant acquiring setup is configured.
+      paymentEnabled: false,
+      paymentProvider: 'manual-jar-and-stars',
+      telegramStarsEnabled: process.env.PAYMENTS_ENABLED === 'true' &&
+        (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() !== 'false' &&
+        Boolean(TELEGRAM_BOT_TOKEN && supabase && supabaseAdmin) &&
         Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) &&
         Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
       telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
+      monobankJarUrl: (process.env.MONOBANK_JAR_URL || '').trim(),
       user: userData,
       stats: { totalReferrals }
     });
@@ -1262,10 +1268,50 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
   }
 });
 
+const jarPaymentClaimCooldown = new Map();
+
+app.post('/api/payments/jar/claim', userAuthMiddleware, async (req, res) => {
+  try {
+    const jarUrl = (process.env.MONOBANK_JAR_URL || '').trim();
+    if (!jarUrl || !/^https:\/\/send\.monobank\.ua\/jar\/[A-Za-z0-9]+$/i.test(jarUrl)) {
+      return res.status(503).json({ success: false, error: 'Посилання на Monobank-банку не налаштовано.' });
+    }
+    const userId = Number(req.telegramUser.id);
+    const now = Date.now();
+    const lastClaim = jarPaymentClaimCooldown.get(userId) || 0;
+    if (now - lastClaim < 10 * 60 * 1000) {
+      return res.status(429).json({ success: false, error: 'Запит уже надіслано. Дочекайтеся перевірки адміністратором.' });
+    }
+    jarPaymentClaimCooldown.set(userId, now);
+    const firstName = String(req.telegramUser.first_name || 'Користувач').slice(0, 80);
+    const username = String(req.telegramUser.username || '').slice(0, 64);
+    const message = [
+      'ЗНАЙДЕНО: запит на ручну перевірку переказу на Monobank-банку.',
+      'Telegram ID: ' + userId,
+      'Ім’я: ' + firstName,
+      username ? 'Username: @' + username : '',
+      'Очікувана сума: 149 грн за Premium на 30 днів.',
+      'Перевірте фактичне зарахування в Monobank перед активацією Premium.'
+    ].filter(Boolean).join('\n');
+    const delivered = await Promise.all(ADMIN_IDS.map(adminId => sendTelegramMessage(adminId, message, null, false)));
+    if (!delivered.some(Boolean)) {
+      jarPaymentClaimCooldown.delete(userId);
+      return res.status(503).json({ success: false, error: 'Не вдалося повідомити адміністратора. Спробуйте пізніше.' });
+    }
+    return res.json({ success: true, manualReview: true });
+  } catch (error) {
+    console.error('[Monobank Jar] Payment claim failed:', error.message);
+    return res.status(500).json({ success: false, error: 'Не вдалося надіслати запит на перевірку.' });
+  }
+});
+
 app.post('/api/payments/stars/invoice-link', userAuthMiddleware, async (req, res) => {
   try {
     const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
-    if (process.env.PAYMENTS_ENABLED !== 'true' || !Number.isSafeInteger(starsPrice) || starsPrice < 1) {
+    if (process.env.PAYMENTS_ENABLED !== 'true' ||
+        (process.env.REGISTER_TELEGRAM_WEBHOOK || 'true').toLowerCase() === 'false' ||
+        !TELEGRAM_BOT_TOKEN || !supabase || !supabaseAdmin ||
+        !Number.isSafeInteger(starsPrice) || starsPrice < 1) {
       return res.status(503).json({
         success: false,
         code: 'PAYMENTS_DISABLED',
@@ -1280,7 +1326,6 @@ app.post('/api/payments/stars/invoice-link', userAuthMiddleware, async (req, res
       provider_token: '',
       currency: 'XTR',
       prices: [{ label: 'ЗНАЙДЕНО Premium · 30 днів', amount: starsPrice }],
-      subscription_period: 2592000
     }, { timeout: 10000 });
     if (!response.data?.ok || typeof response.data.result !== 'string') {
       throw new Error(response.data?.description || 'Telegram не повернув платіжне посилання');
@@ -1446,7 +1491,6 @@ app.post('/telegram-webhook', async (req, res) => {
           title: 'ЗНАЙДЕНО Premium — 30 днів',
           description: 'Premium на 30 днів: до 20 активних фільтрів та перевірка кожні 2 хвилини.',
           payload: 'znaideno_premium_monthly_v1',
-          subscription_period: 2592000,
           provider_token: '',
           currency: 'XTR',
           prices: [{ label: 'Premium на 30 днів', amount: starsPrice }]
