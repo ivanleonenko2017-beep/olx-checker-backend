@@ -43,3 +43,30 @@ The backend must have `SUPABASE_SERVICE_ROLE_KEY` configured in Render. Do not e
 - Do not use a real public Jar for automated end-to-end testing unless you are comfortable with the test transfer being real.
 - The watcher is intentionally separate from Telegram Stars subscriptions.
 
+
+---
+
+# Monobank Acquiring — Premium payments
+
+The Jar integration above is only for voluntary donations and a sponsor badge. Paid Premium uses Monobank Acquiring invoices and is a separate flow.
+
+## Required Render environment variables for Premium checkout
+
+- `MONOBANK_ACQUIRING_TOKEN` — merchant/acquiring token from Monobank acquiring for the merchant account that will receive Premium payments. **A personal API token used for Jar statements is not a substitute.** Do not paste the token into GitHub, the Mini App, or this chat.
+- `PAYMENTS_ENABLED=true` — enables checkout only when the acquiring token is present.
+- `SERVER_URL` — public HTTPS backend URL used for the return page and webhook URL.
+- Existing `SUPABASE_SERVICE_ROLE_KEY` must be configured server-side.
+
+The checkout creates a UAH 149.00 invoice for 30 days of Premium. It is a one-time payment, not an automatic recurring card charge. Users renew manually. Premium is activated only after Monobank reports a successful invoice with the expected amount and currency. The invoice ledger is unique by invoice ID and activation is performed by a database function in one transaction, so duplicate webhook/status notifications do not extend the same paid invoice twice.
+
+## Acquiring smoke test
+
+1. Configure the acquiring token only on the dedicated test Render service.
+2. Deploy the feature branch and verify the profile response reports `paymentEnabled: true`.
+3. Open the Mini App inside Telegram and choose **Оплатити 149 грн · Monobank**.
+4. Confirm the Monobank hosted checkout displays 149.00 UAH, complete a controlled test payment, and return to the Mini App.
+5. Confirm `GET /api/payments/monobank/status/:invoiceId` reports `paid: true`, `users.tariff = 'premium'`, and `users.premium_until` is extended by 30 days.
+6. Recheck the same invoice; the existing expiry must not be extended again for that invoice.
+7. Test a cancelled/expired invoice; Premium must remain unchanged.
+
+If the acquiring token is absent, checkout stays disabled and no money can be charged. Do not enable production checkout until test payment, webhook signature validation, status polling, and Premium activation have all been verified.
