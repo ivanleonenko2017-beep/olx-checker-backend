@@ -935,7 +935,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
         Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) &&
         Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
       telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
-      monobankJarUrl: (process.env.MONOBANK_JAR_URL || '').trim(),
+      monobankJarUrl: '', // Digital goods in Telegram Mini Apps are sold only via Telegram Stars.
       user: userData,
       stats: { totalReferrals }
     });
@@ -1137,7 +1137,7 @@ app.get('/api/legal/terms', (_req, res) => {
       'Реальні платежі вважаються доступними лише якщо платіжний сценарій увімкнений сервером і рахунок успішно створюється. Premium активується лише після підтвердження успішного платежу.',
       'Сервіс не гарантує виявлення кожного оголошення, точність даних сторонніх джерел або безперервну доступність.',
       'Ця передрелізна редакція не замінює остаточну публічну оферту. До комерційного запуску потрібно опублікувати перевірені реквізити постачальника, умови поновлення/скасування, повернення та права споживача.',
-      'Питання: ivanleonenko2016@gmail.com.'
+      'Питання: @esqide.'
     ].join('\n')
   });
 });
@@ -1151,7 +1151,7 @@ app.get('/api/legal/privacy', (_req, res) => {
       'Дані використовуються для входу, збереження фільтрів, пошуку, сповіщень, обліку підписки/платежів, підтримки, діагностики та захисту від зловживань.',
       'Інфраструктура поточної версії включає Telegram, Render і Supabase. Доступність сторонніх платіжних методів залежить від фактично підключеної інтеграції. Сервіс не призначений для збору даних платіжної картки.',
       'Строки зберігання, порядок видалення, правові підстави, реквізити володільця даних і міжнародні передавання мають бути підтверджені до публічного запуску. Не вважайте цей передрелізний текст остаточною політикою.',
-      'Запити щодо даних: ivanleonenko2016@gmail.com.'
+      'Запити щодо даних: @esqide.'
     ].join('\n')
   });
 });
@@ -1268,41 +1268,12 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
   }
 });
 
-const jarPaymentClaimCooldown = new Map();
-
 app.post('/api/payments/jar/claim', userAuthMiddleware, async (req, res) => {
-  try {
-    const jarUrl = (process.env.MONOBANK_JAR_URL || '').trim();
-    if (!jarUrl || !/^https:\/\/send\.monobank\.ua\/jar\/[A-Za-z0-9]+$/i.test(jarUrl)) {
-      return res.status(503).json({ success: false, error: 'Посилання на Monobank-банку не налаштовано.' });
-    }
-    const userId = Number(req.telegramUser.id);
-    const now = Date.now();
-    const lastClaim = jarPaymentClaimCooldown.get(userId) || 0;
-    if (now - lastClaim < 10 * 60 * 1000) {
-      return res.status(429).json({ success: false, error: 'Запит уже надіслано. Дочекайтеся перевірки адміністратором.' });
-    }
-    jarPaymentClaimCooldown.set(userId, now);
-    const firstName = String(req.telegramUser.first_name || 'Користувач').slice(0, 80);
-    const username = String(req.telegramUser.username || '').slice(0, 64);
-    const message = [
-      'ЗНАЙДЕНО: запит на ручну перевірку переказу на Monobank-банку.',
-      'Telegram ID: ' + userId,
-      'Ім’я: ' + firstName,
-      username ? 'Username: @' + username : '',
-      'Очікувана сума: 149 грн за Premium на 30 днів.',
-      'Перевірте фактичне зарахування в Monobank перед активацією Premium.'
-    ].filter(Boolean).join('\n');
-    const delivered = await Promise.all(ADMIN_IDS.map(adminId => sendTelegramMessage(adminId, message, null, false)));
-    if (!delivered.some(Boolean)) {
-      jarPaymentClaimCooldown.delete(userId);
-      return res.status(503).json({ success: false, error: 'Не вдалося повідомити адміністратора. Спробуйте пізніше.' });
-    }
-    return res.json({ success: true, manualReview: true });
-  } catch (error) {
-    console.error('[Monobank Jar] Payment claim failed:', error.message);
-    return res.status(500).json({ success: false, error: 'Не вдалося надіслати запит на перевірку.' });
-  }
+  return res.status(410).json({
+    success: false,
+    code: 'MONOBANK_IN_APP_DISABLED',
+    error: 'Оплата цифрового Premium усередині Telegram доступна лише в Telegram Stars.'
+  });
 });
 
 app.post('/api/payments/stars/invoice-link', userAuthMiddleware, async (req, res) => {
@@ -1381,12 +1352,12 @@ app.post('/telegram-webhook', async (req, res) => {
     if (payment.currency !== 'XTR' || payment.invoice_payload !== 'znaideno_premium_monthly_v1' ||
         Number(payment.total_amount) !== expectedStars || !payment.telegram_payment_charge_id) {
       console.error('Отримано платіж із неочікуваними параметрами; Premium не нараховано.');
-      await sendTelegramMessage(chatId, 'Не вдалося автоматично підтвердити платіж. Напишіть на ivanleonenko2016@gmail.com.');
+      await sendTelegramMessage(chatId, 'Не вдалося автоматично підтвердити платіж. Напишіть на @esqide.');
       return;
     }
     const paymentDb = supabaseAdmin || supabase;
     if (!paymentDb) {
-      await sendTelegramMessage(chatId, 'Платіж отримано, але тимчасово недоступна база даних. Напишіть на ivanleonenko2016@gmail.com.');
+      await sendTelegramMessage(chatId, 'Платіж отримано, але тимчасово недоступна база даних. Напишіть на @esqide.');
       return;
     }
     try {
@@ -1453,7 +1424,7 @@ app.post('/telegram-webhook', async (req, res) => {
       await sendTelegramMessage(chatId, 'Оплату Telegram Stars підтверджено! Premium активовано на 30 днів. Дякуємо за підтримку ЗНАЙДЕНО.');
     } catch (err) {
       console.error('Помилка обробки Telegram Stars платежу:', err.message);
-      await sendTelegramMessage(chatId, 'Платіж отримано, але не вдалося завершити активацію автоматично. Напишіть на ivanleonenko2016@gmail.com.');
+      await sendTelegramMessage(chatId, 'Платіж отримано, але не вдалося завершити активацію автоматично. Напишіть на @esqide.');
     }
     return;
   }
@@ -1482,7 +1453,7 @@ app.post('/telegram-webhook', async (req, res) => {
     if (startPayload === 'buy_premium') {
       const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
       if (process.env.PAYMENTS_ENABLED !== 'true' || !Number.isSafeInteger(starsPrice) || starsPrice < 1) {
-        await sendTelegramMessage(chatId, 'Оплата Premium ще вимкнена на час тестування. Вартість для користувача — 149 грн/місяць; точну суму в Telegram Stars буде показано перед запуском.');
+        await sendTelegramMessage(chatId, 'Оплата Premium тимчасово вимкнена. Планова ціна — 180 ⭐ за 30 днів без автоматичного продовження.');
         return;
       }
       try {
@@ -1497,7 +1468,7 @@ app.post('/telegram-webhook', async (req, res) => {
         });
       } catch (err) {
         console.error('Не вдалося створити Telegram Stars рахунок:', err.message);
-        await sendTelegramMessage(chatId, 'Не вдалося створити рахунок. Спробуйте пізніше або напишіть на ivanleonenko2016@gmail.com.');
+        await sendTelegramMessage(chatId, 'Не вдалося створити рахунок. Спробуйте пізніше або напишіть на @esqide.');
       }
       return;
     }
@@ -1592,20 +1563,20 @@ app.post('/telegram-webhook', async (req, res) => {
         '. Повторного списання не буде.');
     } catch (err) {
       console.error('[Stars] Не вдалося скасувати підписку:', err.response?.data?.description || err.message);
-      await sendTelegramMessage(chatId, 'Не вдалося скасувати автопродовження автоматично. Напишіть у підтримку платежів: ivanleonenko2016@gmail.com.');
+      await sendTelegramMessage(chatId, 'Не вдалося скасувати автопродовження автоматично. Напишіть у підтримку платежів: @esqide.');
     }
     return;
   }
 
   if (text.startsWith('/paysupport') || text.startsWith('/support')) {
     await sendTelegramMessage(chatId,
-      'Підтримка платежів ЗНАЙДЕНО. Опишіть проблему та, якщо є, дату платежу. Контакт: ivanleonenko2016@gmail.com. Не надсилайте дані банківської картки чи паролі.');
+      'Підтримка платежів ЗНАЙДЕНО. Опишіть проблему та, якщо є, дату платежу. Контакт: @esqide. Не надсилайте дані банківської картки чи паролі.');
     return;
   }
 
   if (text.startsWith('/terms')) {
     await sendTelegramMessage(chatId,
-      'Умови ЗНАЙДЕНО: Premium надає доступ до додаткових функцій моніторингу на 30 днів після підтвердження платежу. Сервіс незалежний від OLX і не гарантує безперервну роботу стороннього сайту. Питання щодо платежів: ivanleonenko2016@gmail.com. Повні юридичні дані постачальника та остаточні умови потрібно опублікувати до публічного запуску.');
+      'Умови ЗНАЙДЕНО: Premium надає доступ до додаткових функцій моніторингу на 30 днів після підтвердження платежу. Сервіс незалежний від OLX і не гарантує безперервну роботу стороннього сайту. Питання щодо платежів: @esqide. Повні юридичні дані постачальника та остаточні умови потрібно опублікувати до публічного запуску.');
     return;
   }
 
