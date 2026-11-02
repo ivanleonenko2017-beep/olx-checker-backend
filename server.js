@@ -539,6 +539,9 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
       }
     }
 
+    // Preserve the complete visible card text: OLX condition badges and specs
+    // are not always included in the title or description fields.
+    const cardText = $(element).text().replace(/\\s+/g, ' ').trim().slice(0, 2500);
     const locationDate = $(element).find('[data-testid="location-date"], [data-cy="location-date"], [class*="location"], [class*="date"]').first().text().trim();
     const descriptionCandidate = $(element).find(
       '[data-testid="ad-description"], [data-cy="ad-description"], [class*="description"], p'
@@ -557,6 +560,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
         rawImgUrl,
         proxyImg: rawImgUrl ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(rawImgUrl)}` : `${SERVER_URL}/assets/no-photo.svg`,
         locationDate: locationDate || 'Україна',
+        cardText,
         description
       });
     }
