@@ -237,7 +237,7 @@ function parseNaturalLanguageQuery(input) {
   // A request for a healthy/normal battery should exclude explicitly defective
   // batteries, but must not require sellers to mention battery health in every ad.
   // This avoids turning a soft quality preference into an impossible positive match.
-  const normalBatteryMatch = remaining.match(/(?:з\s+)?норм(?:альн)?\p{L}*\s+(?:батаре\p{L}*|акумулятор\p{L}*|battery)|(?:батаре\p{L}*|акумулятор\p{L}*|battery)\s+(?:в\s+)?нормальн\p{L}*/iu);
+  const normalBatteryMatch = remaining.match(/(?:(?:з|с)\s+)?норм(?:альн)?\p{L}*\s+(?:батаре\p{L}*|акумулятор\p{L}*|battery)|(?:батаре\p{L}*|акумулятор\p{L}*|battery)\s+(?:в\s+)?нормальн\p{L}*/iu);
   if (normalBatteryMatch) {
     criteria.excludeTerms = [...(criteria.excludeTerms || []),
       'несправна батарея', 'неисправная батарея', 'батарея не держит заряд',
