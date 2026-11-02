@@ -249,7 +249,7 @@ function parseNaturalLanguageQuery(input) {
   // Treat an explicit storage capacity as a structured requirement rather than
   // sending it as a noisy free-text token to OLX. The listing matcher supports
   // common GB/ГБ spellings.
-  const storageOnlyMatch = remaining.match(/(?:^|[\s,;])(?:(?:на\s+)?(\d{2,4})\s*(?:гб|gb))(?!\p{L})/iu);
+  const storageOnlyMatch = remaining.match(/(?:^|[\s,;])(?:(?:на\s+)?(\d{2,4})\s*(?:гб|gb))(?!\p{L})(?!\s*(?:оператив|озу|ram))/iu);
   if (storageOnlyMatch) {
     const capacity = storageOnlyMatch[1];
     criteria.includeTerms = [...(criteria.includeTerms || []), `${capacity} ГБ`];
