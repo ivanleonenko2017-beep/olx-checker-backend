@@ -105,12 +105,15 @@ function termMatches(haystack, rawTerm, title = '') {
     if (explicitCapacityPattern.test(haystack)) return true;
 
     const titleText = String(title || '').toLocaleLowerCase('uk-UA');
-    const isIPhoneTitle = /(?:iphone|айфон)/iu.test(titleText);
+    const isIPhoneListing = /(?:iphone|айфон)/iu.test(titleText) ||
+      /(?:iphone|айфон)/iu.test(haystack);
     const bareCapacityPattern = new RegExp(
       '(?:^|[^\\d])' + capacity + '(?!\\s*(?:mb|мб|ram|озу|оператив))(?!\\p{L})(?=$|[^\\d])',
       'iu'
     );
-    if (isIPhoneTitle && bareCapacityPattern.test(titleText)) return true;
+    // OLX cards often put the storage value in a subtitle/specification row,
+    // not in the title. Search the complete card text as well as the title.
+    if (isIPhoneListing && (bareCapacityPattern.test(titleText) || bareCapacityPattern.test(haystack))) return true;
   }
 
   const ramRequirement = term.match(/(\d{1,3})\s*(?:гб|gb)/iu);
