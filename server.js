@@ -609,7 +609,8 @@ async function fetchListingDescription(inputUrl) {
   if (cached) listingDescriptionCache.delete(key);
 
   try {
-    // Throttle only real upstream requests; cache hits return immediately.
+    // Detail pages are fetched only when the search card lacks a required spec.
+    // A small delay and bounded concurrency below keep OLX requests controlled.
     await new Promise(resolve => setTimeout(resolve, 200));
     const response = await axios.get(key, {
       headers: { ...HEADERS, Referer: 'https://www.olx.ua/' },
@@ -619,16 +620,23 @@ async function fetchListingDescription(inputUrl) {
     });
     const $ = cheerio.load(String(response.data || ''));
     let description = $('[data-testid="ad-description"], [data-cy="ad-description"], [data-testid*="description"], [class*="description"]').first().text().trim();
+    const contextParts = [];
+    const pageTitle = $('h1').first().text().trim() ||
+      $('meta[property="og:title"]').attr('content') || $('title').text().trim();
+    if (pageTitle) contextParts.push(pageTitle);
     let conditionMarker = '';
 
-    // OLX often exposes condition as structured metadata rather than in the
-    // seller's description. Preserve it as matching context for Smart Search.
+    // OLX product specs can be present in JSON-LD even when the search card
+    // contains only a model title and price.
     $('script[type="application/ld+json"]').each((_, el) => {
       try {
         const json = JSON.parse($(el).contents().text());
         const candidates = Array.isArray(json) ? json : [json];
         for (const item of candidates) {
           if (!item || typeof item !== 'object') continue;
+          if (!description && typeof item.description === 'string' && item.description.trim()) {
+            description = item.description.trim();
+          }
           const rawCondition = item.itemCondition ?? item.condition ??
             (Array.isArray(item.additionalProperty)
               ? item.additionalProperty.find(prop => /condition|стан/i.test(String(prop?.name || '')))?.value
@@ -637,38 +645,61 @@ async function fetchListingDescription(inputUrl) {
             ? rawCondition
             : String(rawCondition?.name || rawCondition?.['@id'] || '');
           if (/UsedCondition|pre.?owned|вживан|уживан|б\/?у/i.test(conditionValue)) {
-            conditionMarker = ' Стан оголошення: вживаний.';
+            conditionMarker = 'Стан оголошення: вживаний';
           } else if (/NewCondition|brand.?new|новий|нова|нове/i.test(conditionValue)) {
-            conditionMarker = ' Стан оголошення: новий.';
+            conditionMarker = 'Стан оголошення: новий';
           }
-          if (!description && typeof item.description === 'string' && item.description.trim()) {
-            description = item.description.trim();
+          if (Array.isArray(item.additionalProperty)) {
+            for (const property of item.additionalProperty) {
+              const name = String(property?.name || '').trim();
+              const value = String(property?.value ?? property?.valueReference?.name ?? '').trim();
+              if (name && value && /memory|storage|capacity|пам.?ят|обсяг|объем|стан|condition|модель|model/i.test(name)) {
+                contextParts.push(name + ': ' + value);
+              }
+            }
           }
         }
       } catch (_) {}
     });
+
     const visibleCondition = $('[data-testid*="condition"], [data-cy*="condition"], [class*="condition"]').text().trim();
     if (!conditionMarker && /вживан|уживан|б\/?у|used|pre.?owned/i.test(visibleCondition)) {
-      conditionMarker = ' Стан оголошення: вживаний.';
+      conditionMarker = 'Стан оголошення: вживаний';
     } else if (!conditionMarker && /новий|нова|нове|new/i.test(visibleCondition)) {
-      conditionMarker = ' Стан оголошення: новий.';
+      conditionMarker = 'Стан оголошення: новий';
     }
+
+    // Include only specification/attribute containers, not the whole page:
+    // whole-page text may contain unrelated recommendations with other capacities.
+    const specificationSelectors = [
+      '[data-testid*="attribute"]', '[data-cy*="attribute"]',
+      '[data-testid*="parameter"]', '[data-cy*="parameter"]',
+      '[data-testid*="specification"]', '[data-cy*="specification"]',
+      '[class*="attribute"]', '[class*="parameter"]',
+      '[class*="characteristic"]', '[class*="specification"]'
+    ].join(', ');
+    $(specificationSelectors).each((_, element) => {
+      const value = $(element).text().replace(/\s+/g, ' ').trim();
+      if (value && value.length <= 1000) contextParts.push(value);
+    });
+
     if (!description) description = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '';
-    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
-    if (description && conditionMarker) description = (description + conditionMarker).slice(0, 5000);
-    if (description && !/verify you are human|access denied|robot check|підтверд.{0,20}що ви людина/i.test(description)) {
-      listingDescriptionCache.set(key, { description, expiresAt: Date.now() + 10 * 60 * 1000 });
+    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (conditionMarker) contextParts.push(conditionMarker);
+    const searchContext = [...new Set(contextParts)].join('. ');
+    const result = [description, searchContext].filter(Boolean).join('. ').replace(/\s+/g, ' ').slice(0, 5000);
+
+    if (result && !/verify you are human|access denied|robot check|підтверд.{0,20}що ви людина/i.test(result)) {
+      listingDescriptionCache.set(key, { description: result, expiresAt: Date.now() + 10 * 60 * 1000 });
       if (listingDescriptionCache.size > 500) {
         const oldestKey = listingDescriptionCache.keys().next().value;
         listingDescriptionCache.delete(oldestKey);
       }
-      return description;
+      return result;
     }
   } catch (error) {
-    console.warn('[Smart Search details] Не вдалося отримати опис:', error.response?.status || error.code || 'request-failed');
+    console.warn('[Smart Search details] Не вдалося отримати контекст оголошення:', error.response?.status || error.code || 'request-failed');
   }
-  // Cache misses briefly too, so a blocked or unavailable ad is not requested
-  // again for every filter scan in the next minute.
   listingDescriptionCache.set(key, { description: '', expiresAt: Date.now() + 60 * 1000 });
   return '';
 }
@@ -779,13 +810,40 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const locationItems = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
     if (requestedCondition !== 'all') criteria.condition = requestedCondition;
+
+    // Storage is often absent from OLX search cards and exists only on the
+    // individual ad page. Enrich matching iPhone candidates before rejecting
+    // them for a missing capacity; do not make every search fetch every ad.
+    const storageRequirements = [...criteria.includeTerms, ...criteria.anyTerms]
+      .filter(term => /^\d{2,4}\s*(?:гб|gb)$/iu.test(term));
+    let detailsEnriched = 0;
+    if (storageRequirements.length) {
+      const candidates = locationItems.filter(item =>
+        /(?:iphone|айфон)/iu.test(String(item.title || '')) &&
+        applyCriteriaToListing(item, criteria).reason === 'missing_required_term'
+      );
+      let nextCandidate = 0;
+      const workerCount = Math.min(5, candidates.length);
+      const workers = Array.from({ length: workerCount }, async () => {
+        while (nextCandidate < candidates.length) {
+          const item = candidates[nextCandidate++];
+          const detailContext = await fetchListingDescription(item.link);
+          if (detailContext) {
+            item.description = [item.description, detailContext].filter(Boolean).join(' ');
+            detailsEnriched++;
+          }
+        }
+      });
+      await Promise.all(workers);
+    }
+
     const rejectionReasons = {};
     const items = locationItems.filter(item => {
       const result = applyCriteriaToListing(item, criteria);
       if (!result.matches) rejectionReasons[result.reason] = (rejectionReasons[result.reason] || 0) + 1;
       return result.matches;
     });
-    console.log(`[API search] Completed: parsed=${parsedItems.length}, cityMatched=${locationItems.length}, returned=${items.length}, rejected=${JSON.stringify(rejectionReasons)}, city=${JSON.stringify(requestedLocation)}, url=${targetUrl}, smart=${Boolean(parsedNaturalQuery)}, durationMs=${Date.now() - startedAt}`);
+    console.log('[API search] Completed: parsed=' + parsedItems.length + ', cityMatched=' + locationItems.length + ', detailsEnriched=' + detailsEnriched + ', returned=' + items.length + ', rejected=' + JSON.stringify(rejectionReasons) + ', city=' + JSON.stringify(requestedLocation) + ', url=' + targetUrl + ', smart=' + Boolean(parsedNaturalQuery) + ', durationMs=' + (Date.now() - startedAt));
     res.json({
       success: true,
       count: items.length,
