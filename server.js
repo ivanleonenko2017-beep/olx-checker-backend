@@ -440,15 +440,10 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
   const $ = cheerio.load(html);
   const rawItems = [];
 
-  const stopWords = [
-    'аккумулятор', 'акумулятор', 'батарея', 'корпус', 'шлейф', 'плата', 'камера', 'динамик',
-    'стекло', 'скло', 'чехол', 'чехлы', 'чохол', 'чохли', 'накладка', 'накладки', 'бампер', 'бамперы',
-    'дисплей', 'экран', 'екран', 'коробка', 'кабель', 'зарядка', 'адаптер', 'ремешок', 'пленка',
-    'запчасти', 'запчасть', 'разборка', 'обложка', 'обкладинка', 'накидка', 'защитное стекло',
-    'защитная пленка', 'аксессуар', 'аксессуары', 'аксесуар', 'аксесуари',
-    'icloud', 'lost', 'passcode', 'пароль', 'bypass', 'донор', 'скупка', 'ремонт', 'копия', 'реплика'
-  ];
-
+  // Do not reject cards here based on generic accessory/repair words.
+  // These words may appear in a genuine phone listing (e.g. battery replaced,
+  // camera description). User exclusions belong to applyCriteriaToListing,
+  // where the complete criteria and negation context are available.
   // OLX periodically changes card attributes. Support both current and older
   // card markup, and only use article fallback when it contains an ad link.
   let cards = $(
@@ -486,7 +481,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     }
   });
   const supplementalCardCount = Math.max(0, cards.length - primaryCardCount);
-  const parserStats = { skippedNoTitle: 0, skippedStopWord: 0, skippedNoPrice: 0, skippedDuplicate: 0 };
+  const parserStats = { skippedNoTitle: 0, skippedNoPrice: 0, skippedDuplicate: 0 };
   const seenAdLinks = new Set();
 
   cards.each((index, element) => {
@@ -497,14 +492,6 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
       'h1, h2, h3, h4, h5, h6, [data-testid*="title"], [data-cy*="title"]'
     ).first().text().trim();
     if (!title) { parserStats.skippedNoTitle++; return; }
-
-    const lowerTitle = title.toLowerCase();
-    const queryLower = (query || '').toLowerCase();
-
-    const hasStopWord = stopWords.some(word => lowerTitle.includes(word));
-    const queryHasStopWord = stopWords.some(word => queryLower.includes(word));
-
-    if (hasStopWord && !queryHasStopWord) { parserStats.skippedStopWord++; return; }
 
     const priceElement = $(element).find('[data-testid="ad-price"], [data-testid="ad-price-container"], [data-cy="ad-price"], [class*="price"]').first();
     priceElement.find('style, script').remove();
