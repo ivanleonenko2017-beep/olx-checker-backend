@@ -114,3 +114,22 @@ test('parses iPhone 15 with shorthand storage and Chernihiv city', () => {
     description: ''
   }, parsed.criteria).matches, false);
 });
+
+
+test('matches iPhone storage written as a bare number in the title only', () => {
+  const criteria = { includeTerms: ['256 ГБ'] };
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 15 256',
+    description: ''
+  }, criteria).matches, true);
+
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 15 128',
+    description: ''
+  }, criteria).matches, false);
+
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 15 256 МБ RAM',
+    description: ''
+  }, criteria).matches, false);
+});

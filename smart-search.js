@@ -90,16 +90,27 @@ function normalizeCriteria(input = {}) {
   };
 }
 
-function termMatches(haystack, rawTerm) {
+function termMatches(haystack, rawTerm, title = '') {
   const term = String(rawTerm || '').toLocaleLowerCase('uk-UA');
   if (haystack.includes(term)) return true;
 
-  // OLX sellers commonly write phone storage as "128GB", "128 GB", "128ГБ"
-  // or "128 ГБ". Treat these as equivalent for explicit capacity filters.
+  // OLX sellers use several formats for iPhone storage: "256GB", "256 GB",
+  // "256ГБ", "256 ГБ", and often just "iPhone 15 256" in the title.
+  // Accept a bare capacity number only when the title clearly identifies
+  // an iPhone, so unrelated numbers in other listing text do not qualify.
   const phoneStorage = term.match(/^(\d{2,4})\s*(?:gb|гб)$/iu);
   if (phoneStorage) {
-    const capacityPattern = new RegExp('(?:^|[^\\d])' + phoneStorage[1] + '\\s*(?:gb|гб)(?=$|[^\\p{L}])', 'iu');
-    if (capacityPattern.test(haystack)) return true;
+    const capacity = phoneStorage[1];
+    const explicitCapacityPattern = new RegExp('(?:^|[^\\d])' + capacity + '\\s*(?:gb|гб)(?=$|[^\\p{L}])', 'iu');
+    if (explicitCapacityPattern.test(haystack)) return true;
+
+    const titleText = String(title || '').toLocaleLowerCase('uk-UA');
+    const isIPhoneTitle = /(?:iphone|айфон)/iu.test(titleText);
+    const bareCapacityPattern = new RegExp(
+      '(?:^|[^\\d])' + capacity + '(?!\\s*(?:mb|мб|ram|озу|оператив))(?!\\p{L})(?=$|[^\\d])',
+      'iu'
+    );
+    if (isIPhoneTitle && bareCapacityPattern.test(titleText)) return true;
   }
 
   const ramRequirement = term.match(/(\d{1,3})\s*(?:гб|gb)/iu);
@@ -133,10 +144,10 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   const lowerText = text.toLocaleLowerCase('uk-UA');
   const price = toPositiveInteger(listing?.price, 0);
 
-  if (criteria.includeTerms.length && criteria.includeTermsMode === 'all' && !matchesTerms(lowerText, criteria.includeTerms, 'all')) {
+  if (criteria.includeTerms.length && criteria.includeTermsMode === 'all' && !criteria.includeTerms.every(term => termMatches(lowerText, term, listing?.title))) {
     return { matches: false, reason: 'missing_required_term', criteria };
   }
-  if (criteria.includeTerms.length && criteria.includeTermsMode === 'any' && !matchesTerms(lowerText, criteria.includeTerms, 'any')) {
+  if (criteria.includeTerms.length && criteria.includeTermsMode === 'any' && !criteria.includeTerms.some(term => termMatches(lowerText, term, listing?.title))) {
     return { matches: false, reason: 'missing_required_term', criteria };
   }
   if (criteria.anyTerms.length && !matchesTerms(lowerText, criteria.anyTerms, 'any')) {
