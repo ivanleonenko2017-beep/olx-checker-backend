@@ -4,7 +4,7 @@ const { parseNaturalLanguageQuery, applyCriteriaToListing } = require('./smart-s
 
 test('strips purchase intent and treats normal battery as a soft defect exclusion', () => {
   const parsed = parseNaturalLanguageQuery('куплю айфон 14 с норм батарея');
-  assert.equal(parsed.query, 'айфон 14');
+  assert.equal(parsed.query, 'iPhone 14');
   assert.ok(parsed.criteria.excludeTerms.includes('несправна батарея'));
   assert.equal(parsed.criteria.includeTerms.length, 0);
 
@@ -24,7 +24,7 @@ test('strips purchase intent and treats normal battery as a soft defect exclusio
 
 test('extracts explicit phone storage capacity from the OLX free-text query', () => {
   const parsed = parseNaturalLanguageQuery('куплю айфон 14 256гб');
-  assert.equal(parsed.query, 'айфон 14');
+  assert.equal(parsed.query, 'iPhone 14');
   assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
 
   assert.equal(applyCriteriaToListing({
