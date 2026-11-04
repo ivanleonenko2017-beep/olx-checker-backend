@@ -258,10 +258,18 @@ function parseNaturalLanguageQuery(input) {
   // sending it as a noisy free-text token to OLX. The listing matcher supports
   // common GB/ГБ spellings.
   const storageOnlyMatch = remaining.match(/(?:^|[\s,;])(?:(?:на\s+)?(\d{2,4})\s*(?:гб|gb|гіг(?:а|ів|и)?|гиг(?:а|ов|и)?))(?!\p{L})(?!\s*(?:оператив|озу|ram))/iu);
-  if (storageOnlyMatch) {
-    const capacity = storageOnlyMatch[1];
-    criteria.includeTerms = [...(criteria.includeTerms || []), `${capacity} ГБ`];
-    remaining = remaining.replace(storageOnlyMatch[0], ' ').trim();
+  // In everyday phone searches, users often write only "iPhone 15 на 256".
+  // Extract that capacity as a structured filter instead of sending "256"
+  // to OLX as an additional mandatory free-text search token.
+  const barePhoneCapacityMatch = !storageOnlyMatch &&
+    /(?:айфон|iphone|смартфон|телефон|samsung\s+galaxy)/iu.test(remaining)
+    ? remaining.match(/(?:^|[\s,;])на\s+(\d{2,4})(?!\p{L})(?!\s*(?:грн|оператив|озу|ram))/iu)
+    : null;
+  const capacityMatch = storageOnlyMatch || barePhoneCapacityMatch;
+  if (capacityMatch) {
+    const capacity = capacityMatch[1];
+    criteria.includeTerms = (criteria.includeTerms || []).concat(capacity + ' ГБ');
+    remaining = remaining.replace(capacityMatch[0], ' ').trim();
   }
 
   // "Normal screen" filters explicit damage wording only; absent descriptions
