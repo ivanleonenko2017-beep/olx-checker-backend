@@ -644,7 +644,7 @@ async function fetchListingDescription(inputUrl) {
           const conditionValue = typeof rawCondition === 'string'
             ? rawCondition
             : String(rawCondition?.name || rawCondition?.['@id'] || '');
-          if (/UsedCondition|pre.?owned|вживан|уживан|б\\/?у/i.test(conditionValue)) {
+          if (/UsedCondition|pre.?owned|вживан|уживан|б\/?у/i.test(conditionValue)) {
             conditionMarker = 'Стан оголошення: вживаний';
           } else if (/NewCondition|brand.?new|новий|нова|нове/i.test(conditionValue)) {
             conditionMarker = 'Стан оголошення: новий';
@@ -663,7 +663,7 @@ async function fetchListingDescription(inputUrl) {
     });
 
     const visibleCondition = $('[data-testid*="condition"], [data-cy*="condition"], [class*="condition"]').text().trim();
-    if (!conditionMarker && /вживан|уживан|б\\/?у|used|pre.?owned/i.test(visibleCondition)) {
+    if (!conditionMarker && /вживан|уживан|б\/?у|used|pre.?owned/i.test(visibleCondition)) {
       conditionMarker = 'Стан оголошення: вживаний';
     } else if (!conditionMarker && /новий|нова|нове|new/i.test(visibleCondition)) {
       conditionMarker = 'Стан оголошення: новий';
@@ -679,15 +679,15 @@ async function fetchListingDescription(inputUrl) {
       '[class*="characteristic"]', '[class*="specification"]'
     ].join(', ');
     $(specificationSelectors).each((_, element) => {
-      const value = $(element).text().replace(/\\s+/g, ' ').trim();
+      const value = $(element).text().replace(/\s+/g, ' ').trim();
       if (value && value.length <= 1000) contextParts.push(value);
     });
 
     if (!description) description = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '';
-    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();
+    description = String(description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     if (conditionMarker) contextParts.push(conditionMarker);
     const searchContext = [...new Set(contextParts)].join('. ');
-    const result = [description, searchContext].filter(Boolean).join('. ').replace(/\\s+/g, ' ').slice(0, 5000);
+    const result = [description, searchContext].filter(Boolean).join('. ').replace(/\s+/g, ' ').slice(0, 5000);
 
     if (result && !/verify you are human|access denied|robot check|підтверд.{0,20}що ви людина/i.test(result)) {
       listingDescriptionCache.set(key, { description: result, expiresAt: Date.now() + 10 * 60 * 1000 });
