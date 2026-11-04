@@ -843,7 +843,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       if (!result.matches) rejectionReasons[result.reason] = (rejectionReasons[result.reason] || 0) + 1;
       return result.matches;
     });
-    console.log(\`[API search] Completed: parsed=\${parsedItems.length}, cityMatched=\${locationItems.length}, detailsEnriched=\${detailsEnriched}, returned=\${items.length}, rejected=\${JSON.stringify(rejectionReasons)}, city=\${JSON.stringify(requestedLocation)}, url=\${targetUrl}, smart=\${Boolean(parsedNaturalQuery)}, durationMs=\${Date.now() - startedAt}\`);
+    console.log('[API search] Completed: parsed=' + parsedItems.length + ', cityMatched=' + locationItems.length + ', detailsEnriched=' + detailsEnriched + ', returned=' + items.length + ', rejected=' + JSON.stringify(rejectionReasons) + ', city=' + JSON.stringify(requestedLocation) + ', url=' + targetUrl + ', smart=' + Boolean(parsedNaturalQuery) + ', durationMs=' + (Date.now() - startedAt));
     res.json({
       success: true,
       count: items.length,
