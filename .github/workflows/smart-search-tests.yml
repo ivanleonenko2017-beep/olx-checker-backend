@@ -1,0 +1,27 @@
+name: Smart Search tests
+
+on:
+  push:
+    branches:
+      - feature/smart-search-v1
+      - feature/ai-search-test
+      - feature/trial-free-premium-launch
+  pull_request:
+    branches:
+      - pre-release/1.0.0-hardening
+      - main
+
+jobs:
+  smart-search-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run all unit and regression tests
+        run: |
+          npm test
+          node --check server.js
