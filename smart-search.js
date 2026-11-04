@@ -129,7 +129,7 @@ function matchesTerms(text, terms, mode = 'all') {
 
 function applyCriteriaToListing(listing, criteriaInput = {}) {
   const criteria = normalizeCriteria(criteriaInput);
-  const text = [listing?.title, listing?.description].filter(Boolean).join(' ');
+  const text = [listing?.title, listing?.description, listing?.cardText, listing?.conditionText].filter(Boolean).join(' ');
   const lowerText = text.toLocaleLowerCase('uk-UA');
   const price = toPositiveInteger(listing?.price, 0);
 
@@ -173,8 +173,10 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   }
   if (criteria.condition !== 'all') {
     // JavaScript's \b is ASCII-oriented and does not reliably delimit Cyrillic words.
-    const isNew = /(?:^|[^\p{L}])(?:нове|новий|нова|нові|новый|новая|новое|новые|new)(?=$|[^\p{L}])/iu.test(text);
-    const isUsed = /б\/у|(?:^|[^\p{L}])бу(?=$|[^\p{L}])|вживан|уживан|used|після використання/iu.test(text);
+    const conditionText = [text, listing?.cardText, listing?.conditionText, listing?.condition]
+      .filter(Boolean).join(' ').toLocaleLowerCase('uk-UA');
+    const isNew = /(?:^|[^\p{L}])(?:нове|новий|нова|нові|новый|новая|новое|новые|new)(?=$|[^\p{L}])/iu.test(conditionText);
+    const isUsed = /б\s*[/.]?\s*у|(?:^|[^\p{L}])бу(?=$|[^\p{L}])|вживан|уживан|used|після використання|б\s*в\s*стані/iu.test(conditionText);
     if (criteria.condition === 'new' && !isNew) return { matches: false, reason: 'condition_mismatch', criteria };
     if (criteria.condition === 'used' && !isUsed) return { matches: false, reason: 'condition_mismatch', criteria };
   }
@@ -230,6 +232,36 @@ function parseNaturalLanguageQuery(input) {
   if (notBlockedMatch) {
     criteria.excludeTerms = [...(criteria.excludeTerms || []), 'заблокований', 'заблокирован', 'activation lock', 'блокування активації', 'icloud locked', 'icloud заблокований', 'icloud заблокирован'];
     remaining = remaining.replace(notBlockedMatch[0], ' ').trim();
+  }
+
+  // General quality wording is a soft preference, not OLX's formal "used" state.
+  const goodConditionMatch = remaining.match(/(?:у\s+|в\s+)?(?:норм(?:альн)?\p{L}*|хорош\p{L}*|гарн\p{L}*|відмінн\p{L}*|ідеальн\p{L}*)\s+(?:стан\p{L}*|состояни\p{L}*)|(?:стан\p{L}*|состояни\p{L}*)\s+(?:норм(?:альн)?\p{L}*|хорош\p{L}*|гарн\p{L}*|відмінн\p{L}*|ідеальн\p{L}*)/iu);
+  if (goodConditionMatch) {
+    criteria.excludeTerms = [...(criteria.excludeTerms || []), 'не працює', 'не работает', 'несправний', 'неисправный', 'на запчастини', 'на запчасти', 'потребує ремонту', 'требует ремонта', 'пошкоджений', 'поврежденный', 'дефектний', 'дефектный'];
+    remaining = remaining.replace(goodConditionMatch[0], ' ').trim();
+  }
+  remaining = remaining.replace(/(^|[^\p{L}\p{N}])(?:в\s+идеале|в\s+ідеалі|ідеально)(?=$|[^\p{L}\p{N}])/giu, '$1');
+
+  // A request for a healthy/normal battery should exclude explicitly defective
+  // batteries, but must not require sellers to mention battery health in every ad.
+  // This avoids turning a soft quality preference into an impossible positive match.
+  const normalBatteryMatch = remaining.match(/(?:(?:з|с)\s+)?норм(?:альн)?\p{L}*\s+(?:батаре\p{L}*|акумулятор\p{L}*|battery)|(?:батаре\p{L}*|акумулятор\p{L}*|battery)\s+(?:в\s+)?нормальн\p{L}*/iu);
+  if (normalBatteryMatch) {
+    criteria.excludeTerms = [...(criteria.excludeTerms || []),
+      'несправна батарея', 'неисправная батарея', 'батарея не держит заряд',
+      'акумулятор не тримає заряд', 'не тримає заряд', 'не держит заряд',
+      'battery faulty', 'battery health issue'];
+    remaining = remaining.replace(normalBatteryMatch[0], ' ').trim();
+  }
+
+  // Treat an explicit storage capacity as a structured requirement rather than
+  // sending it as a noisy free-text token to OLX. The listing matcher supports
+  // common GB/ГБ spellings.
+  const storageOnlyMatch = remaining.match(/(?:^|[\s,;])(?:(?:на\s+)?(\d{2,4})\s*(?:гб|gb|гіг(?:а|ів|и)?|гиг(?:а|ов|и)?))(?!\p{L})(?!\s*(?:оператив|озу|ram))/iu);
+  if (storageOnlyMatch) {
+    const capacity = storageOnlyMatch[1];
+    criteria.includeTerms = [...(criteria.includeTerms || []), `${capacity} ГБ`];
+    remaining = remaining.replace(storageOnlyMatch[0], ' ').trim();
   }
 
   // "Normal screen" filters explicit damage wording only; absent descriptions
@@ -328,6 +360,9 @@ function parseNaturalLanguageQuery(input) {
   }
 
   remaining = remaining
+    .replace(/(^|[^\p{L}\p{N}])(?:аирподсы|эйрподсы|ейрподси|air\s*pods?)(?=$|[^\p{L}\p{N}])/giu, '$1AirPods')
+    .replace(/(^|[^\p{L}\p{N}])(?:самсунг|samsung)\s+(?:гелекси|галакси|галаксі|galaxy)(?=$|[^\p{L}\p{N}])/giu, '$1Samsung Galaxy')
+    .replace(/(^|[^\p{L}\p{N}])(?:хороший|хорошая|хорошее|хорошие|гарний|гарна|гарне|гарні)(?=$|[^\p{L}\p{N}])/giu, '$1')
     .replace(/^(?:я\s+)?(?:хочу|хотів|хотіла|нужно)\s+(?:купити|купить|придбати|найти|знайти)\s+/iu, '')
     .replace(/^(?:я\s+)?(?:куплю|купити|купить|придбаю|придбати|хочу|хотів|хотіла|нужно)\s+/iu, '')
     .replace(/^(?:шукаю|ищу|знайди|найди|підбери|подбери)\s+/iu, '')
