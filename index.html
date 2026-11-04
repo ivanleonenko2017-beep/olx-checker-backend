@@ -63,6 +63,12 @@
     #tab-documents button:hover { border-color:rgba(52,211,153,.35)!important; background:#171d19!important; }
     @media (max-width:380px) { body { padding-left:12px!important;padding-right:12px!important; } .nav-btn { min-width:46px;padding-left:5px;padding-right:5px; } }
 
+    .tab-content:not(.hidden) { animation: zd-tab-enter .22s cubic-bezier(.2,.75,.25,1) both; }
+    @keyframes zd-tab-enter { from { opacity:0; transform:translateY(7px); } to { opacity:1; transform:translateY(0); } }
+    #app { animation: zd-app-enter .38s cubic-bezier(.2,.75,.25,1) both; }
+    @keyframes zd-app-enter { from { opacity:0; transform:translateY(10px) scale(.992); } to { opacity:1; transform:translateY(0) scale(1); } }
+    .nav-btn:active { transform:scale(.94); }
+    .tab-content button { -webkit-tap-highlight-color:transparent; }
     @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; animation:none!important; scroll-behavior:auto!important; } }
   </style>
 </head>
@@ -362,7 +368,13 @@
         </div>
       </div>
 
-      <!-- Referral program is temporarily hidden during release testing. -->
+      <section id="referralProgram" class="p-4 rounded-3xl bg-gray-900 border border-emerald-500/20 space-y-3">
+        <div class="flex items-center justify-between"><div><div class="text-sm font-bold text-white">Запроси друзів</div><div class="text-[10px] text-gray-400 mt-1">Отримуй 3 дні Premium за кожного нового користувача</div></div><span class="text-xl text-emerald-300">↗</span></div>
+        <div class="grid grid-cols-2 gap-2"><div class="rounded-xl bg-gray-950 border border-gray-800 p-3"><div id="referralTotal" class="text-lg font-bold text-emerald-300">0</div><div class="text-[10px] text-gray-400">Запрошено друзів</div></div><div class="rounded-xl bg-gray-950 border border-gray-800 p-3"><div class="text-lg font-bold text-white">+3 дні</div><div class="text-[10px] text-gray-400">Premium за запрошення</div></div></div>
+        <div class="text-[10px] text-gray-400">Поділися посиланням. Запрошення зараховується після першого запуску бота новим користувачем.</div>
+        <div class="flex gap-2"><button id="referralShareBtn" type="button" onclick="shareReferralLink()" class="flex-1 py-2.5 bg-emerald-400 text-black font-bold rounded-xl text-xs">Запросити друга</button><button id="referralCopyBtn" type="button" onclick="copyRefLink()" class="px-4 py-2.5 bg-gray-800 border border-gray-700 text-white font-bold rounded-xl text-xs">Копіювати</button></div>
+        <p id="referralStatus" class="text-[10px] text-gray-500" aria-live="polite">Реферальне посилання завантажується…</p>
+      </section>
 
     </div>
 
@@ -786,9 +798,15 @@
             document.getElementById('userTariffBadge').innerText = 'FREE ТАРИФ';
             document.getElementById('profileTariffBadge').innerText = 'Безкоштовний тариф · 1 фільтр';
           }
-          if (data.stats) {
-            document.getElementById('statRefUsers').innerText = data.stats.totalReferrals || 0;
-          }
+          const referralCount = Number(data.stats?.totalReferrals || 0);
+          document.getElementById('statRefUsers').innerText = referralCount;
+          const referralTotal = document.getElementById('referralTotal');
+          if (referralTotal) referralTotal.innerText = referralCount;
+          window.referralBotUsername = String(data.telegramBotUsername || '').replace(/^@/, '');
+          const referralStatus = document.getElementById('referralStatus');
+          const referralButtons = ['referralShareBtn', 'referralCopyBtn'].map(id => document.getElementById(id)).filter(Boolean);
+          if (referralStatus) referralStatus.innerText = window.referralBotUsername ? 'Ваше персональне посилання готове.' : 'Посилання тимчасово недоступне: не вдалося підтвердити ім’я Telegram-бота.';
+          referralButtons.forEach(button => { button.disabled = !window.referralBotUsername || !userId; });
         } else {
           console.error('Profile response did not contain success=true; preserving current tariff display.');
         }
@@ -1436,7 +1454,8 @@
         alert('Відкрийте додаток у Telegram для виклику реферального посилання.');
         return;
       }
-      const refLink = 'https://t.me/OLXhelpler_bot?start=ref_' + userId;
+      if (!window.referralBotUsername) { alert('Не вдалося підтвердити ім’я бота. Спробуйте оновити профіль пізніше.'); return; }
+      const refLink = 'https://t.me/' + encodeURIComponent(window.referralBotUsername) + '?start=ref_' + encodeURIComponent(userId);
       const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(refLink) + '&text=' + encodeURIComponent('Використовуй ЗНАЙДЕНО для вигідного пошуку!');
       if (tg && tg.openTelegramLink) tg.openTelegramLink(shareUrl);
       else window.open(shareUrl, '_blank');
@@ -1447,7 +1466,11 @@
         alert('Відкрийте додаток всередині Telegram');
         return;
       }
-      const refLink = 'https://t.me/OLXhelpler_bot?start=ref_' + userId;
+      if (!window.referralBotUsername) { alert('Не вдалося підтвердити ім’я бота. Спробуйте оновити профіль пізніше.'); return; }
+      const refLink = 'https://t.me/' + encodeURIComponent(window.referralBotUsername) + '?start=ref_' + encodeURIComponent(userId);
+      const status = document.getElementById('referralStatus');
+      const copy = navigator.clipboard?.writeText ? navigator.clipboard.writeText(refLink) : Promise.reject(new Error('Clipboard API unavailable'));
+      copy.then(() => { if (status) status.innerText = 'Посилання скопійовано. Надішли його друзям!'; }).catch(() => window.prompt('Скопіюй своє реферальне посилання:', refLink));
       navigator.clipboard.writeText(refLink);
       alert('Реферальне посилання скопійовано!');
     }
