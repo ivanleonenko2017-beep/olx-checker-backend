@@ -814,10 +814,27 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     // OLX card markup is inconsistent: the dedicated location node can be
     // absent or point at a date/metadata wrapper. Search the complete visible
     // card text as a fallback before dropping an otherwise valid local result.
+    const locationDiagnostics = requestedLocation
+      ? parsedItems.map(item => ({
+          title: String(item.title || '').slice(0, 100),
+          locationDate: String(item.locationDate || '').slice(0, 100),
+          matchedLocationDate: locationMatches(item.locationDate, requestedLocation),
+          matchedCardText: locationMatches(item.cardText, requestedLocation),
+          cardTextLocationExcerpt: (String(item.cardText || '').match(/.{0,35}(?:черніг|черниг|chernig).{0,45}/iu) || [])[0] || ''
+        }))
+      : [];
     const locationItems = parsedItems.filter(item =>
       locationMatches(item.locationDate, requestedLocation) ||
       locationMatches(item.cardText, requestedLocation)
     );
+    if (requestedLocation) {
+      console.log('[OLX city diagnostics] ' + JSON.stringify({
+        requestedLocation,
+        parsed: parsedItems.length,
+        matched: locationItems.length,
+        candidates: locationDiagnostics
+      }));
+    }
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
     if (requestedCondition !== 'all') criteria.condition = requestedCondition;
 
