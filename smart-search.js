@@ -234,6 +234,14 @@ function parseNaturalLanguageQuery(input) {
     remaining = remaining.replace(notBlockedMatch[0], ' ').trim();
   }
 
+  // General quality wording is a soft preference, not OLX's formal "used" state.
+  const goodConditionMatch = remaining.match(/(?:у\s+|в\s+)?(?:нормальн\p{L}*|хорош\p{L}*|гарн\p{L}*|відмінн\p{L}*|ідеальн\p{L}*)\s+(?:стан\p{L}*|состояни\p{L}*)|(?:стан\p{L}*|состояни\p{L}*)\s+(?:нормальн\p{L}*|хорош\p{L}*|гарн\p{L}*|відмінн\p{L}*|ідеальн\p{L}*)/iu);
+  if (goodConditionMatch) {
+    criteria.excludeTerms = [...(criteria.excludeTerms || []), 'не працює', 'не работает', 'несправний', 'неисправный', 'на запчастини', 'на запчасти', 'потребує ремонту', 'требует ремонта', 'пошкоджений', 'поврежденный', 'дефектний', 'дефектный'];
+    remaining = remaining.replace(goodConditionMatch[0], ' ').trim();
+  }
+  remaining = remaining.replace(/(^|[^\p{L}\p{N}])(?:в\s+идеале|в\s+ідеалі|ідеально)(?=$|[^\p{L}\p{N}])/giu, '$1');
+
   // A request for a healthy/normal battery should exclude explicitly defective
   // batteries, but must not require sellers to mention battery health in every ad.
   // This avoids turning a soft quality preference into an impossible positive match.
@@ -249,7 +257,7 @@ function parseNaturalLanguageQuery(input) {
   // Treat an explicit storage capacity as a structured requirement rather than
   // sending it as a noisy free-text token to OLX. The listing matcher supports
   // common GB/ГБ spellings.
-  const storageOnlyMatch = remaining.match(/(?:^|[\s,;])(?:(?:на\s+)?(\d{2,4})\s*(?:гб|gb))(?!\p{L})(?!\s*(?:оператив|озу|ram))/iu);
+  const storageOnlyMatch = remaining.match(/(?:^|[\s,;])(?:(?:на\s+)?(\d{2,4})\s*(?:гб|gb|гіг(?:а|ів|и)?|гиг(?:а|ов|и)?))(?!\p{L})(?!\s*(?:оператив|озу|ram))/iu);
   if (storageOnlyMatch) {
     const capacity = storageOnlyMatch[1];
     criteria.includeTerms = [...(criteria.includeTerms || []), `${capacity} ГБ`];
@@ -352,6 +360,10 @@ function parseNaturalLanguageQuery(input) {
   }
 
   remaining = remaining
+    .replace(/(^|[^\p{L}\p{N}])(?:аирподсы|эйрподсы|ейрподси|air\s*pods?)(?=$|[^\p{L}\p{N}])/giu, '$1AirPods')
+    .replace(/(^|[^\p{L}\p{N}])(?:самсунг|samsung)\s+(?:гелекси|галакси|галаксі|galaxy)(?=$|[^\p{L}\p{N}])/giu, '$1Samsung Galaxy')
+    .replace(/(^|[^\p{L}\p{N}])(?:айфон|айфоны|iphone)(?=$|[^\p{L}\p{N}])/giu, '$1iPhone')
+    .replace(/(^|[^\p{L}\p{N}])(?:хороший|хорошая|хорошее|хорошие|гарний|гарна|гарне|гарні)(?=$|[^\p{L}\p{N}])/giu, '$1')
     .replace(/^(?:я\s+)?(?:хочу|хотів|хотіла|нужно)\s+(?:купити|купить|придбати|найти|знайти)\s+/iu, '')
     .replace(/^(?:я\s+)?(?:куплю|купити|купить|придбаю|придбати|хочу|хотів|хотіла|нужно)\s+/iu, '')
     .replace(/^(?:шукаю|ищу|знайди|найди|підбери|подбери)\s+/iu, '')
