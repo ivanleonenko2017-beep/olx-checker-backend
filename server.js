@@ -811,7 +811,13 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
 
     const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query);
     const requestedLocation = String(city || '').trim();
-    const locationItems = parsedItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+    // OLX card markup is inconsistent: the dedicated location node can be
+    // absent or point at a date/metadata wrapper. Search the complete visible
+    // card text as a fallback before dropping an otherwise valid local result.
+    const locationItems = parsedItems.filter(item =>
+      locationMatches(item.locationDate, requestedLocation) ||
+      locationMatches(item.cardText, requestedLocation)
+    );
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
     if (requestedCondition !== 'all') criteria.condition = requestedCondition;
 
