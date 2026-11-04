@@ -463,34 +463,40 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     );
   }
 
-  // Last-resort fallback for OLX markup changes: use the smallest ancestor
-  // containing an ad link, a recognizable title and a price.
-  if (!cards.length) {
-    const seen = new Set();
-    $('a[href*="/d/"], a[href*="/obyavlenie/"]').each((_, linkEl) => {
-      let node = $(linkEl);
-      for (let depth = 0; depth < 6 && node.length; depth++, node = node.parent()) {
-        const text = node.text().replace(/\s+/g, ' ').trim();
-        const hasTitle = node.find('h3, h4, h5, h6, [data-testid*="title"], [data-cy*="title"]').length > 0;
-        const hasPrice = /грн|₴/.test(text);
-        if (hasTitle && hasPrice && text.length < 2500) {
-          const el = node.get(0);
-          if (el && !seen.has(el)) {
-            seen.add(el);
-            cards = cards.add(node);
-          }
-          break;
+  // OLX can mix card markup versions on the same result page. Do not run
+  // the ancestor fallback only when the primary selector finds zero cards:
+  // that silently drops cards whenever the primary selector finds only a
+  // partial subset. Supplement the selected cards from every unique ad link.
+  const primaryCardCount = cards.length;
+  const fallbackNodes = new Set();
+  $('a[href*="/d/"], a[href*="/obyavlenie/"]').each((_, linkEl) => {
+    let node = $(linkEl).parent();
+    for (let depth = 0; depth < 8 && node.length; depth++, node = node.parent()) {
+      const text = node.text().replace(/\s+/g, ' ').trim();
+      const hasTitle = node.find('h1, h2, h3, h4, h5, h6, [data-testid*="title"], [data-cy*="title"]').length > 0;
+      const hasPrice = /грн|₴/.test(text);
+      if (hasTitle && hasPrice && text.length < 2500) {
+        const el = node.get(0);
+        if (el && !fallbackNodes.has(el)) {
+          fallbackNodes.add(el);
+          cards = cards.add(node);
         }
+        break;
       }
-    });
-  }
+    }
+  });
+  const supplementalCardCount = Math.max(0, cards.length - primaryCardCount);
+  const parserStats = { skippedNoTitle: 0, skippedStopWord: 0, skippedNoPrice: 0, skippedDuplicate: 0 };
+  const seenAdLinks = new Set();
 
   cards.each((index, element) => {
     if (rawItems.length >= 30) return;
 
     $(element).find('style, script').remove();
-    const title = $(element).find('h6, h4, [data-testid="ad-title"], [data-cy="ad-title"], h3').first().text().trim();
-    if (!title) return;
+    const title = $(element).find(
+      'h1, h2, h3, h4, h5, h6, [data-testid*="title"], [data-cy*="title"]'
+    ).first().text().trim();
+    if (!title) { parserStats.skippedNoTitle++; return; }
 
     const lowerTitle = title.toLowerCase();
     const queryLower = (query || '').toLowerCase();
@@ -498,7 +504,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     const hasStopWord = stopWords.some(word => lowerTitle.includes(word));
     const queryHasStopWord = stopWords.some(word => queryLower.includes(word));
 
-    if (hasStopWord && !queryHasStopWord) return;
+    if (hasStopWord && !queryHasStopWord) { parserStats.skippedStopWord++; return; }
 
     const priceElement = $(element).find('[data-testid="ad-price"], [data-testid="ad-price-container"], [data-cy="ad-price"], [class*="price"]').first();
     priceElement.find('style, script').remove();
@@ -514,6 +520,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
       numericPrice = parseInt(match[1].replace(/\s/g, ''), 10);
     }
 
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) { parserStats.skippedNoPrice++; return; }
     if (minPrice && numericPrice < parseInt(minPrice, 10)) return;
     if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
 
@@ -563,7 +570,10 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
       ? descriptionCandidate.slice(0, 280)
       : 'Відкрийте оголошення на OLX, щоб переглянути повний опис продавця.';
 
-    if (title && !isNaN(numericPrice) && numericPrice > 0 && rawLink) {
+    const normalizedAdLink = link.split('?')[0].replace(/\/$/, '').toLocaleLowerCase('uk-UA');
+    if (seenAdLinks.has(normalizedAdLink)) { parserStats.skippedDuplicate++; return; }
+    if (title && numericPrice > 0 && rawLink) {
+      seenAdLinks.add(normalizedAdLink);
       rawItems.push({
         id: 'ad_' + crypto.randomBytes(4).toString('hex'),
         title,
@@ -579,6 +589,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     }
   });
 
+  console.log(`[OLX parse] primaryCards=${primaryCardCount}, supplementalCards=${supplementalCardCount}, parsed=${rawItems.length}, skipped=${JSON.stringify(parserStats)}`);
   const prices = rawItems.map(i => i.price).filter(price => Number.isFinite(price) && price > 0);
   // Keep the legacy API field name for compatibility, but use a robust median.
   // No market-price estimate is returned with fewer than five listings.
