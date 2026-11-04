@@ -286,3 +286,47 @@ test('iPhone 11 regression: standalone Chernihiv after a comma and maximum price
   assert.equal(parsed.criteria.maxPrice, 10000);
 });
 
+test('Smart Search enforces the requested iPhone generation in the listing title', () => {
+  const parsed = parseNaturalLanguageQuery('Куплю айфон 11 в Чернигове от 5 до 10к не заблокированный с норм экраном');
+  assert.equal(parsed.query.toLocaleLowerCase('uk-UA'), 'айфон 11');
+  assert.equal(parsed.criteria.modelTerm, 'iPhone 11');
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 11 Pro 128GB',
+    description: 'Стан добрий',
+    price: 7000
+  }, parsed.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 12 128GB',
+    description: 'Можливий обмін на iPhone 11',
+    price: 7000
+  }, parsed.criteria).reason, 'model_mismatch');
+  assert.equal(applyCriteriaToListing({
+    title: 'Samsung Galaxy A11',
+    description: 'iPhone 11 у подарунок не входить',
+    price: 7000
+  }, parsed.criteria).reason, 'model_mismatch');
+});
+
+test('normal-screen filter allows listings that do not mention screen condition', () => {
+  const parsed = parseNaturalLanguageQuery('Куплю айфон 11 з норм екраном');
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11 128GB',
+    description: 'Продам телефон. Все працює.',
+    price: 7000
+  }, parsed.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11 128GB',
+    description: 'Екран тріснутий',
+    price: 7000
+  }, parsed.criteria).matches, false);
+});
+
+test('normal-screen exclusion rejects screen damage, not unrelated body damage', () => {
+  const parsed = parseNaturalLanguageQuery('iPhone 11 з норм екраном');
+  assert.equal(applyCriteriaToListing({
+    title: 'iPhone 11, тріщина на корпусі',
+    description: 'Екран цілий',
+    price: 7000
+  }, parsed.criteria).matches, true);
+});
+
