@@ -96,3 +96,21 @@ test('normalizes common Cyrillic product spellings', () => {
   assert.equal(parseNaturalLanguageQuery('ищу самсунг гелекси 4').query, 'Samsung Galaxy 4');
   assert.equal(parseNaturalLanguageQuery('ищу айфон 11').query, 'айфон 11');
 });
+
+
+test('parses iPhone 15 with shorthand storage and Chernihiv city', () => {
+  const parsed = parseNaturalLanguageQuery('куплю айфон 15 на 256 в чернигове');
+  assert.equal(parsed.query, 'айфон 15');
+  assert.equal(parsed.criteria.city, 'Чернігів');
+  assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
+
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 15 256GB',
+    description: ''
+  }, parsed.criteria).matches, true);
+
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 15 128 GB',
+    description: ''
+  }, parsed.criteria).matches, false);
+});
