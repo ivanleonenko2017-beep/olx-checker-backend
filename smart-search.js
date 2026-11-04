@@ -397,6 +397,33 @@ function parseNaturalLanguageQuery(input) {
   return { original, criteria: normalizeCriteria(criteria), query: criteria.query };
 }
 
+function canUseUnverifiedStorageFallback(listing, criteriaInput = {}) {
+  const criteria = normalizeCriteria(criteriaInput);
+  const storageTerms = [...criteria.includeTerms, ...criteria.anyTerms]
+    .map(term => String(term).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1])
+    .filter(Boolean);
+  if (!storageTerms.length) return false;
+
+  const title = String(listing?.title || '');
+  if (!/(?:iphone|айфон)/iu.test(title)) return false;
+
+  const text = [title, listing?.cardText, listing?.description, listing?.conditionText]
+    .filter(Boolean).join(' ').toLocaleLowerCase('uk-UA');
+  const explicitCapacities = [...text.matchAll(/(?:^|[^\d])(\d{2,4})\s*(?:гб|gb)(?=$|[^\p{L}])/giu)]
+    .map(match => match[1]);
+
+  if (explicitCapacities.length && !explicitCapacities.some(value => storageTerms.includes(value))) {
+    return false;
+  }
+
+  const relaxedCriteria = {
+    ...criteria,
+    includeTerms: criteria.includeTerms.filter(term => !/^\d{2,4}\s*(?:гб|gb)$/iu.test(term)),
+    anyTerms: criteria.anyTerms.filter(term => !/^\d{2,4}\s*(?:гб|gb)$/iu.test(term))
+  };
+  return applyCriteriaToListing(listing, relaxedCriteria).matches;
+}
+
 function median(values) {
   const sorted = values.filter(value => Number.isFinite(value) && value > 0).sort((a, b) => a - b);
   if (!sorted.length) return null;
@@ -428,6 +455,7 @@ module.exports = {
   normalizeCriteria,
   matchesTerms,
   applyCriteriaToListing,
+  canUseUnverifiedStorageFallback,
   parseNaturalLanguageQuery,
   median,
   estimateBargainPrice
