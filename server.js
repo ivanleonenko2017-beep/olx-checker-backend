@@ -952,7 +952,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
         Number.isSafeInteger(Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE)) &&
         Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE) > 0,
       telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
-      monobankJarUrl: '', // Digital goods in Telegram Mini Apps are sold only via Telegram Stars.
+      monobankJarUrl: process.env.MONOBANK_JAR_URL || process.env.MONOBANK_JAR_LINK || '', // Donation link only; not a Premium checkout.
       user: userData,
       stats: { totalReferrals },
       telegramBotUsername: await getTelegramBotUsername()
@@ -1287,11 +1287,34 @@ app.post('/api/admin/broadcast', adminAuthMiddleware, async (req, res) => {
 });
 
 app.post('/api/payments/jar/claim', userAuthMiddleware, async (req, res) => {
-  return res.status(410).json({
-    success: false,
-    code: 'MONOBANK_IN_APP_DISABLED',
-    error: 'Оплата цифрового Premium усередині Telegram доступна лише в Telegram Stars.'
-  });
+  try {
+    const jarUrl = process.env.MONOBANK_JAR_URL || process.env.MONOBANK_JAR_LINK || '';
+    if (!jarUrl || !/^https:\/\/(?:send\.monobank\.ua|jar\.monobank\.ua)\//i.test(jarUrl)) {
+      return res.status(503).json({ success: false, error: 'Посилання на Monobank-банку ще не налаштоване.' });
+    }
+    if (!TELEGRAM_BOT_TOKEN) return res.status(503).json({ success: false, error: 'Telegram-підтримка тимчасово недоступна.' });
+    const user = req.telegramUser || {};
+    const identity = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Користувач';
+    const username = user.username ? '@' + user.username : 'не вказаний';
+    const message = [
+      '💚 <b>Нове повідомлення про донат у ЗНАЙДЕНО</b>',
+      'Користувач повідомив, що зробив внесок у Monobank-банку.',
+      '',
+      'Ім’я: ' + identity,
+      'Username: ' + username,
+      'Telegram ID: ' + String(user.id || 'невідомий'),
+      '',
+      'Перевірте фактичне зарахування коштів у банці. Це повідомлення не підтверджує оплату Premium.'
+    ].join('\\n');
+    const adminIds = [...new Set(ADMIN_IDS)].filter(id => Number.isSafeInteger(id) && id > 0);
+    if (!adminIds.length) return res.status(503).json({ success: false, error: 'Адміністратор не налаштований.' });
+    const results = await Promise.all(adminIds.map(id => sendTelegramMessage(id, message)));
+    if (!results.some(Boolean)) return res.status(502).json({ success: false, error: 'Не вдалося доставити повідомлення адміністратору. Спробуйте пізніше.' });
+    return res.json({ success: true, notified: results.filter(Boolean).length });
+  } catch (error) {
+    console.error('[Donation notice] Не вдалося повідомити адміністратора:', error.message);
+    return res.status(500).json({ success: false, error: 'Не вдалося надіслати повідомлення адміністратору.' });
+  }
 });
 
 app.post('/api/payments/stars/invoice-link', userAuthMiddleware, async (req, res) => {
