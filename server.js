@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const { normalizeCriteria, applyCriteriaToListing, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
+const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 
 const app = express();
@@ -793,9 +793,13 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
         // client-side location matching; otherwise the first national page
         // can contain no listings from the requested city at all.
         const citySlug = parsedNaturalQuery && city ? getOlxCitySlug(city) : '';
+        const storageQueryTerms = [...(parsedCriteria.includeTerms || []), ...(parsedCriteria.anyTerms || [])]
+          .map(term => String(term).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1])
+          .filter(Boolean);
+        const upstreamQuery = [...new Set([cleanQ, ...storageQueryTerms])].join(' ').trim();
         const searchPath = citySlug
-          ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(cleanQ)}/`
-          : `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQ)}/`;
+          ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(upstreamQuery)}/`
+          : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
         const searchMin = minPrice ? `search%5Bfilter_float_price%3Afrom%5D=${minPrice}` : '';
         const searchMax = maxPrice ? `search%5Bfilter_float_price%3Ato%5D=${maxPrice}` : '';
         const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
@@ -821,7 +825,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       const candidates = locationItems.filter(item =>
         /(?:iphone|айфон)/iu.test(String(item.title || '')) &&
         applyCriteriaToListing(item, criteria).reason === 'missing_required_term'
-      );
+      ).slice(0, 5); // Bound detail-page requests; unknown specs use the safe fallback below.
       let nextCandidate = 0;
       const workerCount = Math.min(5, candidates.length);
       const workers = Array.from({ length: workerCount }, async () => {
@@ -840,8 +844,20 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const rejectionReasons = {};
     const items = locationItems.filter(item => {
       const result = applyCriteriaToListing(item, criteria);
-      if (!result.matches) rejectionReasons[result.reason] = (rejectionReasons[result.reason] || 0) + 1;
-      return result.matches;
+      if (result.matches) return true;
+
+      // OLX is queried with the requested capacity. Keep only iPhone cards
+      // whose capacity is absent, never cards explicitly showing another size.
+      if (result.reason === 'missing_required_term' &&
+          storageRequirements.length &&
+          canUseUnverifiedStorageFallback(item, criteria)) {
+        item.capacityUnverified = true;
+        item.capacityVerificationNote = 'Обсяг пам’яті не вказаний у картці OLX — перевірте його в оголошенні.';
+        return true;
+      }
+
+      rejectionReasons[result.reason] = (rejectionReasons[result.reason] || 0) + 1;
+      return false;
     });
     console.log('[API search] Completed: parsed=' + parsedItems.length + ', cityMatched=' + locationItems.length + ', detailsEnriched=' + detailsEnriched + ', returned=' + items.length + ', rejected=' + JSON.stringify(rejectionReasons) + ', city=' + JSON.stringify(requestedLocation) + ', url=' + targetUrl + ', smart=' + Boolean(parsedNaturalQuery) + ', durationMs=' + (Date.now() - startedAt));
     res.json({
