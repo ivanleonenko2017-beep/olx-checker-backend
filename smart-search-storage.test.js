@@ -42,3 +42,34 @@ test('new-condition metadata does not satisfy used-condition filter', () => {
   assert.equal(result.matches, false);
   assert.equal(result.reason, 'condition_mismatch');
 });
+
+
+test('unknown iPhone storage can be retained after OLX query used the requested capacity', () => {
+  const { canUseUnverifiedStorageFallback } = require('./smart-search');
+  const criteria = { includeTerms: ['256 ГБ'], city: 'Чернігів' };
+  assert.equal(canUseUnverifiedStorageFallback({
+    title: 'Apple iPhone 15',
+    cardText: 'Apple iPhone 15 25 000 грн Чернігів',
+    description: ''
+  }, criteria), true);
+});
+
+test('unknown-storage fallback still rejects an explicitly different capacity', () => {
+  const { canUseUnverifiedStorageFallback } = require('./smart-search');
+  const criteria = { includeTerms: ['256 ГБ'], city: 'Чернігів' };
+  assert.equal(canUseUnverifiedStorageFallback({
+    title: 'Apple iPhone 15 128GB',
+    cardText: 'Apple iPhone 15 128GB 25 000 грн Чернігів',
+    description: ''
+  }, criteria), false);
+});
+
+test('unknown-storage fallback does not bypass other criteria', () => {
+  const { canUseUnverifiedStorageFallback } = require('./smart-search');
+  const criteria = { includeTerms: ['256 ГБ', 'Pro Max'], city: 'Чернігів' };
+  assert.equal(canUseUnverifiedStorageFallback({
+    title: 'Apple iPhone 15',
+    cardText: 'Apple iPhone 15 25 000 грн Чернігів',
+    description: ''
+  }, criteria), false);
+});
