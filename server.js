@@ -59,6 +59,19 @@ const TELEGRAM_WEBHOOK_SECRET = (process.env.TELEGRAM_WEBHOOK_SECRET ||
     ? crypto.createHmac('sha256', TELEGRAM_BOT_TOKEN).update('znaideno-telegram-webhook-v1').digest('hex')
     : '')).trim();
 const SERVER_URL = (process.env.SERVER_URL || 'https://olx-checker-backend.onrender.com').replace(/\/$/, '');
+let telegramBotUsernameCache = '';
+let telegramBotUsernameCacheAt = 0;
+async function getTelegramBotUsername() {
+  if (process.env.TELEGRAM_BOT_USERNAME) return process.env.TELEGRAM_BOT_USERNAME.replace(/^@/, '');
+  if (telegramBotUsernameCache && Date.now() - telegramBotUsernameCacheAt < 15 * 60 * 1000) return telegramBotUsernameCache;
+  if (!TELEGRAM_BOT_TOKEN) return '';
+  try {
+    const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe`, { timeout: 5000 });
+    const username = response.data?.ok ? String(response.data.result?.username || '') : '';
+    if (username) { telegramBotUsernameCache = username.replace(/^@/, ''); telegramBotUsernameCacheAt = Date.now(); }
+    return telegramBotUsernameCache;
+  } catch (error) { console.warn('[Telegram] Не вдалося отримати username бота:', error.message); return ''; }
+}
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '668277478')
   .split(',')
@@ -941,7 +954,8 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
       telegramStarsPrice: Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0),
       monobankJarUrl: '', // Digital goods in Telegram Mini Apps are sold only via Telegram Stars.
       user: userData,
-      stats: { totalReferrals }
+      stats: { totalReferrals },
+      telegramBotUsername: await getTelegramBotUsername()
     });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
