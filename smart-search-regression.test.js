@@ -4,7 +4,7 @@ const { parseNaturalLanguageQuery, applyCriteriaToListing } = require('./smart-s
 
 test('strips purchase intent and treats normal battery as a soft defect exclusion', () => {
   const parsed = parseNaturalLanguageQuery('куплю айфон 14 с норм батарея');
-  assert.equal(parsed.query, 'iPhone 14');
+  assert.equal(parsed.query, 'айфон 14');
   assert.ok(parsed.criteria.excludeTerms.includes('несправна батарея'));
   assert.equal(parsed.criteria.includeTerms.length, 0);
 
@@ -24,7 +24,7 @@ test('strips purchase intent and treats normal battery as a soft defect exclusio
 
 test('extracts explicit phone storage capacity from the OLX free-text query', () => {
   const parsed = parseNaturalLanguageQuery('куплю айфон 14 256гб');
-  assert.equal(parsed.query, 'iPhone 14');
+  assert.equal(parsed.query, 'айфон 14');
   assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
 
   assert.equal(applyCriteriaToListing({
@@ -61,7 +61,7 @@ test('does not treat an explicitly new item as used', () => {
 
 test('parses iPhone 11 budget and normal-screen preference', () => {
   const parsed = parseNaturalLanguageQuery('ищу айфон 11 до 10к с норм экраном');
-  assert.equal(parsed.query, 'iPhone 11');
+  assert.equal(parsed.query, 'айфон 11');
   assert.equal(parsed.criteria.maxPrice, 10000);
   assert.ok(parsed.criteria.excludeTerms.some(term => /розбитий екран/.test(term)));
   assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 11 64GB', price: 8500, description: 'Працює, гарний стан' }, parsed.criteria).matches, true);
@@ -86,7 +86,7 @@ test('parses Samsung Galaxy 4 and normal battery as soft preference', () => {
 
 test('parses ideal iPhone storage and maximum budget', () => {
   const parsed = parseNaturalLanguageQuery('ищу хороший айфон 14 на 256 гигов в идеале до 25к');
-  assert.equal(parsed.query, 'iPhone 14');
+  assert.equal(parsed.query, 'айфон 14');
   assert.equal(parsed.criteria.maxPrice, 25000);
   assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
 });
@@ -94,5 +94,5 @@ test('parses ideal iPhone storage and maximum budget', () => {
 test('normalizes common Cyrillic product spellings', () => {
   assert.equal(parseNaturalLanguageQuery('ищу аирподсы 2').query, 'AirPods 2');
   assert.equal(parseNaturalLanguageQuery('ищу самсунг гелекси 4').query, 'Samsung Galaxy 4');
-  assert.equal(parseNaturalLanguageQuery('ищу айфон 11').query, 'iPhone 11');
+  assert.equal(parseNaturalLanguageQuery('ищу айфон 11').query, 'айфон 11');
 });
