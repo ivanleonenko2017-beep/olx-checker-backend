@@ -66,7 +66,7 @@ test('unknown-storage fallback still rejects an explicitly different capacity', 
 
 test('unknown-storage fallback does not bypass other criteria', () => {
   const { canUseUnverifiedStorageFallback } = require('./smart-search');
-  const criteria = { includeTerms: ['256 ГБ', 'iPhone 15'], city: 'Чернігів' };
+  const criteria = { includeTerms: ['256 ГБ', 'Pro Max'], city: 'Чернігів' };
   assert.equal(canUseUnverifiedStorageFallback({
     title: 'Apple iPhone 15',
     cardText: 'Apple iPhone 15 25 000 грн Чернігів',
