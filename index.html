@@ -368,6 +368,14 @@
         </div>
       </div>
 
+      <section id="monobankDonationSection" class="p-4 rounded-3xl bg-gray-900 border border-amber-400/25 space-y-3">
+        <div class="text-sm font-extrabold text-white">Підтримати ЗНАЙДЕНО</div>
+        <p class="text-xs leading-relaxed text-gray-300">Якщо сервіс став корисним, можеш підтримати його добровільним внеском через Monobank-банку. Донат не є оплатою Premium.</p>
+        <button id="premiumJarBtn" type="button" onclick="payViaMonobankJar()" class="hidden w-full py-3 bg-amber-400 text-black font-extrabold rounded-xl text-xs">Відкрити Monobank-банку</button>
+        <button id="premiumJarClaimBtn" type="button" onclick="claimMonobankJarPayment()" disabled class="hidden w-full py-3 bg-gray-800 border border-gray-700 text-white font-bold rounded-xl text-xs">Я оплатив — повідомити адміністратора</button>
+        <p class="text-[10px] text-gray-500 text-center">Після внеску натисни кнопку нижче — адміністратор перевірить зарахування.</p>
+      </section>
+
       <section id="referralProgram" class="p-4 rounded-3xl bg-gray-900 border border-emerald-500/20 space-y-3">
         <div class="flex items-center justify-between"><div><div class="text-sm font-bold text-white">Запроси друзів</div><div class="text-[10px] text-gray-400 mt-1">Отримуй 3 дні Premium за кожного нового користувача</div></div><span class="text-xl text-emerald-300">↗</span></div>
         <div class="grid grid-cols-2 gap-2"><div class="rounded-xl bg-gray-950 border border-gray-800 p-3"><div id="referralTotal" class="text-lg font-bold text-emerald-300">0</div><div class="text-[10px] text-gray-400">Запрошено друзів</div></div><div class="rounded-xl bg-gray-950 border border-gray-800 p-3"><div class="text-lg font-bold text-white">+3 дні</div><div class="text-[10px] text-gray-400">Premium за запрошення</div></div></div>
@@ -717,11 +725,11 @@
           window.paymentEnabled = false; // Digital Premium inside Telegram must be paid exclusively with Telegram Stars.
           window.telegramStarsEnabled = data.telegramStarsEnabled === true;
           window.telegramStarsPrice = Number(data.telegramStarsPrice || 0);
-          window.monobankJarUrl = ''; // Do not expose bank-jar checkout inside Telegram Mini App.
+          window.monobankJarUrl = String(data.monobankJarUrl || ''); // Donation link only; never treat a jar transfer as Premium payment.
           const jarButton = document.getElementById('premiumJarBtn');
           const jarClaimButton = document.getElementById('premiumJarClaimBtn');
-          if (jarButton) jarButton.disabled = !window.monobankJarUrl;
-          if (jarClaimButton) jarClaimButton.disabled = !window.monobankJarUrl;
+          if (jarButton) { jarButton.disabled = !window.monobankJarUrl; jarButton.classList.toggle('hidden', !window.monobankJarUrl); }
+          if (jarClaimButton) { jarClaimButton.disabled = !window.monobankJarUrl; jarClaimButton.classList.toggle('hidden', !window.monobankJarUrl); }
           const payButton = document.getElementById('premiumPayBtn');
           const payNote = document.getElementById('premiumPaymentNote');
           if (payButton) {
@@ -817,14 +825,12 @@
 
     function payViaMonobankJar() {
       if (!window.monobankJarUrl) {
-        alert('Посилання на Monobank-банку тимчасово недоступне.');
+        alert('Посилання на Monobank-банку ще не налаштоване.');
         return;
       }
       const webApp = window.Telegram && window.Telegram.WebApp;
       if (webApp && typeof webApp.openLink === 'function') webApp.openLink(window.monobankJarUrl);
       else window.open(window.monobankJarUrl, '_blank', 'noopener,noreferrer');
-      const note = document.getElementById('premiumPaymentNote');
-      if (note) note.innerText = 'У Telegram цифровий Premium можна оплатити лише в Telegram Stars.';
     }
 
     async function claimMonobankJarPayment() {
@@ -833,14 +839,11 @@
         return;
       }
       if (!window.monobankJarUrl) {
-        alert('Посилання на Monobank-банку тимчасово недоступне.');
+        alert('Посилання на Monobank-банку ще не налаштоване.');
         return;
       }
       const button = document.getElementById('premiumJarClaimBtn');
-      if (button) {
-        button.disabled = true;
-        button.innerText = 'Надсилаємо запит…';
-      }
+      if (button) { button.disabled = true; button.innerText = 'Надсилаємо запит…'; }
       try {
         const response = await fetch(`${BACKEND_URL}/api/payments/jar/claim`, {
           method: 'POST',
@@ -848,14 +851,11 @@
         });
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.error || 'Не вдалося повідомити адміністратора');
-        alert('Запит передано адміністратору. Premium буде активовано вручну після перевірки фактичного зарахування коштів.');
+        alert('Повідомлення надіслано адміністратору. Дякуємо за підтримку ЗНАЙДЕНО! Це донат і він не активує Premium автоматично.');
       } catch (error) {
         alert(error.message || 'Не вдалося повідомити адміністратора');
       } finally {
-        if (button) {
-          button.disabled = !window.monobankJarUrl;
-          button.innerText = 'Я оплатив — повідомити адміністратора';
-        }
+        if (button) { button.disabled = !window.monobankJarUrl; button.innerText = 'Я оплатив — повідомити адміністратора'; }
       }
     }
 
