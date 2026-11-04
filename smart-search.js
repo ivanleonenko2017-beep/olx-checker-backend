@@ -235,7 +235,7 @@ function parseNaturalLanguageQuery(input) {
   }
 
   // General quality wording is a soft preference, not OLX's formal "used" state.
-  const goodConditionMatch = remaining.match(/(?:у\s+|в\s+)?(?:нормальн\p{L}*|хорош\p{L}*|гарн\p{L}*|відмінн\p{L}*|ідеальн\p{L}*)\s+(?:стан\p{L}*|состояни\p{L}*)|(?:стан\p{L}*|состояни\p{L}*)\s+(?:нормальн\p{L}*|хорош\p{L}*|гарн\p{L}*|відмінн\p{L}*|ідеальн\p{L}*)/iu);
+  const goodConditionMatch = remaining.match(/(?:у\s+|в\s+)?(?:норм(?:альн)?\p{L}*|хорош\p{L}*|гарн\p{L}*|відмінн\p{L}*|ідеальн\p{L}*)\s+(?:стан\p{L}*|состояни\p{L}*)|(?:стан\p{L}*|состояни\p{L}*)\s+(?:норм(?:альн)?\p{L}*|хорош\p{L}*|гарн\p{L}*|відмінн\p{L}*|ідеальн\p{L}*)/iu);
   if (goodConditionMatch) {
     criteria.excludeTerms = [...(criteria.excludeTerms || []), 'не працює', 'не работает', 'несправний', 'неисправный', 'на запчастини', 'на запчасти', 'потребує ремонту', 'требует ремонта', 'пошкоджений', 'поврежденный', 'дефектний', 'дефектный'];
     remaining = remaining.replace(goodConditionMatch[0], ' ').trim();
