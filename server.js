@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
+const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
 
 const app = express();
 app.disable('x-powered-by');
@@ -377,7 +378,44 @@ function getOlxCitySlug(city) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+function getLocationAliases(requestedRaw, requested) {
+  const aliases = {
+    'чернігів': ['чернигов', 'chernigov'],
+    'чернигов': ['чернігів', 'chernigov'],
+    'київ': ['киев', 'kiev'],
+    'киев': ['київ', 'kiev'],
+    'львів': ['львов', 'lvov'],
+    'львов': ['львів', 'lvov'],
+    'харків': ['харьков', 'kharkov'],
+    'харьков': ['харків', 'kharkov'],
+    'одеса': ['одесса', 'odessa'],
+    'одесса': ['одеса', 'odessa'],
+    'дніпро': ['днепр', 'dnepr'],
+    'днепр': ['дніпро', 'dnepr']
+  };
+  return aliases[requestedRaw.toLocaleLowerCase('uk-UA')] || aliases[requested] || [];
+}
+
 function locationMatches(locationDate, requestedLocation) {
+  const requestedRaw = String(requestedLocation || '').trim();
+  const requested = normalizeLocationText(requestedRaw);
+  if (!requested || ['всі міста', 'вся україна', 'уся україна'].some(value => normalizeLocationText(value) === requested)) return true;
+  const label = String(locationDate || '').split(/\s*[-–—]\s*/)[0].split(',')[0].trim();
+  const actual = normalizeLocationText(label);
+  if (!actual) return false;
+  const accepted = new Set([requested, ...getLocationAliases(requestedRaw, requested).map(normalizeLocationText)]);
+  return accepted.has(actual);
+}
+
+function locationMatchesCardText(cardText, requestedLocation) {
+  const text = String(cardText || '').replace(/\s+/g, ' ').trim();
+  const requestedRaw = String(requestedLocation || '').trim();
+  const requested = normalizeLocationText(requestedRaw);
+  if (!text || !requested) return false;
+  const variants = [requestedRaw, ...getLocationAliases(requestedRaw, requested)].map(value => String(value || '').trim()).filter(Boolean);
+  const datePattern = '(?:сьогодні|сегодня|today)(?:\\s+о\\s+\\d{1,2}[:.]\\d{2})?|\\d{1,2}\\s+\\p{L}{3,}\\s+\\d{4}';
+  return variants.some(variant => {
+    const escaped = variant.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\function locationMatches(locationDate, requestedLocation) {
   const requestedRaw = String(requestedLocation || '').trim();
   const requested = normalizeLocationText(requestedRaw);
   if (!requested || ['всі міста', 'вся україна', 'уся україна'].some(value => normalizeLocationText(value) === requested)) return true;
@@ -399,9 +437,17 @@ function locationMatches(locationDate, requestedLocation) {
   };
   return (aliases[requestedRaw.toLocaleLowerCase('uk-UA')] || aliases[requested] || [])
     .some(alias => actual.includes(normalizeLocationText(alias)));
+}');
+    const pattern = new RegExp(
+      '(?:^|[^\\p{L}]|(?:нове|новий|нова|вживане|вживаний|new|used))' +
+      escaped + '(?:\\s*,\\s*[^\\-–—]{1,60})?\\s*[-–—]\\s*(?:' + datePattern + ')',
+      'iu'
+    );
+    return pattern.test(text);
+  });
 }
 
-async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
+async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
   let response;
   try {
     response = await axios.get(targetUrl, {
@@ -439,6 +485,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
 
   const $ = cheerio.load(html);
   const rawItems = [];
+  const adLinksFound = $('a[href*="/d/"], a[href*="/obyavlenie/"]').length;
 
   // Do not reject cards here based on generic accessory/repair words.
   // These words may appear in a genuine phone listing (e.g. battery replaced,
@@ -481,11 +528,14 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     }
   });
   const supplementalCardCount = Math.max(0, cards.length - primaryCardCount);
-  const parserStats = { skippedNoTitle: 0, skippedNoPrice: 0, skippedDuplicate: 0 };
+  const parserStats = { skippedNoTitle: 0, skippedNoPrice: 0, skippedDuplicate: 0, maxItemsReached: false };
   const seenAdLinks = new Set();
 
   cards.each((index, element) => {
-    if (rawItems.length >= 30) return;
+    if (rawItems.length >= 200) {
+      parserStats.maxItemsReached = true;
+      return false;
+    }
 
     $(element).find('style, script').remove();
     const title = $(element).find(
@@ -511,7 +561,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     if (minPrice && numericPrice < parseInt(minPrice, 10)) return;
     if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
 
-    const rawLink = $(element).find('a[href*="/d/"], a[href*="/obyavlenie/"], a').first().attr('href') || '';
+    const rawLink = $(element).find('a[href*="/d/"], a[href*="/obyavlenie/"]').first().attr('href') || '';
     const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
 
     let rawImgUrl = '';
@@ -549,7 +599,13 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     // Preserve the complete visible card text: OLX condition badges and specs
     // are not always included in the title or description fields.
     const cardText = $(element).text().replace(/\\s+/g, ' ').trim().slice(0, 2500);
-    const locationDate = $(element).find('[data-testid="location-date"], [data-cy="location-date"], [class*="location"], [class*="date"]').first().text().trim();
+    let locationDate = $(element).find('[data-testid="location-date"], [data-cy="location-date"]').first().text().trim();
+    if (!locationDate) {
+      const locationCandidates = $(element).find('[class*="location"], [class*="date"]').toArray()
+        .map(node => $(node).text().replace(/\s+/g, ' ').trim())
+        .filter(value => value && value.length < 120 && /(?:сьогодні|сегодня|today|\d{1,2}\s+\p{L}{3,})/iu.test(value));
+      locationDate = locationCandidates.find(value => /[-–—]/.test(value)) || '';
+    }
     const descriptionCandidate = $(element).find(
       '[data-testid="ad-description"], [data-cy="ad-description"], [class*="description"], p'
     ).first().text().replace(/\s+/g, ' ').trim();
@@ -569,14 +625,14 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
         link,
         rawImgUrl,
         proxyImg: rawImgUrl ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(rawImgUrl)}` : `${SERVER_URL}/assets/no-photo.svg`,
-        locationDate: locationDate || 'Україна',
+        locationDate,
         cardText,
         description
       });
     }
   });
 
-  console.log(`[OLX parse] primaryCards=${primaryCardCount}, supplementalCards=${supplementalCardCount}, parsed=${rawItems.length}, skipped=${JSON.stringify(parserStats)}`);
+  console.log(`[OLX parse] primaryCards=${primaryCardCount}, supplementalCards=${supplementalCardCount}, adLinksFound=${adLinksFound}, parsed=${rawItems.length}, skipped=${JSON.stringify(parserStats)}`);
   const prices = rawItems.map(i => i.price).filter(price => Number.isFinite(price) && price > 0);
   // Keep the legacy API field name for compatibility, but use a robust median.
   // No market-price estimate is returned with fewer than five listings.
@@ -588,7 +644,37 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '') {
     throw error;
   }
 
-  return { items: rawItems, averagePrice };
+  return { items: rawItems, averagePrice, parserStats };
+}
+
+async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLocation = '') {
+  const cityScoped = Boolean(String(requestedLocation || '').trim()) && !/^https?:\/\//i.test(String(query || '').trim());
+  const configuredPageLimit = Number.parseInt(process.env.OLX_SEARCH_MAX_PAGES || '2', 10);
+  const pageLimit = cityScoped
+    ? Math.min(3, Math.max(1, Number.isFinite(configuredPageLimit) ? configuredPageLimit : 2))
+    : 1;
+  const pages = [];
+  let previousUniqueCount = 0;
+
+  for (let page = 1; page <= pageLimit; page++) {
+    const pageUrl = page === 1 ? targetUrl : buildOlxPageUrl(targetUrl, page);
+    try {
+      const result = await parseOlxPage(pageUrl, minPrice, maxPrice, query);
+      pages.push(result.items);
+      const merged = mergeUniqueOlxItems(pages, 600);
+      console.log(\`[OLX pagination] page=\${page}/\${pageLimit} pageItems=\${result.items.length} uniqueTotal=\${merged.length} city=\${JSON.stringify(requestedLocation || '')}\`);
+      if (result.items.length === 0 || merged.length === previousUniqueCount) break;
+      previousUniqueCount = merged.length;
+    } catch (error) {
+      if (page === 1) throw error;
+      console.warn(\`[OLX pagination] Page \${page} failed; keeping earlier results: code=\${error.code || 'unknown'}, status=\${error.response?.status || 'none'}\`);
+      break;
+    }
+  }
+
+  const items = mergeUniqueOlxItems(pages, 600);
+  const prices = items.map(item => item.price).filter(price => Number.isFinite(price) && price > 0);
+  return { items, averagePrice: prices.length >= 5 ? median(prices) : 0 };
 }
 
 
@@ -809,8 +895,8 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
 
     if (!targetUrl) return res.status(400).json({ error: 'Укажіть пошуковий запит' });
 
-    const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query);
     const requestedLocation = String(city || '').trim();
+    const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query, requestedLocation);
     // OLX card markup is inconsistent: the dedicated location node can be
     // absent or point at a date/metadata wrapper. Search the complete visible
     // card text as a fallback before dropping an otherwise valid local result.
@@ -819,13 +905,13 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
           title: String(item.title || '').slice(0, 100),
           locationDate: String(item.locationDate || '').slice(0, 100),
           matchedLocationDate: locationMatches(item.locationDate, requestedLocation),
-          matchedCardText: locationMatches(item.cardText, requestedLocation),
+          matchedCardText: locationMatchesCardText(item.cardText, requestedLocation),
           cardTextLocationExcerpt: (String(item.cardText || '').match(/.{0,35}(?:черніг|черниг|chernig).{0,45}/iu) || [])[0] || ''
         }))
       : [];
     const locationItems = parsedItems.filter(item =>
       locationMatches(item.locationDate, requestedLocation) ||
-      locationMatches(item.cardText, requestedLocation)
+      (!item.locationDate && locationMatchesCardText(item.cardText, requestedLocation))
     );
     if (requestedLocation) {
       console.log('[OLX city diagnostics] ' + JSON.stringify({
@@ -1785,7 +1871,7 @@ async function runBackgroundWorker() {
           console.log(`[OLX search] filter=${filter.id} cityScope=${citySlug || 'all'}`);
         }
 
-        const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query);
+        const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city);
         const criteria = normalizeCriteria({
           ...(filter.criteria || {}),
           minPrice: filter.min_price,
@@ -1812,7 +1898,10 @@ async function runBackgroundWorker() {
           const link = String(item.link || '').trim().replace(/\/$/, '');
           return isPublishedToday(item.locationDate) || knownLinks.has(link);
         });
-        const locationEligibleItems = dateEligibleItems.filter(item => locationMatches(item.locationDate, requestedLocation));
+        const locationEligibleItems = dateEligibleItems.filter(item =>
+          locationMatches(item.locationDate, requestedLocation) ||
+          (!item.locationDate && locationMatchesCardText(item.cardText, requestedLocation))
+        );
         if (needsFullDescription) {
           // Limit detail-page requests to ads that could actually be notified.
           // A small concurrency cap keeps the worker responsive without hammering OLX.
