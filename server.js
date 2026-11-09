@@ -2080,6 +2080,9 @@ async function runBackgroundWorker() {
           const safeTitle = escapeTelegramHtml(item.title);
           const safeLocation = escapeTelegramHtml(item.locationDate);
           const safeItemLink = escapeTelegramHtml(item.link);
+          const capacityWarning = item.capacityUnverified
+            ? '\n⚠️ <b>' + escapeTelegramHtml(item.capacityVerificationNote || 'Обсяг пам’яті не підтверджено — перевірте характеристики в оголошенні.') + '</b>\n'
+            : '';
           const notificationText =
             (hasPriceDrop
               ? `📉 <b>Ціна знизилася для оголошення у фільтрі “${safeFilterQuery}”</b>\n\n<b>Було:</b> ${previousPrice.toLocaleString('uk-UA')} грн → <b>Стало:</b> ${Number(item.price).toLocaleString('uk-UA')} грн\n\n`
@@ -2090,6 +2093,7 @@ async function runBackgroundWorker() {
               ? `📊 <b>Медіана аналогів:</b> ${Number(bargain.referencePrice).toLocaleString('uk-UA')} грн • ${bargain.comparableCount} оголошень\n`
               : '') +
             `📍 <b>Місто:</b> ${safeLocation}\n\n` +
+            capacityWarning +
             `<a href="${safeItemLink}">👉 Відкрити оголошення на OLX</a>`;
 
           const keyboard = {
