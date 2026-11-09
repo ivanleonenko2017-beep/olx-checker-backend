@@ -51,7 +51,7 @@ test('reports model, memory, condition and price funnel without weakening criter
 
 test('redacts free-text query from OLX search path and emits only normalized criteria', () => {
   const safeUrl = sanitizeSearchUrl('https://www.olx.ua/uk/chernigov/q-private-phone-number-123456/');
-  assert.match(safeUrl, /q-\\[redacted\\]/);
+  assert.match(safeUrl, /q-REDACTED/);
   assert.doesNotMatch(safeUrl, /123456/);
   const summary = summarizeCriteria({
     modelTerm: 'iPhone 15', includeTerms: ['256 GB', 'private phone 123456'],
@@ -65,5 +65,5 @@ test('redacts free-text query from OLX search path and emits only normalized cri
 
 test('admin diagnostic route is wired through server-side admin authentication', () => {
   const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
-  assert.match(source, /app\\.post\\(['"]\\/api\\/admin\\/search-diagnostics['"],\\s*adminAuthMiddleware/);
+  assert.match(source, /app\.post\(['"]\/api\/admin\/search-diagnostics['"],\s*adminAuthMiddleware/);
 });
