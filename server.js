@@ -9,6 +9,7 @@ const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallba
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
+const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
 
 const app = express();
 app.disable('x-powered-by');
@@ -204,7 +205,22 @@ async function adminAuthMiddleware(req, res, next) {
   });
 }
 
-async function sendTelegramMessage(chatId, text, replyMarkup = null, useHtml = true) {
+async function markTelegramBlocked(chatId) {
+  const db = supabaseAdmin || supabase;
+  const telegramId = Number(chatId);
+  if (!db || !Number.isSafeInteger(telegramId) || telegramId <= 0) return;
+  try {
+    const { error } = await db.from('users')
+      .update({ telegram_blocked_at: new Date().toISOString() })
+      .eq('telegram_id', telegramId);
+    if (error) console.warn('[Telegram] Не вдалося позначити заблокованого користувача:', error.message);
+  } catch (error) {
+    console.warn('[Telegram] Помилка збереження статусу блокування:', error.message);
+  }
+}
+
+
+async function sendTelegramMessage(chatId, text, replyMarkup = null, useHtml = true, attempt = 0) {
   if (!TELEGRAM_BOT_TOKEN) {
     console.error('[Telegram] TELEGRAM_BOT_TOKEN не налаштовано');
     return false;
@@ -218,36 +234,55 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null, useHtml = t
     const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, payload, { timeout: 8000 });
     return Boolean(response.data && response.data.ok);
   } catch (err) {
+    const status = err.response?.status;
     const description = err.response?.data?.description || err.message;
+    if (isTelegramBlockedError(err)) {
+      await markTelegramBlocked(chatId);
+      console.warn(`[Telegram] Бот заблокований користувачем ${chatId}; повторні спроби припинено.`);
+      return false;
+    }
+    if (status === 429 && attempt < 2) {
+      const retrySeconds = getTelegramRetryDelaySeconds(err);
+      console.warn(`[Telegram] 429 для чату ${chatId}; повтор через ${retrySeconds} с.`);
+      await new Promise(resolve => setTimeout(resolve, retrySeconds * 1000));
+      return sendTelegramMessage(chatId, text, replyMarkup, useHtml, attempt + 1);
+    }
     if (useHtml && /can't parse entities|unsupported start tag/i.test(description)) {
       console.warn(`[Telegram] HTML parse error for chat ${chatId}; retrying as plain text`);
-      return await sendTelegramMessage(chatId, text, replyMarkup, false);
+      return sendTelegramMessage(chatId, text, replyMarkup, false, attempt);
     }
-    console.error(`[Telegram] sendMessage failed for chat ${chatId} (HTTP ${err.response?.status || 'network'}): ${description}`);
+    console.error(`[Telegram] sendMessage failed for chat ${chatId} (HTTP ${status || 'network'}): ${description}`);
     return false;
   }
 }
 
-async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) {
+async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null, attempt = 0) {
   if (!TELEGRAM_BOT_TOKEN) return false;
   try {
     const fullPhotoUrl = photoUrl.startsWith('/') ? `${SERVER_URL}${photoUrl}` : photoUrl;
     const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
       chat_id: chatId,
       photo: fullPhotoUrl,
-      caption: caption,
+      caption,
       parse_mode: 'HTML',
       reply_markup: replyMarkup
     }, { timeout: 8000 });
     if (response.data?.ok === true) return true;
-    console.warn(`[Telegram] sendPhoto не підтвердив доставку для чату ${chatId}:`, response.data?.description || 'невідома помилка');
-    return await sendTelegramMessage(chatId, caption, replyMarkup);
+    console.warn(`[Telegram] sendPhoto не підтвердив доставку для чату ${chatId}: `, response.data?.description || 'невідома помилка');
+    return sendTelegramMessage(chatId, caption, replyMarkup);
   } catch (err) {
-    if (err.response?.status === 429) {
-      console.warn(`⚠️ Telegram Rate Limit (429) на фото для чата ${chatId}.`);
+    if (isTelegramBlockedError(err)) {
+      await markTelegramBlocked(chatId);
+      console.warn(`[Telegram] Бот заблокований користувачем ${chatId}; фото та повідомлення більше не надсилаються.`);
       return false;
     }
-    return await sendTelegramMessage(chatId, caption, replyMarkup);
+    if (err.response?.status === 429 && attempt < 1) {
+      const retrySeconds = getTelegramRetryDelaySeconds(err);
+      console.warn(`[Telegram] 429 для фото чату ${chatId}; повтор через ${retrySeconds} с.`);
+      await new Promise(resolve => setTimeout(resolve, retrySeconds * 1000));
+      return sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup, attempt + 1);
+    }
+    return sendTelegramMessage(chatId, caption, replyMarkup);
   }
 }
 
@@ -1159,7 +1194,7 @@ app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
     const userId = req.telegramUser.id;
     if (!supabase) return res.json({ success: true, filters: [] });
 
-    const { data, error } = await supabase.from('filters').select('*').eq('user_id', userId);
+    const { data, error } = await supabase.from('filters').select('*').eq('user_id', userId).order('created_at', { ascending: true });
     if (error) throw error;
 
     const uniqueFilters = [];
@@ -1718,11 +1753,26 @@ app.post('/telegram-webhook', async (req, res) => {
         .select('telegram_id').eq('telegram_id', chatId).maybeSingle();
       if (previousUserError) throw previousUserError;
       isNewTelegramUser = !previousUser;
-      const { error: userUpsertError } = await userDb.from('users').upsert({
+
+      const firstStartPayload = text.startsWith('/start') ? text.trim().split(/\s+/, 2)[1] || '' : '';
+      const firstReferralMatch = /^ref_(\d{1,20})$/.exec(firstStartPayload);
+      const inviterCandidate = firstReferralMatch ? Number(firstReferralMatch[1]) : 0;
+      const inviteeCandidate = Number(chatId);
+      const pendingReferrer = isNewTelegramUser &&
+        Number.isSafeInteger(inviterCandidate) && inviterCandidate > 0 &&
+        Number.isSafeInteger(inviteeCandidate) && inviteeCandidate > 0 &&
+        inviterCandidate !== inviteeCandidate
+          ? inviterCandidate
+          : null;
+
+      const userPayload = {
         telegram_id: chatId,
         first_name: msg.from?.first_name || 'User',
-        ...(isNewTelegramUser ? { trial_started_at: new Date().toISOString() } : {})
-      }, { onConflict: 'telegram_id' });
+        telegram_blocked_at: null,
+        ...(isNewTelegramUser ? { trial_started_at: new Date().toISOString() } : {}),
+        ...(pendingReferrer ? { pending_referrer_telegram_id: pendingReferrer } : {})
+      };
+      const { error: userUpsertError } = await userDb.from('users').upsert(userPayload, { onConflict: 'telegram_id' });
       if (userUpsertError) throw userUpsertError;
     } catch (userError) {
       console.error('[Telegram] Не вдалося зберегти користувача для розсилок:', userError.message);
@@ -1753,36 +1803,32 @@ app.post('/telegram-webhook', async (req, res) => {
       }
       return;
     }
-    // Accept one referral attribution per Telegram account; never count self-referrals.
-    const referralMatch = /^ref_(\d{1,20})$/.exec(startPayload);
-    if (referralMatch && isNewTelegramUser && (supabaseAdmin || supabase)) {
-      const inviterId = Number(referralMatch[1]);
+    // Referral attribution is persisted on the invitee's first start and retried
+    // on later /start updates if the atomic database operation previously failed.
+    const referralDb = supabaseAdmin || supabase;
+    if (referralDb) {
       const inviteeId = Number(chatId);
-      if (Number.isSafeInteger(inviterId) && inviterId > 0 &&
-          Number.isSafeInteger(inviteeId) && inviteeId > 0 && inviterId !== inviteeId) {
-        const referralDb = supabaseAdmin || supabase;
-        const { data: newReferral, error: referralError } = await referralDb.from('referrals').upsert({
-          inviter_telegram_id: inviterId,
-          invitee_telegram_id: inviteeId
-        }, { onConflict: 'invitee_telegram_id', ignoreDuplicates: true }).select('id');
-        if (referralError && !/does not exist|schema cache|relation .*referrals/i.test(referralError.message || '')) {
-          console.warn('Не вдалося зберегти реферала:', referralError.message);
-        } else if (!referralError && newReferral && newReferral.length > 0) {
-          // Reward only when a new, unique referral row was actually inserted.
-          // Extend an existing subscription rather than overwriting remaining days.
-          const { data: inviter, error: inviterReadError } = await referralDb
-            .from('users').select('tariff,premium_until').eq('telegram_id', inviterId).maybeSingle();
-          if (!inviterReadError && inviter) {
-            const currentExpiry = inviter.premium_until ? Date.parse(inviter.premium_until) : 0;
-            const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
-            const nextExpiry = new Date(rewardBase + 3 * 24 * 60 * 60 * 1000).toISOString();
-            const { error: rewardError } = await referralDb.from('users').update({
-              tariff: 'premium',
-              premium_until: nextExpiry
-            }).eq('telegram_id', inviterId);
-            if (rewardError) console.warn('Не вдалося нарахувати реферальний Premium:', rewardError.message);
-          } else if (inviterReadError) {
-            console.warn('Не вдалося перевірити власника реферального посилання:', inviterReadError.message);
+      const { data: pendingReferralUser, error: pendingReferralError } = await referralDb
+        .from('users')
+        .select('pending_referrer_telegram_id')
+        .eq('telegram_id', inviteeId)
+        .maybeSingle();
+      if (pendingReferralError) {
+        console.warn('Не вдалося прочитати відкладене реферальне запрошення:', pendingReferralError.message);
+      } else if (pendingReferralUser?.pending_referrer_telegram_id) {
+        const inviterId = Number(pendingReferralUser.pending_referrer_telegram_id);
+        const { data: rewardData, error: rewardError } = await referralDb.rpc('grant_referral_reward', {
+          p_inviter_telegram_id: inviterId,
+          p_invitee_telegram_id: inviteeId
+        });
+        if (rewardError) {
+          console.warn('Не вдалося атомарно обробити реферальне запрошення; воно залишиться для повторної спроби:', rewardError.message);
+        } else {
+          const rewardResult = Array.isArray(rewardData) ? rewardData[0] : rewardData;
+          if (rewardResult?.rewarded === true) {
+            console.log('[Referral] Premium bonus atomically granted for invitee:', inviteeId);
+          } else if (rewardResult?.reason) {
+            console.log('[Referral] Attribution result:', rewardResult.reason);
           }
         }
       }
@@ -1882,6 +1928,7 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 });
 
+const WORKER_INSTANCE_ID = process.env.RENDER_INSTANCE_ID || crypto.randomUUID();
 let isWorkerRunning = false;
 async function runBackgroundWorker() {
   if (isWorkerRunning || !supabase || !TELEGRAM_BOT_TOKEN) return;
@@ -1889,25 +1936,45 @@ async function runBackgroundWorker() {
   try {
     isWorkerRunning = true;
     const { data: filters, error: filtersError } = await supabase.from('filters').select('*').order('created_at', { ascending: true });
-    const freeFilterProcessed = new Set();
+    const processedFiltersByUser = new Map();
     if (filtersError) throw filtersError;
     if (!filters || filters.length === 0) return;
 
     for (const filter of filters) {
+      const lockClient = supabaseAdmin || supabase;
+      let filterLockAcquired = false;
       try {
+        if (!lockClient) continue;
+        const { data: lockAcquired, error: lockError } = await lockClient.rpc('acquire_filter_processing_lock', {
+          p_filter_id: String(filter.id),
+          p_lock_owner: WORKER_INSTANCE_ID,
+          p_lease_seconds: 600
+        });
+        if (lockError) {
+          console.warn(`[Worker Lock] Не вдалося захопити фільтр ${filter.id}; пропускаємо цей цикл:`, lockError.message);
+          continue;
+        }
+        filterLockAcquired = lockAcquired === true;
+        if (!filterLockAcquired) continue;
+
         const { data: filterOwner, error: ownerError } = await supabase
-          .from('users').select('tariff,premium_until,is_admin,trial_started_at').eq('telegram_id', filter.user_id).maybeSingle();
+          .from('users').select('tariff,premium_until,is_admin,trial_started_at,telegram_blocked_at').eq('telegram_id', filter.user_id).maybeSingle();
         if (ownerError) {
           console.error(`Не вдалося перевірити тариф користувача для фільтра ${filter.id}:`, ownerError.message);
           continue;
         }
-        const access = deriveAccess(filterOwner || {}, filterOwner?.is_admin === true);
-        const ownerTrial = access.hasActiveTrial;
-        const ownerPremium = access.hasActivePremium;
-        if (!ownerPremium && !ownerTrial && filterOwner?.is_admin !== true) {
-          if (freeFilterProcessed.has(String(filter.user_id))) continue;
-          freeFilterProcessed.add(String(filter.user_id));
+        if (filterOwner?.telegram_blocked_at) {
+          console.log(`[Worker] Користувач ${filter.user_id} заблокував бота; фільтр ${filter.id} пропущено.`);
+          continue;
         }
+        const access = deriveAccess(filterOwner || {}, filterOwner?.is_admin === true);
+        const userKey = String(filter.user_id);
+        const processedCount = processedFiltersByUser.get(userKey) || 0;
+        const filterLimit = filterOwner?.is_admin === true
+          ? Infinity
+          : Math.max(1, Number(access.filterLimit) || 1);
+        if (processedCount >= filterLimit) continue;
+        processedFiltersByUser.set(userKey, processedCount + 1);
         const intervalMs = access.checkIntervalMinutes * 60 * 1000;
         const lastCheckedAt = filter.last_checked_at ? Date.parse(filter.last_checked_at) : 0;
         if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0 && Date.now() - lastCheckedAt < intervalMs) continue;
@@ -2141,6 +2208,18 @@ async function runBackgroundWorker() {
         }
       } catch (fErr) {
         console.error(`Помилка воркера для фільтра ${filter.id}:`, fErr.message);
+      } finally {
+        if (filterLockAcquired && lockClient) {
+          try {
+            const { error: releaseError } = await lockClient.rpc('release_filter_processing_lock', {
+              p_filter_id: String(filter.id),
+              p_lock_owner: WORKER_INSTANCE_ID
+            });
+            if (releaseError) console.warn(`[Worker Lock] Не вдалося звільнити фільтр ${filter.id}:`, releaseError.message);
+          } catch (releaseError) {
+            console.warn(`[Worker Lock] Помилка звільнення фільтра ${filter.id}:`, releaseError.message);
+          }
+        }
       }
     }
   } catch (err) {
