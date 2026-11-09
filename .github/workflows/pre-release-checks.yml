@@ -27,3 +27,10 @@ jobs:
           name: olx-live-diagnostic
           path: olx-live-diagnostic.json
           if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: generated-package-lock
+          path: package-lock.json
+          if-no-files-found: error
