@@ -1174,18 +1174,51 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
     }
     const userId = req.telegramUser.id;
     const { query, minPrice, maxPrice, city, condition } = req.body;
-    const criteriaInput = { ...(req.body.criteria && typeof req.body.criteria === 'object' ? req.body.criteria : {}) };
-    if (condition !== undefined && condition !== null && condition !== '') criteriaInput.condition = condition;
-    if (city !== undefined && city !== null && city !== '') criteriaInput.city = city;
-    if (minPrice !== undefined && minPrice !== null && minPrice !== '') criteriaInput.minPrice = minPrice;
-    if (maxPrice !== undefined && maxPrice !== null && maxPrice !== '') criteriaInput.maxPrice = maxPrice;
-    const criteria = normalizeCriteria(criteriaInput);
-
-    if (!query || typeof query !== 'string') {
+    if (!query || typeof query !== 'string' || !query.trim()) {
       return res.status(400).json({ success: false, error: 'Введіть коректний пошуковий запит' });
     }
 
-    const cleanQuery = query.trim();
+    const rawQuery = query.trim();
+    const parsedQuery = /^https?:\/\//i.test(rawQuery) ? null : parseNaturalLanguageQuery(rawQuery);
+    const parsedCriteria = parsedQuery?.criteria || {};
+    const cleanQuery = parsedQuery?.query || rawQuery;
+    const submittedCriteria = req.body.criteria && typeof req.body.criteria === 'object'
+      ? req.body.criteria
+      : {};
+    const hasText = value => Array.isArray(value) ? value.length > 0 : String(value || '').trim().length > 0;
+    const criteriaInput = { ...parsedCriteria, ...submittedCriteria };
+
+    // Empty/default form fields must not erase constraints parsed from the
+    // original sentence. Non-empty manual values remain authoritative.
+    if (!hasText(submittedCriteria.includeTerms)) criteriaInput.includeTerms = parsedCriteria.includeTerms || [];
+    if (!hasText(submittedCriteria.anyTerms)) criteriaInput.anyTerms = parsedCriteria.anyTerms || [];
+    if (!hasText(submittedCriteria.excludeTerms)) criteriaInput.excludeTerms = parsedCriteria.excludeTerms || [];
+    if (!hasText(submittedCriteria.modelTerm)) criteriaInput.modelTerm = parsedCriteria.modelTerm || '';
+    if (!submittedCriteria.includeTermsMode || submittedCriteria.includeTermsMode === 'all') {
+      criteriaInput.includeTermsMode = parsedCriteria.includeTermsMode || submittedCriteria.includeTermsMode || 'all';
+    }
+    if (!submittedCriteria.photosOnly) criteriaInput.photosOnly = parsedCriteria.photosOnly === true;
+    if (!Number(submittedCriteria.maxAgeMinutes)) criteriaInput.maxAgeMinutes = parsedCriteria.maxAgeMinutes || 0;
+
+    const explicitCity = typeof city === 'string' ? city.trim() : '';
+    const allCities = !explicitCity || ['всі міста', 'все міста', 'вся україна', 'уся україна']
+      .includes(normalizeLocationText(explicitCity));
+    criteriaInput.city = allCities ? (parsedCriteria.city || explicitCity) : explicitCity;
+
+    const explicitCondition = String(condition || '').trim().toLowerCase();
+    criteriaInput.condition = explicitCondition && explicitCondition !== 'all'
+      ? explicitCondition
+      : (parsedCriteria.condition || 'all');
+
+    const explicitMinPrice = minPrice !== undefined && minPrice !== null && minPrice !== '' && Number(minPrice) > 0
+      ? minPrice
+      : (parsedCriteria.minPrice || 0);
+    const explicitMaxPrice = maxPrice !== undefined && maxPrice !== null && maxPrice !== '' && Number(maxPrice) > 0
+      ? maxPrice
+      : (parsedCriteria.maxPrice || 0);
+    criteriaInput.minPrice = explicitMinPrice;
+    criteriaInput.maxPrice = explicitMaxPrice;
+    const criteria = normalizeCriteria(criteriaInput);
 
     if (supabase) {
       try {
@@ -1251,15 +1284,30 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
       try {
         let targetUrl = cleanQuery;
         if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-          targetUrl = `https://www.olx.ua/uk/list/q-${encodeURIComponent(cleanQuery)}/`;
+          const storageTerms = [...criteria.includeTerms, ...criteria.anyTerms]
+            .map(term => String(term).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1])
+            .filter(Boolean);
+          const upstreamQuery = [...new Set([cleanQuery, ...storageTerms])].join(' ').trim();
+          const citySlug = getOlxCitySlug(criteria.city);
+          const searchPath = citySlug
+            ? \`https://www.olx.ua/uk/\${citySlug}/q-\${encodeURIComponent(upstreamQuery)}/\`
+            : \`https://www.olx.ua/uk/list/q-\${encodeURIComponent(upstreamQuery)}/\`;
+          targetUrl = searchPath;
         }
-        const { items } = await parseOlx(targetUrl, minPrice, maxPrice, cleanQuery);
-        if (items && items.length > 0) {
-          const initialSeen = items.map(item => ({
+        const { items } = await parseOlx(targetUrl, criteria.minPrice, criteria.maxPrice, cleanQuery, criteria.city);
+        const baselineItems = items.filter(item =>
+          locationMatches(item.locationDate, criteria.city) ||
+          (!item.locationDate && locationMatchesCardText(item.cardText, criteria.city))
+        );
+        if (baselineItems.length > 0) {
+          const initialSeen = baselineItems.map(item => ({
             filter_id: createdFilter.id,
             ad_link: item.link
           }));
-          const { error: warmupInsertError } = await supabase.from('seen_ads').insert(initialSeen);
+          const { error: warmupInsertError } = await supabase.from('seen_ads').upsert(initialSeen, {
+            onConflict: 'filter_id,ad_link',
+            ignoreDuplicates: true
+          });
           if (warmupInsertError) console.error('[Warmup Warning] Не вдалося позначити початкові оголошення:', warmupInsertError.message);
         }
       } catch (warmupErr) {
