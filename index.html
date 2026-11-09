@@ -974,6 +974,14 @@
       }
     });
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     function getFavorites() {
       return JSON.parse(localStorage.getItem('olx_favorites') || '[]');
     }
@@ -1359,13 +1367,13 @@
           <div class="flex items-center gap-3">
             <div class="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center text-sm">🔍</div>
             <div>
-              <div class="text-xs font-semibold text-white">${f.query}</div>
+              <div class="text-xs font-semibold text-white">${escapeHtml(f.query)}</div>
               <div class="text-[10px] text-gray-400">
-                ${(f.max_price || f.maxPrice) ? 'до ' + parseInt(f.max_price || f.maxPrice).toLocaleString('uk-UA') + ' грн' : 'Без ліміту'} • ${f.city || 'Всі міста'}
+                ${(f.max_price || f.maxPrice) ? 'до ' + parseInt(f.max_price || f.maxPrice).toLocaleString('uk-UA') + ' грн' : 'Без ліміту'} • ${escapeHtml(f.city || 'Всі міста')}
               </div>
             </div>
           </div>
-          <button onclick="deleteActiveFilter(${f.id})" class="text-xs text-red-400 hover:text-red-300 p-1">✕</button>
+          <button data-filter-id="${escapeHtml(f.id)}" onclick="deleteActiveFilter(this.dataset.filterId)" class="text-xs text-red-400 hover:text-red-300 p-1">✕</button>
         </div>
       `).join('');
     }
@@ -1403,22 +1411,30 @@
         return;
       }
 
-      listDiv.innerHTML = favs.map(item => `
-        <div class="p-3 rounded-2xl bg-gray-900 border border-gray-800 space-y-2">
-          <div class="flex gap-3 cursor-pointer" onclick="openAdModal('${item.id}')">
-            <img src="${item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-16 h-16 object-cover rounded-xl bg-gray-800 flex-shrink-0">
-            <div class="flex-1 min-w-0">
-              <div class="text-xs font-semibold text-white truncate">${item.title}</div>
-              <div class="text-sm font-bold text-emerald-400 mt-0.5">${item.priceText}</div>
-              <div class="text-[10px] text-gray-400 mt-1 truncate">${item.locationDate || ''}</div>
+      listDiv.innerHTML = favs.map(item => {
+        const favoriteId = escapeHtml(item.id || '');
+        const favoriteLink = escapeHtml(item.link || '');
+        const favoriteImage = escapeHtml(item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`);
+        const favoriteTitle = escapeHtml(item.title || '');
+        const favoritePrice = escapeHtml(item.priceText || '');
+        const favoriteLocation = escapeHtml(item.locationDate || '');
+        return `
+          <div class="p-3 rounded-2xl bg-gray-900 border border-gray-800 space-y-2">
+            <div class="flex gap-3 cursor-pointer" data-ad-id="${favoriteId}" onclick="openAdModal(this.dataset.adId)">
+              <img src="${favoriteImage}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-16 h-16 object-cover rounded-xl bg-gray-800 flex-shrink-0">
+              <div class="flex-1 min-w-0">
+                <div class="text-xs font-semibold text-white truncate">${favoriteTitle}</div>
+                <div class="text-sm font-bold text-emerald-400 mt-0.5">${favoritePrice}</div>
+                <div class="text-[10px] text-gray-400 mt-1 truncate">${favoriteLocation}</div>
+              </div>
+            </div>
+            <div class="flex gap-2 pt-1 border-t border-gray-800/60">
+              <a href="${favoriteLink}" target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-1.5 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded-xl text-[11px] font-medium">Відкрити на OLX</a>
+              <button data-favorite-link="${favoriteLink}" onclick="toggleFavorite(this.dataset.favoriteLink)" class="px-3 py-1.5 bg-red-950/60 text-red-400 border border-red-800/60 rounded-xl text-[11px]">Видалити</button>
             </div>
           </div>
-          <div class="flex gap-2 pt-1 border-t border-gray-800/60">
-            <a href="${item.link}" target="_blank" class="flex-1 text-center py-1.5 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded-xl text-[11px] font-medium">Відкрити на OLX</a>
-            <button onclick="toggleFavorite('${item.link}')" class="px-3 py-1.5 bg-red-950/60 text-red-400 border border-red-800/60 rounded-xl text-[11px]">Видалити</button>
-          </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     function switchTab(tabName) {
@@ -1490,22 +1506,26 @@
         const isCheap = item.price > 0 && window.lastAvgPrice > 0 && item.price < window.lastAvgPrice * 0.85;
         const discount = isCheap ? Math.round((1 - item.price / window.lastAvgPrice) * 100) : 0;
         const isFav = favs.some(f => f.link === item.link);
-        const imgSrc = item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`;
+        const imgSrc = escapeHtml(item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`);
+        const itemId = escapeHtml(item.id || '');
+        const itemLink = escapeHtml(item.link || '');
+        const itemTitle = escapeHtml(item.title || '');
+        const itemPrice = escapeHtml(item.priceText || '');
+        const itemLocation = escapeHtml(item.locationDate || '');
 
         return `
           <div class="p-3 rounded-2xl bg-gray-900 border ${isCheap ? 'border-emerald-500/80 bg-emerald-950/10' : 'border-gray-800'} space-y-2">
-            <div onclick="openAdModal('${item.id}')" class="flex gap-3 cursor-pointer">
+            <div data-ad-id="${itemId}" onclick="openAdModal(this.dataset.adId)" class="flex gap-3 cursor-pointer">
               <img src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-20 h-20 object-cover rounded-xl bg-gray-800 flex-shrink-0">
               <div class="flex-1 min-w-0">
-                <div class="text-xs font-semibold text-white truncate">${item.title}</div>
-                <div class="text-base font-bold ${isCheap ? 'text-emerald-400' : 'text-white'} mt-1">${item.priceText}</div>
-                <div class="text-[10px] text-gray-400 mt-1 truncate">${item.locationDate || ''}</div>
+                <div class="text-xs font-semibold text-white truncate">${itemTitle}</div>
+                <div class="text-base font-bold ${isCheap ? 'text-emerald-400' : 'text-white'} mt-1">${itemPrice}</div>
+                <div class="text-[10px] text-gray-400 mt-1 truncate">${itemLocation}</div>
               </div>
             </div>
-            
             <div class="flex items-center justify-between pt-2 border-t border-gray-800/80">
               ${isCheap ? `<span class="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded-lg border border-emerald-800 font-medium">🔥 Нижче ринку на ${discount}%</span>` : '<span></span>'}
-              <button onclick="toggleFavorite('${item.link}')" class="text-xs px-2.5 py-1 rounded-xl bg-gray-800 border ${isFav ? 'border-red-500 text-red-400' : 'border-gray-700 text-gray-300'} font-medium">
+              <button data-favorite-link="${itemLink}" onclick="toggleFavorite(this.dataset.favoriteLink)" class="text-xs px-2.5 py-1 rounded-xl bg-gray-800 border ${isFav ? 'border-red-500 text-red-400' : 'border-gray-700 text-gray-300'} font-medium">
                 ${isFav ? '❤️ В Обраному' : '🤍 Додати в Обране'}
               </button>
             </div>
@@ -1528,7 +1548,7 @@
       (criteria.includeTerms || []).forEach(term => labels.push('Умова: ' + term));
       if (criteria.photosOnly) labels.push('Лише з фото');
       chips.innerHTML = labels.map(label => '<span class="px-2 py-1 rounded-lg bg-gray-800 border border-gray-700 text-[10px] text-gray-200">' +
-        label.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>').join('');
+        escapeHtml(label) + '</span>').join('');
       box.classList.remove('hidden');
     }
 
@@ -1611,7 +1631,7 @@
         const data = await res.json();
         if (!res.ok || data.success === false) {
           resultsDiv.innerHTML = '<div class="text-center text-red-400 py-6 bg-gray-900 rounded-2xl border border-gray-800">' +
-            (data.error || 'Не вдалося виконати пошук. Спробуйте ще раз.') + '</div>';
+            escapeHtml(data.error || 'Не вдалося виконати пошук. Спробуйте ще раз.') + '</div>';
           analyticsDiv.classList.add('hidden');
           return;
         }
@@ -1629,7 +1649,7 @@
       } catch (err) {
         console.error('[AI Search]', err);
         resultsDiv.innerHTML = '<div class="text-center text-red-400 py-4 bg-gray-900 rounded-2xl border border-gray-800">' +
-          String(err.message || 'Помилка з’єднання з сервером.').replace(/</g, '&lt;') + '</div>';
+          escapeHtml(err.message || 'Помилка з’єднання з сервером.') + '</div>';
       } finally {
         btn.disabled = false;
         btn.innerText = '✨ Знайти через ШІ';
