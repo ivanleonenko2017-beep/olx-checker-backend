@@ -286,3 +286,64 @@ test('iPhone 11 regression: standalone Chernihiv after a comma and maximum price
   assert.equal(parsed.criteria.maxPrice, 10000);
 });
 
+
+
+test('parses base iPhone model and excludes Plus/Pro/Pro Max and demand/accessory listings', () => {
+  const parsed = parseNaturalLanguageQuery('куплю айфон 14 на 256 в Чернигове');
+  assert.equal(parsed.query, 'айфон 14');
+  assert.equal(parsed.criteria.modelTerm, 'iPhone 14');
+  assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
+  assert.equal(parsed.criteria.city, 'Чернігів');
+
+  assert.equal(applyCriteriaToListing({
+    title: 'Продам Apple iPhone 14 256GB',
+    cardText: 'Apple iPhone 14 256GB 18 000 грн Чернігів',
+    price: 18000
+  }, parsed.criteria).matches, true);
+
+  for (const title of [
+    'Apple iPhone 14 Plus 256GB',
+    'Apple iPhone 14 Pro 256GB',
+    'Apple iPhone 14 Pro Max 256GB',
+    'Apple iPhone 14 Max 256GB',
+    'Apple iPhone 14 Mini 256GB'
+  ]) {
+    assert.equal(applyCriteriaToListing({ title, price: 18000 }, parsed.criteria).reason, 'model_mismatch', title);
+  }
+
+  assert.equal(applyCriteriaToListing({
+    title: 'Куплю iPhone 14 256GB',
+    price: 100
+  }, parsed.criteria).reason, 'wrong_product_type');
+
+  assert.equal(applyCriteriaToListing({
+    title: 'Чохол на iPhone 14',
+    price: 100
+  }, { modelTerm: 'iPhone 14' }).reason, 'wrong_product_type');
+});
+
+test('parses Pro Max as an exact iPhone modification and accepts shorthand capacity', () => {
+  const parsed = parseNaturalLanguageQuery('iPhone 15 Pro Max 256');
+  assert.equal(parsed.query, 'iPhone 15 Pro Max');
+  assert.equal(parsed.criteria.modelTerm, 'iPhone 15 Pro Max');
+  assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
+
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 15 Pro Max 256GB',
+    price: 30000
+  }, parsed.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 15 Pro 256GB',
+    price: 30000
+  }, parsed.criteria).reason, 'model_mismatch');
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 15 256GB',
+    price: 30000
+  }, parsed.criteria).reason, 'model_mismatch');
+});
+
+test('does not invent an iPhone model constraint for unrelated product queries', () => {
+  const parsed = parseNaturalLanguageQuery('телефон Samsung 256 ГБ');
+  assert.equal(parsed.criteria.modelTerm, '');
+  assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
+});
