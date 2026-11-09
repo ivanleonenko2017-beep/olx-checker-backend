@@ -1183,6 +1183,8 @@
 
         const criteria = data.criteria || {};
         input.value = data.query || query;
+        window.currentParsedFilterCriteria = { ...criteria };
+        window.currentParsedFilterQuery = input.value;
 
         // Apply only criteria actually inferred from the sentence; don't reset
         // manually chosen form values just because the parser returned defaults.
@@ -1236,6 +1238,9 @@
         bargainHunter: document.getElementById('modalBargainHunter').checked,
         maxDiscountPercent: Number(document.getElementById('modalDiscountPercent').value) || 15,
         minComparableListings: Number(document.getElementById('modalComparableListings').value) || 5,
+        modelTerm: window.currentParsedFilterQuery === query
+          ? String(window.currentParsedFilterCriteria?.modelTerm || '')
+          : '',
         condition, city, minPrice: Number(minPrice) || 0, maxPrice: Number(maxPrice) || 0
       };
 
@@ -1308,6 +1313,8 @@
       }
 
       closeAddFilterModal();
+      window.currentParsedFilterCriteria = null;
+      window.currentParsedFilterQuery = '';
       saveBtn.disabled = false;
       saveBtn.innerText = 'Зберегти та запустити відстеження';
       
@@ -1564,6 +1571,8 @@
         }
 
         const criteria = parsed.criteria || {};
+        window.currentParsedFilterCriteria = { ...criteria };
+        window.currentParsedFilterQuery = parsed.query || inputVal;
         if (!minPriceInput.value && criteria.minPrice) minPriceInput.value = criteria.minPrice;
         if (!maxPriceInput.value && criteria.maxPrice) maxPriceInput.value = criteria.maxPrice;
         if (!cityInput.value && criteria.city) cityInput.value = criteria.city;
