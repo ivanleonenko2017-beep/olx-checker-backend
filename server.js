@@ -1895,14 +1895,17 @@ async function runBackgroundWorker() {
         const lastCheckedAt = filter.last_checked_at ? Date.parse(filter.last_checked_at) : 0;
         if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0 && Date.now() - lastCheckedAt < intervalMs) continue;
 
+        const storedQuery = filter.query ? String(filter.query).trim() : '';
+        const parsedStoredQuery = /^https?:\/\//i.test(storedQuery) ? null : parseNaturalLanguageQuery(storedQuery);
         const criteria = normalizeCriteria({
+          ...(parsedStoredQuery?.criteria || {}),
           ...(filter.criteria || {}),
           minPrice: filter.min_price,
           maxPrice: filter.max_price,
           city: filter.city,
           condition: filter.condition
         });
-        let targetUrl = filter.query ? filter.query.trim() : '';
+        let targetUrl = parsedStoredQuery?.query || storedQuery;
 
         if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
           const storageQueryTerms = [...criteria.includeTerms, ...criteria.anyTerms]
