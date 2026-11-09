@@ -2,7 +2,7 @@ name: OLX live diagnostic (temporary)
 on:
   push:
     branches:
-      - fix/znaydeno-search-release-hardening-2026-11-09
+      - pre-release/olx-live-diagnostic-2026-11-09
   workflow_dispatch:
 jobs:
   olx-live-diagnostic:
