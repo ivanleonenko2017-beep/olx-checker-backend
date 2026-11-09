@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { applyCriteriaToListing, canUseUnverifiedStorageFallback } = require('./smart-search');
 
 const SENSITIVE_QUERY_KEYS = /^(?:token|access_token|auth|authorization|hash|signature|password|passwd|secret|initdata|user|cookie|session)$/i;
 
@@ -42,4 +43,58 @@ function compactRejectedCards(cards, limit = 25) {
   };
 }
 
-module.exports = { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards };
+
+function evaluateCriteriaFunnel(items, criteria = {}) {
+  const stages = [
+    ['model', { modelTerm: criteria.modelTerm }],
+    ['memory', {
+      includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
+      includeTermsMode: criteria.includeTermsMode
+    }],
+    ['excluded_words', { excludeTerms: criteria.excludeTerms }],
+    ['price', { minPrice: criteria.minPrice, maxPrice: criteria.maxPrice }],
+    ['condition', { condition: criteria.condition }],
+    ['other', { maxAgeMinutes: criteria.maxAgeMinutes, photosOnly: criteria.photosOnly }]
+  ];
+  let current = Array.isArray(items) ? items : [];
+  const counts = { parsedAfterCity: current.length };
+  const rejected = [];
+  let capacityUnverified = 0;
+
+  for (const [stage, stageCriteria] of stages) {
+    if (stage === 'memory') {
+      const strict = [];
+      for (const item of current) {
+        const result = applyCriteriaToListing(item, stageCriteria);
+        if (result.matches) {
+          strict.push(item);
+          continue;
+        }
+        if (result.reason === 'missing_required_term' &&
+            canUseUnverifiedStorageFallback(item, criteria)) {
+          strict.push(item);
+          capacityUnverified++;
+          continue;
+        }
+        rejected.push({ item, stage, reason: result.reason || 'memory_mismatch' });
+      }
+      current = strict;
+      counts.afterMemoryStrict = current.length - capacityUnverified;
+      counts.afterMemoryIncludingUnverified = current.length;
+      continue;
+    }
+
+    const passed = [];
+    for (const item of current) {
+      const result = applyCriteriaToListing(item, stageCriteria);
+      if (result.matches) passed.push(item);
+      else rejected.push({ item, stage, reason: result.reason || stage + '_mismatch' });
+    }
+    current = passed;
+    counts['after_' + stage] = current.length;
+  }
+
+  return { counts, capacityUnverified, finalCount: current.length, rejected };
+}
+
+module.exports = { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards, evaluateCriteriaFunnel };
