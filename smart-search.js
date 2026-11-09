@@ -77,7 +77,7 @@ function normalizePhoneVariant(value = '') {
 
 function parsePhoneModelDescriptor(value = '') {
   const match = String(value || '').match(
-    /(?:iphone|айфон|іфон|ифон)\s*(\d{1,2})(?:\s*(pro\s*max|pro|max|plus|mini|про\s*макс|про|макс|плюс|міні|мини))?(?=$|[^\p{L}\p{N}])/iu
+    /(?:iphone|apple(?:\s*iphone)?|айфон|іфон|ифон)\s*(\d{1,2})(?:\s*(pro\s*max|pro|max|plus|mini|про\s*макс|про|макс|плюс|міні|мини))?(?=$|[^\p{L}\p{N}])/iu
   );
   if (!match) return null;
   return {
