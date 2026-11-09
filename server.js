@@ -10,6 +10,7 @@ const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require
 const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
+const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria } = require('./search-telemetry');
 
 const app = express();
 app.disable('x-powered-by');
@@ -473,6 +474,7 @@ function locationMatchesCardText(cardText, requestedLocation) {
 }
 
 async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
+  const pageStartedAt = Date.now();
   let response;
   try {
     response = await axios.get(targetUrl, {
@@ -487,6 +489,15 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     throw requestError;
   }
   const html = String(response.data || '');
+  const pageMeta = {
+    requestedUrl: sanitizeSearchUrl(targetUrl),
+    finalUrl: sanitizeSearchUrl(response.request?.res?.responseUrl || response.request?._redirectable?._currentUrl || targetUrl),
+    status: Number(response.status || 0),
+    durationMs: Date.now() - pageStartedAt,
+    responseBytes: Buffer.byteLength(html, 'utf8'),
+    declaredTotal: null,
+    antiBotDetected: false
+  };
   const pageText = html.toLowerCase();
   // OLX may mention captcha libraries in scripts even on normal result pages.
   // Only classify explicit HTTP blocks or clear human-verification interstitial text.
@@ -502,6 +513,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
   ];
   const matchedBlockPattern = blockPatterns.find(pattern => pattern.test(pageText));
   if (response.status === 403 || response.status === 429 || matchedBlockPattern) {
+    pageMeta.antiBotDetected = true;
     console.warn(`[OLX search] Block detected: status=${response.status}, reason=${response.status === 403 || response.status === 429 ? 'http-status' : matchedBlockPattern?.source || 'unknown'}`);
     const error = new Error('OLX тимчасово обмежив доступ до пошуку. Спробуйте пізніше.');
     error.code = 'OLX_BLOCKED';
@@ -553,7 +565,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     }
   });
   const supplementalCardCount = Math.max(0, cards.length - primaryCardCount);
-  const parserStats = { skippedNoTitle: 0, skippedNoPrice: 0, skippedDuplicate: 0, skippedInvalidLink: 0, maxItemsReached: false };
+  const parserStats = { primaryCards: primaryCardCount, supplementalCards: supplementalCardCount, adLinksFound, skippedNoTitle: 0, skippedNoPrice: 0, skippedDuplicate: 0, skippedInvalidLink: 0, maxItemsReached: false };
   const seenAdLinks = new Set();
 
   cards.each((index, element) => {
@@ -685,17 +697,31 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     throw error;
   }
 
-  return { items: rawItems, averagePrice, parserStats };
+  return { items: rawItems, averagePrice, parserStats, pageMeta };
 }
 
-async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLocation = '') {
+async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLocation = '', traceContext = {}) {
+  const requestId = String(traceContext.requestId || crypto.randomBytes(6).toString('hex')).slice(0, 16);
+  const source = ['manual', 'background', 'filter_warmup', 'diagnostic'].includes(traceContext.source)
+    ? traceContext.source : 'unknown';
+  const userHash = hashUserId(traceContext.userId, TELEGRAM_WEBHOOK_SECRET);
+  const criteriaSummary = summarizeCriteria(traceContext.criteria || {});
   const cityScoped = Boolean(String(requestedLocation || '').trim()) && !/^https?:\/\//i.test(String(query || '').trim());
   const configuredPageLimit = Number.parseInt(process.env.OLX_SEARCH_MAX_PAGES || '2', 10);
   const pageLimit = cityScoped
     ? Math.min(3, Math.max(1, Number.isFinite(configuredPageLimit) ? configuredPageLimit : 2))
     : 1;
   const pages = [];
+  const pageTraces = [];
   let previousUniqueCount = 0;
+  let stopReason = 'page_limit';
+  const startedAt = new Date().toISOString();
+  console.log('[SEARCH_TRACE] ' + JSON.stringify({
+    event: 'search_start', requestId, at: startedAt, source, userHash,
+    queryHash: hashUserId(query, TELEGRAM_WEBHOOK_SECRET), criteria: criteriaSummary,
+    requestedLocation: safeText(requestedLocation, 80),
+    targetUrl: sanitizeSearchUrl(targetUrl), pageLimit
+  }));
 
   for (let page = 1; page <= pageLimit; page++) {
     const pageUrl = page === 1 ? targetUrl : buildOlxPageUrl(targetUrl, page);
@@ -703,19 +729,50 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
       const result = await parseOlxPage(pageUrl, minPrice, maxPrice, query);
       pages.push(result.items);
       const merged = mergeUniqueOlxItems(pages, 600);
-      console.log(`[OLX pagination] page=${page}/${pageLimit} pageItems=${result.items.length} uniqueTotal=${merged.length} city=${JSON.stringify(requestedLocation || '')}`);
-      if (result.items.length === 0 || merged.length === previousUniqueCount) break;
+      const newAfterDedup = Math.max(0, merged.length - previousUniqueCount);
+      const pageTrace = {
+        at: new Date().toISOString(), page, requestedUrl: result.pageMeta?.requestedUrl || sanitizeSearchUrl(pageUrl),
+        finalUrl: result.pageMeta?.finalUrl || sanitizeSearchUrl(pageUrl),
+        httpStatus: result.pageMeta?.status || null,
+        durationMs: result.pageMeta?.durationMs ?? null,
+        responseBytes: result.pageMeta?.responseBytes ?? null,
+        antiBotDetected: Boolean(result.pageMeta?.antiBotDetected),
+        declaredTotal: result.pageMeta?.declaredTotal ?? null,
+        cardsOnPage: (result.parserStats?.primaryCards || 0) + (result.parserStats?.supplementalCards || 0),
+        cardsParsed: result.items.length, newAfterDedup,
+        uniqueTotal: merged.length, parserStats: result.parserStats || {}
+      };
+      pageTraces.push(pageTrace);
+      console.log('[SEARCH_TRACE] ' + JSON.stringify({
+        event: 'search_page', requestId, source, ...pageTrace
+      }));
+      if (result.items.length === 0) { stopReason = 'empty_page'; break; }
+      if (merged.length === previousUniqueCount) { stopReason = 'no_new_unique_cards'; break; }
       previousUniqueCount = merged.length;
     } catch (error) {
+      stopReason = error.response?.status === 429 ? 'http_429' :
+        (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT' ? 'timeout' : 'upstream_error');
+      console.error('[SEARCH_TRACE] ' + JSON.stringify({
+        event: 'search_page_error', requestId, source, page,
+        requestedUrl: sanitizeSearchUrl(pageUrl),
+        httpStatus: Number(error.response?.status || 0) || null,
+        errorCode: safeText(error.code || 'UPSTREAM_ERROR', 48),
+        stopReason, antiBotDetected: error.code === 'OLX_BLOCKED' || [403, 429].includes(Number(error.response?.status || 0))
+      }));
       if (page === 1) throw error;
-      console.warn(`[OLX pagination] Page ${page} failed; keeping earlier results: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}`);
       break;
     }
   }
 
   const items = mergeUniqueOlxItems(pages, 600);
   const prices = items.map(item => item.price).filter(price => Number.isFinite(price) && price > 0);
-  return { items, averagePrice: prices.length >= 5 ? median(prices) : 0 };
+  console.log('[SEARCH_TRACE] ' + JSON.stringify({
+    event: 'search_pages_complete', requestId, source,
+    pageCount: pageTraces.length, pageLimit, stopReason,
+    parsedAcrossPages: pageTraces.reduce((sum, p) => sum + p.cardsParsed, 0),
+    afterDedup: items.length, pages: pageTraces
+  }));
+  return { items, averagePrice: prices.length >= 5 ? median(prices) : 0, requestId, pageTraces, stopReason };
 }
 
 
@@ -937,7 +994,12 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     if (!targetUrl) return res.status(400).json({ error: 'Укажіть пошуковий запит' });
 
     const requestedLocation = String(city || '').trim();
-    const { items: parsedItems } = await parseOlx(targetUrl, minPrice, maxPrice, query, requestedLocation);
+    const searchTrace = { source: 'manual', userId: req.telegramUser.id, criteria: {
+      modelTerm: criteria.modelTerm || '', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
+      excludeTerms: criteria.excludeTerms, condition: criteria.condition, city: criteria.city,
+      minPrice: criteria.minPrice, maxPrice: criteria.maxPrice
+    }};
+    const { items: parsedItems, requestId } = await parseOlx(targetUrl, minPrice, maxPrice, query, requestedLocation, searchTrace);
     // OLX card markup is inconsistent: the dedicated location node can be
     // absent or point at a date/metadata wrapper. Search the complete visible
     // card text as a fallback before dropping an otherwise valid local result.
@@ -962,8 +1024,20 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
         candidates: locationDiagnostics
       }));
     }
+    const cityRejected = parsedItems.filter(item => !(
+      locationMatches(item.locationDate, requestedLocation) ||
+      (!item.locationDate && locationMatchesCardText(item.cardText, requestedLocation))
+    ));
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
     if (requestedCondition !== 'all') criteria.condition = requestedCondition;
+    const cityRejectedCards = cityRejected.map(item => ({
+      listingKey: hashUserId(item.link, TELEGRAM_WEBHOOK_SECRET),
+      url: sanitizeSearchUrl(item.link),
+      stage: 'city',
+      reason: 'city_mismatch',
+      value: safeText(item.locationDate || item.cardText, 100)
+    }));
+
 
     // Storage is often absent from OLX search cards and exists only on the
     // individual ad page. Enrich matching iPhone candidates before rejecting
@@ -991,7 +1065,9 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       await Promise.all(workers);
     }
 
+    const stagedFunnel = evaluateCriteriaFunnel(locationItems, criteria);
     const rejectionReasons = {};
+    const rejectedCards = [...cityRejectedCards];
     const items = locationItems.filter(item => {
       const result = applyCriteriaToListing(item, criteria);
       if (result.matches) return true;
@@ -1007,6 +1083,18 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       }
 
       rejectionReasons[result.reason] = (rejectionReasons[result.reason] || 0) + 1;
+      rejectedCards.push({
+        listingKey: hashUserId(item.link, TELEGRAM_WEBHOOK_SECRET),
+        url: sanitizeSearchUrl(item.link), stage: ({
+          model_mismatch: 'model', wrong_product_type: 'model',
+          missing_required_term: storageRequirements.length ? 'memory_or_required_terms' : 'required_terms',
+          missing_any_alternative: 'required_terms', condition_mismatch: 'condition',
+          below_min_price: 'price', above_max_price: 'price', excluded_term: 'excluded_words'
+        })[result.reason] || 'other',
+        reason: result.reason,
+        value: safeText(result.reason === 'below_min_price' || result.reason === 'above_max_price'
+          ? String(item.price || '') : item.title, 100)
+      });
       return false;
     });
     const comparablePriceValues = items
@@ -1014,10 +1102,23 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       .map(item => Number(item.price))
       .filter(price => Number.isFinite(price) && price > 0);
     const matchingAveragePrice = comparablePriceValues.length >= 5 ? median(comparablePriceValues) : 0;
-    console.log('[API search] Completed: parsed=' + parsedItems.length + ', cityMatched=' + locationItems.length + ', detailsEnriched=' + detailsEnriched + ', returned=' + items.length + ', rejected=' + JSON.stringify(rejectionReasons) + ', city=' + JSON.stringify(requestedLocation) + ', url=' + targetUrl + ', smart=' + Boolean(parsedNaturalQuery) + ', durationMs=' + (Date.now() - startedAt));
+    console.log('[SEARCH_TRACE] ' + JSON.stringify({
+      event: 'search_funnel', requestId, source: 'manual',
+      parsed: parsedItems.length, afterDedup: parsedItems.length,
+      afterAdsOnly: parsedItems.length, afterCity: locationItems.length,
+      afterCriteria: items.length, criteriaStages: stagedFunnel.counts, detailsEnriched,
+      capacityUnverified: items.filter(item => item.capacityUnverified === true).length,
+      cityUnverified: items.filter(item => !item.locationDate && locationMatchesCardText(item.cardText, requestedLocation)).length,
+      rejectedByReason: rejectionReasons,
+      rejectedCards: compactRejectedCards(rejectedCards, 25).cards,
+      rejectedCardsOmitted: compactRejectedCards(rejectedCards, 25).omitted,
+      durationMs: Date.now() - startedAt
+    }));
+    console.log('[API search] Completed: parsed=' + parsedItems.length + ', cityMatched=' + locationItems.length + ', detailsEnriched=' + detailsEnriched + ', returned=' + items.length + ', rejected=' + JSON.stringify(rejectionReasons) + ', city=' + JSON.stringify(requestedLocation) + ', url=' + sanitizeSearchUrl(targetUrl) + ', smart=' + Boolean(parsedNaturalQuery) + ', requestId=' + requestId + ', durationMs=' + (Date.now() - startedAt));
     res.json({
       success: true,
       count: items.length,
+      searchRequestId: requestId,
       averagePrice: matchingAveragePrice,
       items,
       plan: access.plan,
@@ -1027,7 +1128,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       ...(parsedNaturalQuery ? { parsedQuery: parsedNaturalQuery.query, criteria: parsedCriteria } : {})
     });
   } catch (error) {
-    console.error(`[API search] Failed: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}, message=${String(error.message || 'unknown').slice(0, 180)}, durationMs=${Date.now() - startedAt}`);
+    console.error(`[API search] Failed: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}, durationMs=${Date.now() - startedAt}`);
     if (error.code === 'OLX_BLOCKED') {
       return res.status(503).json({ success: false, error: error.message });
     }
@@ -1340,7 +1441,7 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
             : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
           targetUrl = searchPath;
         }
-        const { items } = await parseOlx(targetUrl, criteria.minPrice, criteria.maxPrice, cleanQuery, criteria.city);
+        const { items } = await parseOlx(targetUrl, criteria.minPrice, criteria.maxPrice, cleanQuery, criteria.city, { source: 'filter_warmup', userId: req.telegramUser.id, criteria });
         const baselineItems = items.filter(item =>
           locationMatches(item.locationDate, criteria.city) ||
           (!item.locationDate && locationMatchesCardText(item.cardText, criteria.city))
@@ -1447,6 +1548,105 @@ app.get('/api/legal/privacy', (_req, res) => {
       'Запити щодо даних: @esqide.'
     ].join('\n')
   });
+});
+
+const searchDiagnosticRateLimits = new Map();
+app.post('/api/admin/search-diagnostics', adminAuthMiddleware, async (req, res) => {
+  const rawQuery = typeof req.body?.query === 'string' ? req.body.query.trim().slice(0, 300) : '';
+  if (!rawQuery) return res.status(400).json({ success: false, error: 'Укажіть пошуковий запит' });
+  const adminKey = hashUserId(req.adminUser.id, TELEGRAM_WEBHOOK_SECRET) || 'admin';
+  const lastRunAt = searchDiagnosticRateLimits.get(adminKey) || 0;
+  const now = Date.now();
+  if (now - lastRunAt < 60000) {
+    return res.status(429).json({ success: false, error: 'Діагностика доступна не частіше одного разу на хвилину' });
+  }
+  searchDiagnosticRateLimits.set(adminKey, now);
+  if (searchDiagnosticRateLimits.size > 1000) {
+    for (const [key, timestamp] of searchDiagnosticRateLimits) {
+      if (now - timestamp > 10 * 60000) searchDiagnosticRateLimits.delete(key);
+    }
+  }
+
+  const requestId = crypto.randomBytes(6).toString('hex');
+  const startedAt = Date.now();
+  try {
+    const parsed = parseNaturalLanguageQuery(rawQuery);
+    const criteria = normalizeCriteria(parsed.criteria);
+    const city = criteria.city || '';
+    const storageTerms = [...criteria.includeTerms, ...criteria.anyTerms]
+      .map(term => String(term).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1]).filter(Boolean);
+    const upstreamQuery = [...new Set([parsed.query, ...storageTerms])].join(' ').trim();
+    const citySlug = city ? getOlxCitySlug(city) : '';
+    const searchPath = citySlug
+      ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(upstreamQuery)}/`
+      : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
+    const { items: parsedItems, pageTraces, stopReason } = await parseOlx(
+      searchPath, criteria.minPrice, criteria.maxPrice, parsed.query, city,
+      { source: 'diagnostic', userId: req.adminUser.id, requestId, criteria }
+    );
+    const cityItems = parsedItems.filter(item =>
+      locationMatches(item.locationDate, city) ||
+      (!item.locationDate && locationMatchesCardText(item.cardText, city))
+    );
+    if (storageTerms.length) {
+      const candidates = cityItems.filter(item =>
+        /(?:iphone|айфон)/iu.test(String(item.title || '')) &&
+        applyCriteriaToListing(item, criteria).reason === 'missing_required_term'
+      ).slice(0, 5);
+      for (const item of candidates) {
+        const detailContext = await fetchListingDescription(item.link);
+        if (detailContext) item.description = [item.description, detailContext].filter(Boolean).join(' ');
+      }
+    }
+    const funnel = evaluateCriteriaFunnel(cityItems, criteria);
+    const results = cityItems.filter(item => {
+      const match = applyCriteriaToListing(item, criteria);
+      return match.matches || (match.reason === 'missing_required_term' &&
+        storageTerms.length > 0 && canUseUnverifiedStorageFallback(item, criteria));
+    }).map(item => ({
+      title: safeText(item.title, 120), url: sanitizeSearchUrl(item.link),
+      price: item.price, capacityUnverified: !applyCriteriaToListing(item, criteria).matches
+    }));
+    const cityRejected = parsedItems.filter(item => !cityItems.includes(item)).map(item => ({
+      listingKey: hashUserId(item.link, TELEGRAM_WEBHOOK_SECRET), url: sanitizeSearchUrl(item.link),
+      stage: 'city', reason: 'city_mismatch', value: safeText(item.locationDate || item.cardText, 100)
+    }));
+    const criteriaRejected = funnel.rejected.map(entry => ({
+      listingKey: hashUserId(entry.item.link, TELEGRAM_WEBHOOK_SECRET),
+      url: sanitizeSearchUrl(entry.item.link), stage: entry.stage,
+      reason: entry.reason, value: safeText(entry.stage === 'price' ? entry.item.price : entry.item.title, 100)
+    }));
+    const rejected = compactRejectedCards([...cityRejected, ...criteriaRejected], 25);
+    console.log('[SEARCH_TRACE] ' + JSON.stringify({
+      event: 'search_funnel', requestId, source: 'diagnostic',
+      parsed: parsedItems.length, afterDedup: parsedItems.length, afterAdsOnly: parsedItems.length,
+      afterCity: cityItems.length, criteriaStages: funnel.counts,
+      finalCount: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length,
+      rejectedCards: rejected.cards, rejectedCardsOmitted: rejected.omitted,
+      durationMs: Date.now() - startedAt
+    }));
+    return res.json({
+      success: true, requestId, source: 'diagnostic', parsedQuery: parsed.query,
+      criteria: { model: criteria.modelTerm, memory: storageTerms, condition: criteria.condition,
+        city, minPrice: criteria.minPrice, maxPrice: criteria.maxPrice, exclusions: criteria.excludeTerms },
+      pages: pageTraces, stopReason,
+      funnel: { parsed: parsedItems.length, afterDedup: parsedItems.length,
+        afterAdsOnly: parsedItems.length, afterCity: cityItems.length, ...funnel.counts,
+        final: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length },
+      rejected: { cards: rejected.cards, omitted: rejected.omitted },
+      results
+    });
+  } catch (error) {
+    console.error('[SEARCH_TRACE] ' + JSON.stringify({
+      event: 'search_diagnostic_error', requestId, source: 'diagnostic',
+      code: safeText(error.code || 'UPSTREAM_ERROR', 48),
+      httpStatus: Number(error.response?.status || 0) || null,
+      durationMs: Date.now() - startedAt
+    }));
+    return res.status(error.code === 'OLX_BLOCKED' ? 503 : 502).json({
+      success: false, requestId, error: 'Не вдалося виконати діагностичний пошук. Перевірте логи за request-id.'
+    });
+  }
 });
 
 app.get('/api/admin/stats', adminAuthMiddleware, async (req, res) => {
@@ -2011,7 +2211,7 @@ async function runBackgroundWorker() {
           console.log(`[OLX search] filter=${filter.id} cityScope=${citySlug || 'all'}`);
         }
 
-        const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city);
+        const { items: parsedItems, averagePrice, requestId: searchRequestId } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city, { source: 'background', userId: filter.user_id, criteria });
         const requestedLocation = String(filter.city || '').trim();
         // Advanced term filters need the listing page, not just the often-incomplete
         // search card. Fetch full descriptions only after date and city filtering below,
@@ -2035,6 +2235,8 @@ async function runBackgroundWorker() {
           locationMatches(item.locationDate, requestedLocation) ||
           (!item.locationDate && locationMatchesCardText(item.cardText, requestedLocation))
         );
+        const dateRejected = parsedItems.filter(item => !dateEligibleItems.includes(item));
+        const cityRejected = dateEligibleItems.filter(item => !locationEligibleItems.includes(item));
         if (needsFullDescription) {
           // Limit detail-page requests to ads that could actually be notified.
           // A small concurrency cap keeps the worker responsive without hammering OLX.
@@ -2079,7 +2281,34 @@ async function runBackgroundWorker() {
           if (!result.matches) counts[result.reason] = (counts[result.reason] || 0) + 1;
           return counts;
         }, {});
-        console.log(`[Worker Diagnostics] filter=${filter.id} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} rejected=${JSON.stringify(rejectionCounts)} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
+        const traceRejected = [
+          ...dateRejected.map(item => ({ item, stage: 'date', reason: 'not_published_today_or_seen' })),
+          ...cityRejected.map(item => ({ item, stage: 'city', reason: 'city_mismatch' })),
+          ...criteriaEvaluations.filter(result => !result.matches).map(result => ({
+            item: result.item, stage: result.reason === 'condition_mismatch' ? 'condition' :
+              (result.reason === 'below_min_price' || result.reason === 'above_max_price' ? 'price' :
+                (result.reason === 'missing_required_term' ? 'memory_or_required_terms' :
+                  (result.reason === 'model_mismatch' || result.reason === 'wrong_product_type' ? 'model' : 'other'))),
+            reason: result.reason
+          }))
+        ].map(entry => ({
+          listingKey: hashUserId(entry.item.link, TELEGRAM_WEBHOOK_SECRET),
+          url: sanitizeSearchUrl(entry.item.link), stage: entry.stage, reason: entry.reason,
+          value: safeText(entry.stage === 'city' ? entry.item.locationDate : entry.item.title, 100)
+        }));
+        console.log('[SEARCH_TRACE] ' + JSON.stringify({
+          event: 'search_funnel', requestId: searchRequestId, source: 'background',
+          parsed: parsedItems.length, afterDedup: parsedItems.length, afterAdsOnly: parsedItems.length,
+          afterDate: dateEligibleItems.length, afterCity: locationEligibleItems.length,
+          afterCriteria: items.length,
+          capacityUnverified: items.filter(item => item.capacityUnverified === true).length,
+          cityUnverified: locationEligibleItems.filter(item => !item.locationDate).length,
+          rejectedByReason: rejectionCounts,
+          rejectedCards: compactRejectedCards(traceRejected, 25).cards,
+          rejectedCardsOmitted: compactRejectedCards(traceRejected, 25).omitted,
+          knownListings: knownLinks.size
+        }));
+        console.log(`[Worker Diagnostics] filter=${filter.id} requestId=${searchRequestId} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} rejected=${JSON.stringify(rejectionCounts)} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
         const { error: checkedAtError } = await supabase.from('filters')
           .update({ last_checked_at: new Date().toISOString() }).eq('id', filter.id);
         if (checkedAtError) {
