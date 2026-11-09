@@ -1948,7 +1948,7 @@ async function runBackgroundWorker() {
         const { data: lockAcquired, error: lockError } = await lockClient.rpc('acquire_filter_processing_lock', {
           p_filter_id: String(filter.id),
           p_lock_owner: WORKER_INSTANCE_ID,
-          p_lease_seconds: 180
+          p_lease_seconds: 600
         });
         if (lockError) {
           console.warn(`[Worker Lock] Не вдалося захопити фільтр ${filter.id}; пропускаємо цей цикл:`, lockError.message);
