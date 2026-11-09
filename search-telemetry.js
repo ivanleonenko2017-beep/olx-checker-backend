@@ -25,6 +25,11 @@ function sanitizeSearchUrl(input, maxLength = 500) {
   }
 }
 
+async function isAuthorizedAdmin(user, checkAdmin) {
+  if (!user || !user.id || typeof checkAdmin !== 'function') return false;
+  try { return Boolean(await checkAdmin(user.id)); } catch { return false; }
+}
+
 function hashUserId(value, secret) {
   if (value === null || value === undefined || !String(secret || '')) return null;
   return crypto.createHmac('sha256', String(secret)).update(String(value)).digest('hex').slice(0, 12);
@@ -115,4 +120,4 @@ function evaluateCriteriaFunnel(items, criteria = {}) {
   return { counts, capacityUnverified, finalCount: current.length, rejected };
 }
 
-module.exports = { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria };
+module.exports = { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin };
