@@ -129,3 +129,12 @@ PR #37 додав модуль, що був відсутній, і unit tests. G
 ## Наступний крок
 
 Після контрольного пошуку: додати request-id і повну воронку відсіву, якщо production logs не дають per-ad причин; потім додати глобальний rate limit/TTL-кеш. Дизайн — окремим PR після стабілізації.
+
+
+## Додаткова актуалізація після PR #38
+
+- PR #38 (документація) merged у commit dfaaea2ad0793639816d42fed2f0fdec957c4d35.
+- Render deploy dep-dbp3bv142hec73d0vu40 завершився статусом Live; deployed SHA збігається з commit PR #38.
+- Startup logs після цього deploy підтвердили підключення Supabase, налаштований admin client, увімкнений worker, запуск сервера на port 10000 та реєстрацію Telegram webhook.
+- GitHub Actions для PR #38: 70 тестів пройшли, 0 впало, 0 пропущено; node --check server.js пройшов.
+- Прямий HTTP запит до /health та контрольний OLX search із Mini App досі не виконані. Статус пошуку залишається ⚠️ не вдалося перевірити в live сценарії.
