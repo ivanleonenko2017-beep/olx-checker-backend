@@ -17,3 +17,13 @@ jobs:
       - run: npm install --ignore-scripts
       - run: node --check server.js
       - run: npm test
+
+      - name: Temporary live OLX diagnostic
+        run: node scripts/olx-live-diagnostic.js
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: olx-live-diagnostic
+          path: olx-live-diagnostic.json
+          if-no-files-found: ignore
