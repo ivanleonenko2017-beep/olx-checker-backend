@@ -15,7 +15,7 @@ function sanitizeSearchUrl(input, maxLength = 500) {
     url.username = '';
     url.password = '';
     url.hash = '';
-    url.pathname = url.pathname.replace(/\\/q-[^/]+/i, '/q-[redacted]');
+    url.pathname = url.pathname.replace(/\/q-[^/]+/i, '/q-REDACTED');
     for (const key of [...url.searchParams.keys()]) {
       if (SENSITIVE_QUERY_KEYS.test(key)) url.searchParams.delete(key);
     }
@@ -32,7 +32,7 @@ function hashUserId(value, secret) {
 
 function summarizeCriteria(criteria = {}) {
   const capacity = [...(criteria.includeTerms || []), ...(criteria.anyTerms || [])]
-    .map(value => String(value).match(/^(\\d{2,4})\\s*(?:гб|gb)$/iu)?.[1])
+    .map(value => String(value).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1])
     .filter(Boolean);
   return {
     model: safeText(criteria.modelTerm || '', 60),
