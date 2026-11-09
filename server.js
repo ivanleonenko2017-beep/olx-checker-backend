@@ -8,6 +8,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
+const { escapeTelegramHtml } = require('./telegram-html');
 
 const app = express();
 app.disable('x-powered-by');
@@ -1517,8 +1518,8 @@ app.post('/api/payments/jar/claim', userAuthMiddleware, async (req, res) => {
     }
     if (!TELEGRAM_BOT_TOKEN) return res.status(503).json({ success: false, error: 'Telegram-підтримка тимчасово недоступна.' });
     const user = req.telegramUser || {};
-    const identity = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Користувач';
-    const username = user.username ? '@' + user.username : 'не вказаний';
+    const identity = escapeTelegramHtml([user.first_name, user.last_name].filter(Boolean).join(' ') || 'Користувач');
+    const username = escapeTelegramHtml(user.username ? '@' + user.username : 'не вказаний');
     const message = [
       '💚 <b>Нове повідомлення про донат у ЗНАЙДЕНО</b>',
       'Користувач повідомив, що зробив внесок у Monobank-банку.',
@@ -2044,17 +2045,21 @@ async function runBackgroundWorker() {
           const isCheap = bargain.isBargain;
           const discount = isCheap ? (bargain.discountPercent ?? 0) : 0;
 
-          const notificationText = 
+          const safeFilterQuery = escapeTelegramHtml(filter.query);
+          const safeTitle = escapeTelegramHtml(item.title);
+          const safeLocation = escapeTelegramHtml(item.locationDate);
+          const safeItemLink = escapeTelegramHtml(item.link);
+          const notificationText =
             (hasPriceDrop
-              ? `📉 <b>Ціна знизилася для оголошення у фільтрі “${filter.query}”</b>\n\n<b>Було:</b> ${previousPrice.toLocaleString('uk-UA')} грн → <b>Стало:</b> ${Number(item.price).toLocaleString('uk-UA')} грн\n\n`
-              : `🔎 <b>Знайдено нове оголошення для фільтра “${filter.query}”</b>\n\n`) +
-            `📌 <b>${item.title}</b>\n` +
+              ? `📉 <b>Ціна знизилася для оголошення у фільтрі “${safeFilterQuery}”</b>\n\n<b>Було:</b> ${previousPrice.toLocaleString('uk-UA')} грн → <b>Стало:</b> ${Number(item.price).toLocaleString('uk-UA')} грн\n\n`
+              : `🔎 <b>Знайдено нове оголошення для фільтра “${safeFilterQuery}”</b>\n\n`) +
+            `📌 <b>${safeTitle}</b>\n` +
             `💰 <b>Ціна:</b> ${item.priceText} ${isCheap ? `🔥 (Нижче медіани на ${discount}%)` : ''}\n` +
             (isCheap && bargain.reliable
               ? `📊 <b>Медіана аналогів:</b> ${Number(bargain.referencePrice).toLocaleString('uk-UA')} грн • ${bargain.comparableCount} оголошень\n`
               : '') +
-            `📍 <b>Місто:</b> ${item.locationDate}\n\n` +
-            `<a href="${item.link}">👉 Відкрити оголошення на OLX</a>`;
+            `📍 <b>Місто:</b> ${safeLocation}\n\n` +
+            `<a href="${safeItemLink}">👉 Відкрити оголошення на OLX</a>`;
 
           const keyboard = {
             inline_keyboard: [
