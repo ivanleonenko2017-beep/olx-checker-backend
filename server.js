@@ -1980,17 +1980,32 @@ async function runBackgroundWorker() {
             }));
           }
         }
+        const storageRequirements = [...criteria.includeTerms, ...criteria.anyTerms]
+          .filter(term => /^\d{2,4}\s*(?:гб|gb)$/iu.test(term));
         const criteriaEvaluations = locationEligibleItems.map(item => {
           // If the detail page could not be read, don't claim the item passed
           // explicit required/excluded-word rules using incomplete card text.
           if (needsFullDescription && !item.detailsLoaded) {
             return { item, matches: false, reason: 'description_unavailable' };
           }
-          const result = applyCriteriaToListing({
+          const listing = {
             ...item,
             ageMinutes: getListingAgeMinutes(item.locationDate)
-          }, criteria);
-          return { item, matches: result.matches, reason: result.reason || 'matched' };
+          };
+          const result = applyCriteriaToListing(listing, criteria);
+          if (result.matches) return { item, matches: true, reason: 'matched' };
+
+          // Mirror Smart Search's safe capacity fallback: the requested
+          // capacity was sent to OLX, no conflicting capacity is visible,
+          // and the user is explicitly told that the card did not confirm it.
+          if (result.reason === 'missing_required_term' &&
+              storageRequirements.length &&
+              canUseUnverifiedStorageFallback(listing, criteria)) {
+            item.capacityUnverified = true;
+            item.capacityVerificationNote = 'Обсяг пам’яті не вказаний у картці OLX — перевірте його в оголошенні.';
+            return { item, matches: true, reason: 'capacity_unverified' };
+          }
+          return { item, matches: false, reason: result.reason || 'criteria_mismatch' };
         });
         const items = criteriaEvaluations.filter(result => result.matches).map(result => result.item);
         const rejectionCounts = criteriaEvaluations.reduce((counts, result) => {
