@@ -736,6 +736,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
         durationMs: result.pageMeta?.durationMs ?? null,
         responseBytes: result.pageMeta?.responseBytes ?? null,
         antiBotDetected: Boolean(result.pageMeta?.antiBotDetected),
+        cardsOnPage: (result.parserStats?.primaryCards || 0) + (result.parserStats?.supplementalCards || 0),
         cardsParsed: result.items.length, newAfterDedup,
         uniqueTotal: merged.length, parserStats: result.parserStats || {}
       };
@@ -753,7 +754,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
         event: 'search_page_error', requestId, source, page,
         requestedUrl: sanitizeSearchUrl(pageUrl),
         httpStatus: Number(error.response?.status || 0) || null,
-        errorCode: safeText(error.code || error.code === 'OLX_BLOCKED' ? error.code : 'UPSTREAM_ERROR', 48),
+        errorCode: safeText(error.code || 'UPSTREAM_ERROR', 48),
         stopReason
       }));
       if (page === 1) throw error;
@@ -1035,13 +1036,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       reason: 'city_mismatch',
       value: safeText(item.locationDate || item.cardText, 100)
     }));
-    const criteriaRejectedCards = stagedFunnel.rejected.map(entry => ({
-      listingKey: hashUserId(entry.item.link, TELEGRAM_WEBHOOK_SECRET),
-      url: sanitizeSearchUrl(entry.item.link),
-      stage: entry.stage,
-      reason: entry.reason,
-      value: safeText(entry.stage === 'price' ? entry.item.price : entry.item.title, 100)
-    }));
+
 
     // Storage is often absent from OLX search cards and exists only on the
     // individual ad page. Enrich matching iPhone candidates before rejecting
@@ -1070,7 +1065,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     }
 
     const rejectionReasons = {};
-    const rejectedCards = [...cityRejectedCards, ...criteriaRejectedCards];
+    const rejectedCards = [...cityRejectedCards];
     const items = locationItems.filter(item => {
       const result = applyCriteriaToListing(item, criteria);
       if (result.matches) return true;
