@@ -409,41 +409,30 @@ function locationMatches(locationDate, requestedLocation) {
 
 function locationMatchesCardText(cardText, requestedLocation) {
   const text = String(cardText || '').replace(/\s+/g, ' ').trim();
+  const lowerText = text.toLocaleLowerCase('uk-UA');
   const requestedRaw = String(requestedLocation || '').trim();
   const requested = normalizeLocationText(requestedRaw);
   if (!text || !requested) return false;
-  const variants = [requestedRaw, ...getLocationAliases(requestedRaw, requested)].map(value => String(value || '').trim()).filter(Boolean);
-  const datePattern = '(?:сьогодні|сегодня|today)(?:\\s+о\\s+\\d{1,2}[:.]\\d{2})?|\\d{1,2}\\s+\\p{L}{3,}\\s+\\d{4}';
+
+  const variants = [requestedRaw, ...getLocationAliases(requestedRaw, requested)]
+    .map(value => String(value || '').trim().toLocaleLowerCase('uk-UA'))
+    .filter(Boolean);
+  const dateAfterCity = /^\s*(?:,\s*[^-–—]{1,60})?\s*[-–—]\s*(?:(?:сьогодні|сегодня|today)(?:\s+о\s+\d{1,2}[:.]\d{2})?|\d{1,2}\s+\p{L}{3,}\s+\d{4})/iu;
+
   return variants.some(variant => {
-    const escaped = variant.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\function locationMatches(locationDate, requestedLocation) {
-  const requestedRaw = String(requestedLocation || '').trim();
-  const requested = normalizeLocationText(requestedRaw);
-  if (!requested || ['всі міста', 'вся україна', 'уся україна'].some(value => normalizeLocationText(value) === requested)) return true;
-  const actual = normalizeLocationText(locationDate);
-  if (actual.includes(requested)) return true;
-  const aliases = {
-    'чернігів': ['чернигов', 'chernigov'],
-    'чернигов': ['чернігів', 'chernigov'],
-    'київ': ['киев', 'kiev'],
-    'киев': ['київ', 'kiev'],
-    'львів': ['львов', 'lvov'],
-    'львов': ['львів', 'lvov'],
-    'харків': ['харьков', 'kharkov'],
-    'харьков': ['харків', 'kharkov'],
-    'одеса': ['одесса', 'odessa'],
-    'одесса': ['одеса', 'odessa'],
-    'дніпро': ['днепр', 'dnepr'],
-    'днепр': ['дніпро', 'dnepr']
-  };
-  return (aliases[requestedRaw.toLocaleLowerCase('uk-UA')] || aliases[requested] || [])
-    .some(alias => actual.includes(normalizeLocationText(alias)));
-}');
-    const pattern = new RegExp(
-      '(?:^|[^\\p{L}]|(?:нове|новий|нова|вживане|вживаний|new|used))' +
-      escaped + '(?:\\s*,\\s*[^\\-–—]{1,60})?\\s*[-–—]\\s*(?:' + datePattern + ')',
-      'iu'
-    );
-    return pattern.test(text);
+    let searchFrom = 0;
+    while (searchFrom < lowerText.length) {
+      const position = lowerText.indexOf(variant, searchFrom);
+      if (position < 0) return false;
+      const before = lowerText.slice(Math.max(0, position - 20), position);
+      const previousCharacter = position > 0 ? lowerText[position - 1] : '';
+      const isBoundary = position === 0 || !/\p{L}/u.test(previousCharacter) ||
+        /(?:нове|новий|нова|вживане|вживаний|new|used|б[/.]?у)$/iu.test(before);
+      const after = lowerText.slice(position + variant.length);
+      if (isBoundary && dateAfterCity.test(after)) return true;
+      searchFrom = position + 1;
+    }
+    return false;
   });
 }
 
@@ -662,12 +651,12 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
       const result = await parseOlxPage(pageUrl, minPrice, maxPrice, query);
       pages.push(result.items);
       const merged = mergeUniqueOlxItems(pages, 600);
-      console.log(\`[OLX pagination] page=\${page}/\${pageLimit} pageItems=\${result.items.length} uniqueTotal=\${merged.length} city=\${JSON.stringify(requestedLocation || '')}\`);
+      console.log(`[OLX pagination] page=${page}/${pageLimit} pageItems=${result.items.length} uniqueTotal=${merged.length} city=${JSON.stringify(requestedLocation || '')}`);
       if (result.items.length === 0 || merged.length === previousUniqueCount) break;
       previousUniqueCount = merged.length;
     } catch (error) {
       if (page === 1) throw error;
-      console.warn(\`[OLX pagination] Page \${page} failed; keeping earlier results: code=\${error.code || 'unknown'}, status=\${error.response?.status || 'none'}\`);
+      console.warn(`[OLX pagination] Page ${page} failed; keeping earlier results: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}`);
       break;
     }
   }
@@ -1295,8 +1284,8 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
           const upstreamQuery = [...new Set([cleanQuery, ...storageTerms])].join(' ').trim();
           const citySlug = getOlxCitySlug(criteria.city);
           const searchPath = citySlug
-            ? \`https://www.olx.ua/uk/\${citySlug}/q-\${encodeURIComponent(upstreamQuery)}/\`
-            : \`https://www.olx.ua/uk/list/q-\${encodeURIComponent(upstreamQuery)}/\`;
+            ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(upstreamQuery)}/`
+            : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
           targetUrl = searchPath;
         }
         const { items } = await parseOlx(targetUrl, criteria.minPrice, criteria.maxPrice, cleanQuery, criteria.city);
@@ -1922,17 +1911,17 @@ async function runBackgroundWorker() {
           const upstreamQuery = [...new Set([targetUrl, ...storageQueryTerms])].join(' ').trim();
           const citySlug = getOlxCitySlug(filter.city);
           const searchPath = citySlug
-            ? \`https://www.olx.ua/uk/\${citySlug}/q-\${encodeURIComponent(upstreamQuery)}/\`
-            : \`https://www.olx.ua/uk/list/q-\${encodeURIComponent(upstreamQuery)}/\`;
+            ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(upstreamQuery)}/`
+            : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
           if (filter.min_price || filter.max_price) {
-            const searchMin = filter.min_price ? \`search%5Bfilter_float_price%3Afrom%5D=\${filter.min_price}\` : '';
-            const searchMax = filter.max_price ? \`search%5Bfilter_float_price%3Ato%5D=\${filter.max_price}\` : '';
+            const searchMin = filter.min_price ? `search%5Bfilter_float_price%3Afrom%5D=${filter.min_price}` : '';
+            const searchMax = filter.max_price ? `search%5Bfilter_float_price%3Ato%5D=${filter.max_price}` : '';
             const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
-            targetUrl = \`\${searchPath}?\${queryParams}\`;
+            targetUrl = `${searchPath}?${queryParams}`;
           } else {
             targetUrl = searchPath;
           }
-          console.log(\`[OLX search] filter=\${filter.id} cityScope=\${citySlug || 'all'}\`);
+          console.log(`[OLX search] filter=${filter.id} cityScope=${citySlug || 'all'}`);
         }
 
         const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city);
