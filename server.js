@@ -9,6 +9,7 @@ const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallba
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
+const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
 
 const app = express();
 app.disable('x-powered-by');
@@ -218,10 +219,6 @@ async function markTelegramBlocked(chatId) {
   }
 }
 
-function getTelegramRetryDelaySeconds(error) {
-  const retryAfter = Number(error.response?.data?.parameters?.retry_after);
-  return Math.min(30, Math.max(1, Number.isFinite(retryAfter) ? Math.ceil(retryAfter) : 1));
-}
 
 async function sendTelegramMessage(chatId, text, replyMarkup = null, useHtml = true, attempt = 0) {
   if (!TELEGRAM_BOT_TOKEN) {
@@ -239,7 +236,7 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null, useHtml = t
   } catch (err) {
     const status = err.response?.status;
     const description = err.response?.data?.description || err.message;
-    if (status === 403) {
+    if (isTelegramBlockedError(err)) {
       await markTelegramBlocked(chatId);
       console.warn(`[Telegram] Бот заблокований користувачем ${chatId}; повторні спроби припинено.`);
       return false;
@@ -274,7 +271,7 @@ async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null, 
     console.warn(`[Telegram] sendPhoto не підтвердив доставку для чату ${chatId}: `, response.data?.description || 'невідома помилка');
     return sendTelegramMessage(chatId, caption, replyMarkup);
   } catch (err) {
-    if (err.response?.status === 403) {
+    if (isTelegramBlockedError(err)) {
       await markTelegramBlocked(chatId);
       console.warn(`[Telegram] Бот заблокований користувачем ${chatId}; фото та повідомлення більше не надсилаються.`);
       return false;
