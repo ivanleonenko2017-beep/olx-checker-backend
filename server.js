@@ -1202,7 +1202,7 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
 
     const explicitCity = typeof city === 'string' ? city.trim() : '';
     const allCities = !explicitCity || ['всі міста', 'все міста', 'вся україна', 'уся україна']
-      .includes(normalizeLocationText(explicitCity));
+      .some(value => normalizeLocationText(value) === normalizeLocationText(explicitCity));
     criteriaInput.city = allCities ? (parsedCriteria.city || explicitCity) : explicitCity;
 
     const explicitCondition = String(condition || '').trim().toLowerCase();
