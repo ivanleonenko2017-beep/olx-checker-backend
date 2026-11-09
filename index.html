@@ -982,6 +982,17 @@
         .replace(/"/g, '&quot;');
     }
 
+    function safeOlxUrl(value) {
+      try {
+        const url = new URL(String(value || ''));
+        const host = url.hostname.toLowerCase();
+        if (url.protocol === 'https:' && (host === 'olx.ua' || host.endsWith('.olx.ua')) && !url.username && !url.password) {
+          return escapeHtml(url.toString());
+        }
+      } catch (_) {}
+      return 'https://www.olx.ua/';
+    }
+
     function getFavorites() {
       return JSON.parse(localStorage.getItem('olx_favorites') || '[]');
     }
@@ -1413,7 +1424,7 @@
 
       listDiv.innerHTML = favs.map(item => {
         const favoriteId = escapeHtml(item.id || '');
-        const favoriteLink = escapeHtml(item.link || '');
+        const favoriteLink = safeOlxUrl(item.link || '');
         const favoriteImage = escapeHtml(item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`);
         const favoriteTitle = escapeHtml(item.title || '');
         const favoritePrice = escapeHtml(item.priceText || '');
@@ -1508,7 +1519,7 @@
         const isFav = favs.some(f => f.link === item.link);
         const imgSrc = escapeHtml(item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`);
         const itemId = escapeHtml(item.id || '');
-        const itemLink = escapeHtml(item.link || '');
+        const itemLink = safeOlxUrl(item.link || '');
         const itemTitle = escapeHtml(item.title || '');
         const itemPrice = escapeHtml(item.priceText || '');
         const itemLocation = escapeHtml(item.locationDate || '');
