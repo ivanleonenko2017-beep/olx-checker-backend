@@ -10,7 +10,7 @@ const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require
 const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
-const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel } = require('./search-telemetry');
+const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria } = require('./search-telemetry');
 
 const app = express();
 app.disable('x-powered-by');
@@ -705,7 +705,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
   const source = ['manual', 'background', 'filter_warmup', 'diagnostic'].includes(traceContext.source)
     ? traceContext.source : 'unknown';
   const userHash = hashUserId(traceContext.userId, TELEGRAM_WEBHOOK_SECRET);
-  const criteriaSummary = traceContext.criteria || {};
+  const criteriaSummary = summarizeCriteria(traceContext.criteria || {});
   const cityScoped = Boolean(String(requestedLocation || '').trim()) && !/^https?:\/\//i.test(String(query || '').trim());
   const configuredPageLimit = Number.parseInt(process.env.OLX_SEARCH_MAX_PAGES || '2', 10);
   const pageLimit = cityScoped
@@ -718,7 +718,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
   const startedAt = new Date().toISOString();
   console.log('[SEARCH_TRACE] ' + JSON.stringify({
     event: 'search_start', requestId, at: startedAt, source, userHash,
-    query: safeText(query, 180), criteria: criteriaSummary,
+    queryHash: hashUserId(query, TELEGRAM_WEBHOOK_SECRET), criteria: criteriaSummary,
     requestedLocation: safeText(requestedLocation, 80),
     targetUrl: sanitizeSearchUrl(targetUrl), pageLimit
   }));
