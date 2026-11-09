@@ -896,7 +896,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     if (!targetUrl) return res.status(400).json({ error: 'Укажіть пошуковий запит' });
 
     const requestedLocation = String(city || '').trim();
-    const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, minPrice, maxPrice, query, requestedLocation);
+    const { items: parsedItems } = await parseOlx(targetUrl, minPrice, maxPrice, query, requestedLocation);
     // OLX card markup is inconsistent: the dedicated location node can be
     // absent or point at a date/metadata wrapper. Search the complete visible
     // card text as a fallback before dropping an otherwise valid local result.
@@ -968,11 +968,16 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       rejectionReasons[result.reason] = (rejectionReasons[result.reason] || 0) + 1;
       return false;
     });
+    const comparablePriceValues = items
+      .filter(item => item.capacityUnverified !== true)
+      .map(item => Number(item.price))
+      .filter(price => Number.isFinite(price) && price > 0);
+    const matchingAveragePrice = comparablePriceValues.length >= 5 ? median(comparablePriceValues) : 0;
     console.log('[API search] Completed: parsed=' + parsedItems.length + ', cityMatched=' + locationItems.length + ', detailsEnriched=' + detailsEnriched + ', returned=' + items.length + ', rejected=' + JSON.stringify(rejectionReasons) + ', city=' + JSON.stringify(requestedLocation) + ', url=' + targetUrl + ', smart=' + Boolean(parsedNaturalQuery) + ', durationMs=' + (Date.now() - startedAt));
     res.json({
       success: true,
       count: items.length,
-      averagePrice,
+      averagePrice: matchingAveragePrice,
       items,
       plan: access.plan,
       searchesUsedToday: searchQuota.used,
