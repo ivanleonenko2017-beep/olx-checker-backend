@@ -1756,11 +1756,26 @@ app.post('/telegram-webhook', async (req, res) => {
         .select('telegram_id').eq('telegram_id', chatId).maybeSingle();
       if (previousUserError) throw previousUserError;
       isNewTelegramUser = !previousUser;
-      const { error: userUpsertError } = await userDb.from('users').upsert({
+
+      const firstStartPayload = text.startsWith('/start') ? text.trim().split(/\s+/, 2)[1] || '' : '';
+      const firstReferralMatch = /^ref_(\d{1,20})$/.exec(firstStartPayload);
+      const inviterCandidate = firstReferralMatch ? Number(firstReferralMatch[1]) : 0;
+      const inviteeCandidate = Number(chatId);
+      const pendingReferrer = isNewTelegramUser &&
+        Number.isSafeInteger(inviterCandidate) && inviterCandidate > 0 &&
+        Number.isSafeInteger(inviteeCandidate) && inviteeCandidate > 0 &&
+        inviterCandidate !== inviteeCandidate
+          ? inviterCandidate
+          : null;
+
+      const userPayload = {
         telegram_id: chatId,
         first_name: msg.from?.first_name || 'User',
-        ...(isNewTelegramUser ? { trial_started_at: new Date().toISOString() } : {})
-      }, { onConflict: 'telegram_id' });
+        telegram_blocked_at: null,
+        ...(isNewTelegramUser ? { trial_started_at: new Date().toISOString() } : {}),
+        ...(pendingReferrer ? { pending_referrer_telegram_id: pendingReferrer } : {})
+      };
+      const { error: userUpsertError } = await userDb.from('users').upsert(userPayload, { onConflict: 'telegram_id' });
       if (userUpsertError) throw userUpsertError;
     } catch (userError) {
       console.error('[Telegram] Не вдалося зберегти користувача для розсилок:', userError.message);
@@ -1791,36 +1806,32 @@ app.post('/telegram-webhook', async (req, res) => {
       }
       return;
     }
-    // Accept one referral attribution per Telegram account; never count self-referrals.
-    const referralMatch = /^ref_(\d{1,20})$/.exec(startPayload);
-    if (referralMatch && isNewTelegramUser && (supabaseAdmin || supabase)) {
-      const inviterId = Number(referralMatch[1]);
+    // Referral attribution is persisted on the invitee's first start and retried
+    // on later /start updates if the atomic database operation previously failed.
+    const referralDb = supabaseAdmin || supabase;
+    if (referralDb) {
       const inviteeId = Number(chatId);
-      if (Number.isSafeInteger(inviterId) && inviterId > 0 &&
-          Number.isSafeInteger(inviteeId) && inviteeId > 0 && inviterId !== inviteeId) {
-        const referralDb = supabaseAdmin || supabase;
-        const { data: newReferral, error: referralError } = await referralDb.from('referrals').upsert({
-          inviter_telegram_id: inviterId,
-          invitee_telegram_id: inviteeId
-        }, { onConflict: 'invitee_telegram_id', ignoreDuplicates: true }).select('id');
-        if (referralError && !/does not exist|schema cache|relation .*referrals/i.test(referralError.message || '')) {
-          console.warn('Не вдалося зберегти реферала:', referralError.message);
-        } else if (!referralError && newReferral && newReferral.length > 0) {
-          // Reward only when a new, unique referral row was actually inserted.
-          // Extend an existing subscription rather than overwriting remaining days.
-          const { data: inviter, error: inviterReadError } = await referralDb
-            .from('users').select('tariff,premium_until').eq('telegram_id', inviterId).maybeSingle();
-          if (!inviterReadError && inviter) {
-            const currentExpiry = inviter.premium_until ? Date.parse(inviter.premium_until) : 0;
-            const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
-            const nextExpiry = new Date(rewardBase + 3 * 24 * 60 * 60 * 1000).toISOString();
-            const { error: rewardError } = await referralDb.from('users').update({
-              tariff: 'premium',
-              premium_until: nextExpiry
-            }).eq('telegram_id', inviterId);
-            if (rewardError) console.warn('Не вдалося нарахувати реферальний Premium:', rewardError.message);
-          } else if (inviterReadError) {
-            console.warn('Не вдалося перевірити власника реферального посилання:', inviterReadError.message);
+      const { data: pendingReferralUser, error: pendingReferralError } = await referralDb
+        .from('users')
+        .select('pending_referrer_telegram_id')
+        .eq('telegram_id', inviteeId)
+        .maybeSingle();
+      if (pendingReferralError) {
+        console.warn('Не вдалося прочитати відкладене реферальне запрошення:', pendingReferralError.message);
+      } else if (pendingReferralUser?.pending_referrer_telegram_id) {
+        const inviterId = Number(pendingReferralUser.pending_referrer_telegram_id);
+        const { data: rewardData, error: rewardError } = await referralDb.rpc('grant_referral_reward', {
+          p_inviter_telegram_id: inviterId,
+          p_invitee_telegram_id: inviteeId
+        });
+        if (rewardError) {
+          console.warn('Не вдалося атомарно обробити реферальне запрошення; воно залишиться для повторної спроби:', rewardError.message);
+        } else {
+          const rewardResult = Array.isArray(rewardData) ? rewardData[0] : rewardData;
+          if (rewardResult?.rewarded === true) {
+            console.log('[Referral] Premium bonus atomically granted for invitee:', inviteeId);
+          } else if (rewardResult?.reason) {
+            console.log('[Referral] Attribution result:', rewardResult.reason);
           }
         }
       }
