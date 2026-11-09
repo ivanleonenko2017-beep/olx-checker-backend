@@ -495,6 +495,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     status: Number(response.status || 0),
     durationMs: Date.now() - pageStartedAt,
     responseBytes: Buffer.byteLength(html, 'utf8'),
+    declaredTotal: null,
     antiBotDetected: false
   };
   const pageText = html.toLowerCase();
@@ -564,7 +565,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     }
   });
   const supplementalCardCount = Math.max(0, cards.length - primaryCardCount);
-  const parserStats = { skippedNoTitle: 0, skippedNoPrice: 0, skippedDuplicate: 0, skippedInvalidLink: 0, maxItemsReached: false };
+  const parserStats = { primaryCards: primaryCardCount, supplementalCards: supplementalCardCount, adLinksFound, skippedNoTitle: 0, skippedNoPrice: 0, skippedDuplicate: 0, skippedInvalidLink: 0, maxItemsReached: false };
   const seenAdLinks = new Set();
 
   cards.each((index, element) => {
@@ -736,6 +737,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
         durationMs: result.pageMeta?.durationMs ?? null,
         responseBytes: result.pageMeta?.responseBytes ?? null,
         antiBotDetected: Boolean(result.pageMeta?.antiBotDetected),
+        declaredTotal: result.pageMeta?.declaredTotal ?? null,
         cardsOnPage: (result.parserStats?.primaryCards || 0) + (result.parserStats?.supplementalCards || 0),
         cardsParsed: result.items.length, newAfterDedup,
         uniqueTotal: merged.length, parserStats: result.parserStats || {}
@@ -755,7 +757,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
         requestedUrl: sanitizeSearchUrl(pageUrl),
         httpStatus: Number(error.response?.status || 0) || null,
         errorCode: safeText(error.code || 'UPSTREAM_ERROR', 48),
-        stopReason
+        stopReason, antiBotDetected: error.code === 'OLX_BLOCKED' || [403, 429].includes(Number(error.response?.status || 0))
       }));
       if (page === 1) throw error;
       break;
