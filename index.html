@@ -993,6 +993,22 @@
       return 'https://www.olx.ua/';
     }
 
+    function safeImageUrl(value) {
+      const fallback = BACKEND_URL + '/assets/no-photo.svg';
+      try {
+        const url = new URL(String(value || ''), BACKEND_URL);
+        const host = url.hostname.toLowerCase();
+        const sameBackend = url.origin === new URL(BACKEND_URL).origin && url.pathname.startsWith('/');
+        const olxImageHost = host === 'olx.ua' || host.endsWith('.olx.ua') ||
+          host === 'olxcdn.com' || host.endsWith('.olxcdn.com') ||
+          host === 'olxstatic.com' || host.endsWith('.olxstatic.com');
+        if (url.protocol === 'https:' && (sameBackend || olxImageHost) && !url.username && !url.password) {
+          return escapeHtml(url.toString());
+        }
+      } catch (_) {}
+      return escapeHtml(fallback);
+    }
+
     function getFavorites() {
       return JSON.parse(localStorage.getItem('olx_favorites') || '[]');
     }
@@ -1146,10 +1162,10 @@
             }
           });
       }
-      document.getElementById('modalOlxLink').href = item.link;
+      document.getElementById('modalOlxLink').href = safeOlxUrl(item.link);
 
       const imgContainer = document.getElementById('modalAdImgContainer');
-      const imgSrc = item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`;
+      const imgSrc = safeImageUrl(item.proxyImg || item.img);
       
       imgContainer.innerHTML = `<img src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-full h-full object-cover">`;
 
@@ -1425,7 +1441,7 @@
       listDiv.innerHTML = favs.map(item => {
         const favoriteId = escapeHtml(item.id || '');
         const favoriteLink = safeOlxUrl(item.link || '');
-        const favoriteImage = escapeHtml(item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`);
+        const favoriteImage = safeImageUrl(item.proxyImg || item.img);
         const favoriteTitle = escapeHtml(item.title || '');
         const favoritePrice = escapeHtml(item.priceText || '');
         const favoriteLocation = escapeHtml(item.locationDate || '');
@@ -1517,7 +1533,7 @@
         const isCheap = item.price > 0 && window.lastAvgPrice > 0 && item.price < window.lastAvgPrice * 0.85;
         const discount = isCheap ? Math.round((1 - item.price / window.lastAvgPrice) * 100) : 0;
         const isFav = favs.some(f => f.link === item.link);
-        const imgSrc = escapeHtml(item.proxyImg || item.img || `${BACKEND_URL}/assets/no-photo.svg`);
+        const imgSrc = safeImageUrl(item.proxyImg || item.img);
         const itemId = escapeHtml(item.id || '');
         const itemLink = safeOlxUrl(item.link || '');
         const itemTitle = escapeHtml(item.title || '');
