@@ -518,7 +518,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     }
   });
   const supplementalCardCount = Math.max(0, cards.length - primaryCardCount);
-  const parserStats = { skippedNoTitle: 0, skippedNoPrice: 0, skippedDuplicate: 0, maxItemsReached: false };
+  const parserStats = { skippedNoTitle: 0, skippedNoPrice: 0, skippedDuplicate: 0, skippedInvalidLink: 0, maxItemsReached: false };
   const seenAdLinks = new Set();
 
   cards.each((index, element) => {
@@ -552,7 +552,23 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
 
     const rawLink = $(element).find('a[href*="/d/"], a[href*="/obyavlenie/"]').first().attr('href') || '';
-    const link = rawLink.startsWith('http') ? rawLink : `https://www.olx.ua${rawLink}`;
+    let parsedLink;
+    try {
+      parsedLink = new URL(rawLink, 'https://www.olx.ua');
+    } catch (_) {
+      parserStats.skippedInvalidLink++;
+      return;
+    }
+    const linkHost = parsedLink.hostname.toLowerCase();
+    if (parsedLink.protocol !== 'https:' ||
+        !(linkHost === 'olx.ua' || linkHost.endsWith('.olx.ua')) ||
+        !/(?:\/d\/|\/obyavlenie\/)/i.test(parsedLink.pathname)) {
+      parserStats.skippedInvalidLink++;
+      return;
+    }
+    parsedLink.search = '';
+    parsedLink.hash = '';
+    const link = parsedLink.toString();
 
     let rawImgUrl = '';
     const imgEl = $(element).find('img').first();
