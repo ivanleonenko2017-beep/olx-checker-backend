@@ -982,15 +982,19 @@
         .replace(/"/g, '&quot;');
     }
 
-    function safeOlxUrl(value) {
+    function getSafeOlxUrl(value) {
       try {
         const url = new URL(String(value || ''));
         const host = url.hostname.toLowerCase();
         if (url.protocol === 'https:' && (host === 'olx.ua' || host.endsWith('.olx.ua')) && !url.username && !url.password) {
-          return escapeHtml(url.toString());
+          return url.toString();
         }
       } catch (_) {}
       return 'https://www.olx.ua/';
+    }
+
+    function safeOlxUrl(value) {
+      return escapeHtml(getSafeOlxUrl(value));
     }
 
     function safeImageUrl(value) {
@@ -1162,7 +1166,7 @@
             }
           });
       }
-      document.getElementById('modalOlxLink').href = safeOlxUrl(item.link);
+      document.getElementById('modalOlxLink').href = getSafeOlxUrl(item.link);
 
       const imgContainer = document.getElementById('modalAdImgContainer');
       const imgSrc = safeImageUrl(item.proxyImg || item.img);
