@@ -65,6 +65,36 @@ function toPositiveInteger(value, fallback = 0) {
   return Number.isSafeInteger(number) && number >= 0 ? number : fallback;
 }
 
+function normalizePhoneVariant(value = '') {
+  const normalized = String(value || '').toLocaleLowerCase('uk-UA').replace(/[\s._-]+/g, '');
+  if (normalized === 'promax' || normalized === 'промакс') return 'pro max';
+  if (normalized === 'pro' || normalized === 'про') return 'pro';
+  if (normalized === 'max' || normalized === 'макс') return 'max';
+  if (normalized === 'plus' || normalized === 'плюс') return 'plus';
+  if (normalized === 'mini' || normalized === 'мини' || normalized === 'міні') return 'mini';
+  return '';
+}
+
+function parsePhoneModelDescriptor(value = '') {
+  const match = String(value || '').match(
+    /(?:iphone|apple(?:\s*iphone)?|айфон|іфон|ифон)\s*(\d{1,2})(?:\s*(pro\s*max|pro|max|plus|mini|про\s*макс|про|макс|плюс|міні|мини))?(?=$|[^\p{L}\p{N}])/iu
+  );
+  if (!match) return null;
+  return {
+    generation: Number(match[1]),
+    variant: normalizePhoneVariant(match[2] || '')
+  };
+}
+
+function isNonPhoneOfferTitle(value = '') {
+  const title = String(value || '').trim().toLocaleLowerCase('uk-UA');
+  if (!title) return true;
+  if (/^(?:куплю|купить|купити|скупка|викуп|покупаю|ищу|шукаю)(?=$|[^\p{L}])/iu.test(title)) return true;
+  if (/^(?:чохол|чехол|case|стекло|скло|захисне\s+скло|защитное\s+стекло|плівка|пленка|кабель|зарядк\p{L}*|блок\s+(?:живлення|питания)|коробка|упаковка|аксесуар|аксессуар|запчаст\p{L}*|детал\p{L}*|ремонт|послуги|услуги)(?=$|[^\p{L}])/iu.test(title)) return true;
+  if (/(?:на\s+запчастини|на\s+запчасти|під\s+ремонт|под\s+ремонт)/iu.test(title)) return true;
+  return false;
+}
+
 function normalizeCriteria(input = {}) {
   const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const minPrice = toPositiveInteger(source.minPrice ?? source.min_price, 0);
@@ -86,7 +116,8 @@ function normalizeCriteria(input = {}) {
     maxDiscountPercent: Math.min(90, Math.max(5, maxDiscountPercent)),
     minComparableListings: Math.min(30, Math.max(3, toPositiveInteger(source.minComparableListings, 5))),
     maxAgeMinutes: Math.min(10080, Math.max(0, toPositiveInteger(source.maxAgeMinutes ?? source.max_age_minutes, 0))),
-    includeTermsMode: source.includeTermsMode === 'any' || source.include_terms_mode === 'any' ? 'any' : 'all'
+    includeTermsMode: source.includeTermsMode === 'any' || source.include_terms_mode === 'any' ? 'any' : 'all',
+    modelTerm: typeof source.modelTerm === 'string' ? source.modelTerm.trim().replace(/\s+/g, ' ').slice(0, 60) : ''
   };
 }
 
@@ -146,6 +177,19 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
   const text = [listing?.title, listing?.description, listing?.cardText, listing?.conditionText].filter(Boolean).join(' ');
   const lowerText = text.toLocaleLowerCase('uk-UA');
   const price = toPositiveInteger(listing?.price, 0);
+
+  if (criteria.modelTerm) {
+    const requestedModel = parsePhoneModelDescriptor(criteria.modelTerm);
+    const listingModel = parsePhoneModelDescriptor(listing?.title || '');
+    if (!requestedModel || !listingModel ||
+        requestedModel.generation !== listingModel.generation ||
+        requestedModel.variant !== listingModel.variant) {
+      return { matches: false, reason: 'model_mismatch', criteria };
+    }
+    if (isNonPhoneOfferTitle(listing?.title || '')) {
+      return { matches: false, reason: 'wrong_product_type', criteria };
+    }
+  }
 
   if (criteria.includeTerms.length && criteria.includeTermsMode === 'all' && !criteria.includeTerms.every(term => termMatches(lowerText, term, listing?.title))) {
     return { matches: false, reason: 'missing_required_term', criteria };
@@ -276,8 +320,8 @@ function parseNaturalLanguageQuery(input) {
   // Extract that capacity as a structured filter instead of sending "256"
   // to OLX as an additional mandatory free-text search token.
   const barePhoneCapacityMatch = !storageOnlyMatch &&
-    /(?:айфон|iphone|смартфон|телефон|samsung\s+galaxy)/iu.test(remaining)
-    ? remaining.match(/(?:^|[\s,;])на\s+(\d{2,4})(?!\p{L})(?!\s*(?:грн|оператив|озу|ram))/iu)
+    /(?:айфон|iphone|іфон|ифон|смартфон|телефон|samsung\s+galaxy)/iu.test(remaining)
+    ? remaining.match(/(?:^|[\s,;])(?:на\s+)?(64|128|256|512|1024)(?!\p{L})(?!\s*(?:грн|оператив|озу|ram))/iu)
     : null;
   const capacityMatch = storageOnlyMatch || barePhoneCapacityMatch;
   if (capacityMatch) {
@@ -339,6 +383,15 @@ function parseNaturalLanguageQuery(input) {
       criteria.anyTerms = [...(criteria.anyTerms || []), ...alternatives];
       remaining = remaining.replace(alternativeMatch[0], ' ').trim();
     }
+  }
+
+  // Preserve the exact iPhone generation and modification. A plain iPhone 14
+  // must not silently include 14 Plus, Pro, Pro Max, Max, or Mini listings.
+  // Alternative phone models were already extracted into anyTerms above.
+  const phoneModel = parsePhoneModelDescriptor(remaining);
+  if (phoneModel) {
+    criteria.modelTerm = 'iPhone ' + phoneModel.generation +
+      (phoneModel.variant ? ' ' + phoneModel.variant.replace(/\b\w/g, char => char.toUpperCase()) : '');
   }
 
   // Keep hardware requirements as explicit criteria instead of leaving them
