@@ -1197,7 +1197,7 @@ app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
     const userId = req.telegramUser.id;
     if (!supabase) return res.json({ success: true, filters: [] });
 
-    const { data, error } = await supabase.from('filters').select('*').eq('user_id', userId);
+    const { data, error } = await supabase.from('filters').select('*').eq('user_id', userId).order('created_at', { ascending: true });
     if (error) throw error;
 
     const uniqueFilters = [];
@@ -2213,11 +2213,15 @@ async function runBackgroundWorker() {
         console.error(`Помилка воркера для фільтра ${filter.id}:`, fErr.message);
       } finally {
         if (filterLockAcquired && lockClient) {
-          const { error: releaseError } = await lockClient.rpc('release_filter_processing_lock', {
-            p_filter_id: String(filter.id),
-            p_lock_owner: WORKER_INSTANCE_ID
-          });
-          if (releaseError) console.warn(`[Worker Lock] Не вдалося звільнити фільтр ${filter.id}:`, releaseError.message);
+          try {
+            const { error: releaseError } = await lockClient.rpc('release_filter_processing_lock', {
+              p_filter_id: String(filter.id),
+              p_lock_owner: WORKER_INSTANCE_ID
+            });
+            if (releaseError) console.warn(`[Worker Lock] Не вдалося звільнити фільтр ${filter.id}:`, releaseError.message);
+          } catch (releaseError) {
+            console.warn(`[Worker Lock] Помилка звільнення фільтра ${filter.id}:`, releaseError.message);
+          }
         }
       }
     }
