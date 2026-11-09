@@ -15,6 +15,7 @@ function sanitizeSearchUrl(input, maxLength = 500) {
     url.username = '';
     url.password = '';
     url.hash = '';
+    url.pathname = url.pathname.replace(/\\/q-[^/]+/i, '/q-[redacted]');
     for (const key of [...url.searchParams.keys()]) {
       if (SENSITIVE_QUERY_KEYS.test(key)) url.searchParams.delete(key);
     }
@@ -27,6 +28,23 @@ function sanitizeSearchUrl(input, maxLength = 500) {
 function hashUserId(value, secret) {
   if (value === null || value === undefined || !String(secret || '')) return null;
   return crypto.createHmac('sha256', String(secret)).update(String(value)).digest('hex').slice(0, 12);
+}
+
+function summarizeCriteria(criteria = {}) {
+  const capacity = [...(criteria.includeTerms || []), ...(criteria.anyTerms || [])]
+    .map(value => String(value).match(/^(\\d{2,4})\\s*(?:гб|gb)$/iu)?.[1])
+    .filter(Boolean);
+  return {
+    model: safeText(criteria.modelTerm || '', 60),
+    memoryGb: [...new Set(capacity)].slice(0, 5),
+    condition: safeText(criteria.condition || 'all', 12),
+    city: safeText(criteria.city || '', 60),
+    minPrice: Number(criteria.minPrice || 0) || 0,
+    maxPrice: Number(criteria.maxPrice || 0) || 0,
+    includeTermCount: Array.isArray(criteria.includeTerms) ? criteria.includeTerms.length : 0,
+    anyTermCount: Array.isArray(criteria.anyTerms) ? criteria.anyTerms.length : 0,
+    excludeTermCount: Array.isArray(criteria.excludeTerms) ? criteria.excludeTerms.length : 0
+  };
 }
 
 function compactRejectedCards(cards, limit = 25) {
@@ -97,4 +115,4 @@ function evaluateCriteriaFunnel(items, criteria = {}) {
   return { counts, capacityUnverified, finalCount: current.length, rejected };
 }
 
-module.exports = { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards, evaluateCriteriaFunnel };
+module.exports = { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria };
