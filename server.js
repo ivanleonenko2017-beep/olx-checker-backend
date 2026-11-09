@@ -10,7 +10,7 @@ const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require
 const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
-const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria } = require('./search-telemetry');
+const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
 
 const app = express();
 app.disable('x-powered-by');
@@ -195,7 +195,7 @@ async function adminAuthMiddleware(req, res, next) {
   const initDataRaw = req.headers['x-telegram-init-data'];
   const user = verifyTelegramWebAppData(initDataRaw);
 
-  if (user && user.id && await checkIsAdmin(user.id)) {
+  if (await isAuthorizedAdmin(user, checkIsAdmin)) {
     req.adminUser = user;
     return next();
   }
@@ -738,6 +738,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
         responseBytes: result.pageMeta?.responseBytes ?? null,
         antiBotDetected: Boolean(result.pageMeta?.antiBotDetected),
         declaredTotal: result.pageMeta?.declaredTotal ?? null,
+        recommendationClassification: 'not_instrumented',
         cardsOnPage: (result.parserStats?.primaryCards || 0) + (result.parserStats?.supplementalCards || 0),
         cardsParsed: result.items.length, newAfterDedup,
         uniqueTotal: merged.length, parserStats: result.parserStats || {}
@@ -753,7 +754,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
       stopReason = error.response?.status === 429 ? 'http_429' :
         (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT' ? 'timeout' : 'upstream_error');
       console.error('[SEARCH_TRACE] ' + JSON.stringify({
-        event: 'search_page_error', requestId, source, page,
+        event: 'search_page_error', requestId, source, at: new Date().toISOString(), page,
         requestedUrl: sanitizeSearchUrl(pageUrl),
         httpStatus: Number(error.response?.status || 0) || null,
         errorCode: safeText(error.code || 'UPSTREAM_ERROR', 48),
@@ -767,7 +768,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
   const items = mergeUniqueOlxItems(pages, 600);
   const prices = items.map(item => item.price).filter(price => Number.isFinite(price) && price > 0);
   console.log('[SEARCH_TRACE] ' + JSON.stringify({
-    event: 'search_pages_complete', requestId, source,
+    event: 'search_pages_complete', requestId, source, at: new Date().toISOString(),
     pageCount: pageTraces.length, pageLimit, stopReason,
     parsedAcrossPages: pageTraces.reduce((sum, p) => sum + p.cardsParsed, 0),
     afterDedup: items.length, pages: pageTraces
@@ -1103,9 +1104,9 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       .filter(price => Number.isFinite(price) && price > 0);
     const matchingAveragePrice = comparablePriceValues.length >= 5 ? median(comparablePriceValues) : 0;
     console.log('[SEARCH_TRACE] ' + JSON.stringify({
-      event: 'search_funnel', requestId, source: 'manual',
+      event: 'search_funnel', requestId, source: 'manual', at: new Date().toISOString(),
       parsed: parsedItems.length, afterDedup: parsedItems.length,
-      afterAdsOnly: parsedItems.length, afterCity: locationItems.length,
+      afterCardParse: parsedItems.length, afterCity: locationItems.length,
       afterCriteria: items.length, criteriaStages: stagedFunnel.counts, detailsEnriched,
       capacityUnverified: items.filter(item => item.capacityUnverified === true).length,
       cityUnverified: items.filter(item => !item.locationDate && locationMatchesCardText(item.cardText, requestedLocation)).length,
@@ -1618,8 +1619,8 @@ app.post('/api/admin/search-diagnostics', adminAuthMiddleware, async (req, res) 
     }));
     const rejected = compactRejectedCards([...cityRejected, ...criteriaRejected], 25);
     console.log('[SEARCH_TRACE] ' + JSON.stringify({
-      event: 'search_funnel', requestId, source: 'diagnostic',
-      parsed: parsedItems.length, afterDedup: parsedItems.length, afterAdsOnly: parsedItems.length,
+      event: 'search_funnel', requestId, source: 'diagnostic', at: new Date().toISOString(),
+      parsed: parsedItems.length, afterDedup: parsedItems.length, afterCardParse: parsedItems.length,
       afterCity: cityItems.length, criteriaStages: funnel.counts,
       finalCount: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length,
       rejectedCards: rejected.cards, rejectedCardsOmitted: rejected.omitted,
@@ -1631,14 +1632,16 @@ app.post('/api/admin/search-diagnostics', adminAuthMiddleware, async (req, res) 
         city, minPrice: criteria.minPrice, maxPrice: criteria.maxPrice, exclusions: criteria.excludeTerms },
       pages: pageTraces, stopReason,
       funnel: { parsed: parsedItems.length, afterDedup: parsedItems.length,
-        afterAdsOnly: parsedItems.length, afterCity: cityItems.length, ...funnel.counts,
-        final: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length },
+        afterCardParse: parsedItems.length, recommendationClassification: 'not_instrumented',
+        afterCity: cityItems.length, ...funnel.counts,
+        final: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length,
+        cityUnverified: cityItems.filter(item => !item.locationDate && locationMatchesCardText(item.cardText, city)).length },
       rejected: { cards: rejected.cards, omitted: rejected.omitted },
       results
     });
   } catch (error) {
     console.error('[SEARCH_TRACE] ' + JSON.stringify({
-      event: 'search_diagnostic_error', requestId, source: 'diagnostic',
+      event: 'search_diagnostic_error', requestId, source: 'diagnostic', at: new Date().toISOString(),
       code: safeText(error.code || 'UPSTREAM_ERROR', 48),
       httpStatus: Number(error.response?.status || 0) || null,
       durationMs: Date.now() - startedAt
@@ -2297,8 +2300,8 @@ async function runBackgroundWorker() {
           value: safeText(entry.stage === 'city' ? entry.item.locationDate : entry.item.title, 100)
         }));
         console.log('[SEARCH_TRACE] ' + JSON.stringify({
-          event: 'search_funnel', requestId: searchRequestId, source: 'background',
-          parsed: parsedItems.length, afterDedup: parsedItems.length, afterAdsOnly: parsedItems.length,
+          event: 'search_funnel', requestId: searchRequestId, source: 'background', at: new Date().toISOString(),
+          parsed: parsedItems.length, afterDedup: parsedItems.length, afterCardParse: parsedItems.length,
           afterDate: dateEligibleItems.length, afterCity: locationEligibleItems.length,
           afterCriteria: items.length,
           capacityUnverified: items.filter(item => item.capacityUnverified === true).length,
