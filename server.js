@@ -204,7 +204,26 @@ async function adminAuthMiddleware(req, res, next) {
   });
 }
 
-async function sendTelegramMessage(chatId, text, replyMarkup = null, useHtml = true) {
+async function markTelegramBlocked(chatId) {
+  const db = supabaseAdmin || supabase;
+  const telegramId = Number(chatId);
+  if (!db || !Number.isSafeInteger(telegramId) || telegramId <= 0) return;
+  try {
+    const { error } = await db.from('users')
+      .update({ telegram_blocked_at: new Date().toISOString() })
+      .eq('telegram_id', telegramId);
+    if (error) console.warn('[Telegram] Не вдалося позначити заблокованого користувача:', error.message);
+  } catch (error) {
+    console.warn('[Telegram] Помилка збереження статусу блокування:', error.message);
+  }
+}
+
+function getTelegramRetryDelaySeconds(error) {
+  const retryAfter = Number(error.response?.data?.parameters?.retry_after);
+  return Math.min(30, Math.max(1, Number.isFinite(retryAfter) ? Math.ceil(retryAfter) : 1));
+}
+
+async function sendTelegramMessage(chatId, text, replyMarkup = null, useHtml = true, attempt = 0) {
   if (!TELEGRAM_BOT_TOKEN) {
     console.error('[Telegram] TELEGRAM_BOT_TOKEN не налаштовано');
     return false;
@@ -218,36 +237,55 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null, useHtml = t
     const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, payload, { timeout: 8000 });
     return Boolean(response.data && response.data.ok);
   } catch (err) {
+    const status = err.response?.status;
     const description = err.response?.data?.description || err.message;
+    if (status === 403) {
+      await markTelegramBlocked(chatId);
+      console.warn(`[Telegram] Бот заблокований користувачем ${chatId}; повторні спроби припинено.`);
+      return false;
+    }
+    if (status === 429 && attempt < 2) {
+      const retrySeconds = getTelegramRetryDelaySeconds(err);
+      console.warn(`[Telegram] 429 для чату ${chatId}; повтор через ${retrySeconds} с.`);
+      await new Promise(resolve => setTimeout(resolve, retrySeconds * 1000));
+      return sendTelegramMessage(chatId, text, replyMarkup, useHtml, attempt + 1);
+    }
     if (useHtml && /can't parse entities|unsupported start tag/i.test(description)) {
       console.warn(`[Telegram] HTML parse error for chat ${chatId}; retrying as plain text`);
-      return await sendTelegramMessage(chatId, text, replyMarkup, false);
+      return sendTelegramMessage(chatId, text, replyMarkup, false, attempt);
     }
-    console.error(`[Telegram] sendMessage failed for chat ${chatId} (HTTP ${err.response?.status || 'network'}): ${description}`);
+    console.error(`[Telegram] sendMessage failed for chat ${chatId} (HTTP ${status || 'network'}): ${description}`);
     return false;
   }
 }
 
-async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null) {
+async function sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup = null, attempt = 0) {
   if (!TELEGRAM_BOT_TOKEN) return false;
   try {
     const fullPhotoUrl = photoUrl.startsWith('/') ? `${SERVER_URL}${photoUrl}` : photoUrl;
     const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
       chat_id: chatId,
       photo: fullPhotoUrl,
-      caption: caption,
+      caption,
       parse_mode: 'HTML',
       reply_markup: replyMarkup
     }, { timeout: 8000 });
     if (response.data?.ok === true) return true;
-    console.warn(`[Telegram] sendPhoto не підтвердив доставку для чату ${chatId}:`, response.data?.description || 'невідома помилка');
-    return await sendTelegramMessage(chatId, caption, replyMarkup);
+    console.warn(`[Telegram] sendPhoto не підтвердив доставку для чату ${chatId}: `, response.data?.description || 'невідома помилка');
+    return sendTelegramMessage(chatId, caption, replyMarkup);
   } catch (err) {
-    if (err.response?.status === 429) {
-      console.warn(`⚠️ Telegram Rate Limit (429) на фото для чата ${chatId}.`);
+    if (err.response?.status === 403) {
+      await markTelegramBlocked(chatId);
+      console.warn(`[Telegram] Бот заблокований користувачем ${chatId}; фото та повідомлення більше не надсилаються.`);
       return false;
     }
-    return await sendTelegramMessage(chatId, caption, replyMarkup);
+    if (err.response?.status === 429 && attempt < 1) {
+      const retrySeconds = getTelegramRetryDelaySeconds(err);
+      console.warn(`[Telegram] 429 для фото чату ${chatId}; повтор через ${retrySeconds} с.`);
+      await new Promise(resolve => setTimeout(resolve, retrySeconds * 1000));
+      return sendTelegramPhoto(chatId, photoUrl, caption, replyMarkup, attempt + 1);
+    }
+    return sendTelegramMessage(chatId, caption, replyMarkup);
   }
 }
 
