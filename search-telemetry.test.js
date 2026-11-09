@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards, evaluateCriteriaFunnel } = require('./search-telemetry');
+const fs = require('node:fs');
+const path = require('node:path');
+const { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria } = require('./search-telemetry');
 
 test('sanitizes sensitive URL query parameters and credentials', () => {
   const result = new URL(sanitizeSearchUrl('https://user:pass@www.olx.ua/search?q=iphone&token=abc&initData=secret#fragment'));
@@ -45,4 +47,23 @@ test('reports model, memory, condition and price funnel without weakening criter
   assert.equal(result.counts.after_price, 2);
   assert.equal(result.counts.after_condition, 2);
   assert.equal(result.finalCount, 2);
+});
+
+test('redacts free-text query from OLX search path and emits only normalized criteria', () => {
+  const safeUrl = sanitizeSearchUrl('https://www.olx.ua/uk/chernigov/q-private-phone-number-123456/');
+  assert.match(safeUrl, /q-\\[redacted\\]/);
+  assert.doesNotMatch(safeUrl, /123456/);
+  const summary = summarizeCriteria({
+    modelTerm: 'iPhone 15', includeTerms: ['256 GB', 'private phone 123456'],
+    anyTerms: [], excludeTerms: ['icloud'], condition: 'used', city: 'Чернігів'
+  });
+  assert.equal(summary.model, 'iPhone 15');
+  assert.deepEqual(summary.memoryGb, ['256']);
+  assert.equal(summary.includeTermCount, 2);
+  assert.equal(JSON.stringify(summary).includes('123456'), false);
+});
+
+test('admin diagnostic route is wired through server-side admin authentication', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /app\\.post\\(['"]\\/api\\/admin\\/search-diagnostics['"],\\s*adminAuthMiddleware/);
 });
