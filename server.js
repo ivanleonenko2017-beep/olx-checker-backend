@@ -995,7 +995,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
 
     const requestedLocation = String(city || '').trim();
     const searchTrace = { source: 'manual', userId: req.telegramUser.id, criteria: {
-      model: criteria.modelTerm || '', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
+      modelTerm: criteria.modelTerm || '', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
       excludeTerms: criteria.excludeTerms, condition: criteria.condition, city: criteria.city,
       minPrice: criteria.minPrice, maxPrice: criteria.maxPrice
     }};
@@ -1030,7 +1030,6 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     ));
     const requestedCondition = String(condition || 'all').trim().toLowerCase();
     if (requestedCondition !== 'all') criteria.condition = requestedCondition;
-    const stagedFunnel = evaluateCriteriaFunnel(locationItems, criteria);
     const cityRejectedCards = cityRejected.map(item => ({
       listingKey: hashUserId(item.link, TELEGRAM_WEBHOOK_SECRET),
       url: sanitizeSearchUrl(item.link),
@@ -1066,6 +1065,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       await Promise.all(workers);
     }
 
+    const stagedFunnel = evaluateCriteriaFunnel(locationItems, criteria);
     const rejectionReasons = {};
     const rejectedCards = [...cityRejectedCards];
     const items = locationItems.filter(item => {
