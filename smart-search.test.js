@@ -347,3 +347,16 @@ test('does not invent an iPhone model constraint for unrelated product queries',
   assert.equal(parsed.criteria.modelTerm, '');
   assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
 });
+
+test('recognizes Apple model shorthand without broadening the model family', () => {
+  const parsed = parseNaturalLanguageQuery('Apple 14 256');
+  assert.equal(parsed.criteria.modelTerm, 'iPhone 14');
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple 14 256GB',
+    price: 18000
+  }, parsed.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({
+    title: 'Apple iPhone 14 Pro 256GB',
+    price: 18000
+  }, parsed.criteria).reason, 'model_mismatch');
+});
