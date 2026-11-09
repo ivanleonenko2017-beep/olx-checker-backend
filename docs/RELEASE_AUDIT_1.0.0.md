@@ -205,3 +205,158 @@ PR #37 додав модуль, що був відсутній, і unit tests. G
 4. Вирішити Render Free vs платний план і перевірити Supabase backup/PITR у Dashboard.
 5. Після юридичної готовності провести мінімальний реальний платіж і перевірити Premium activation/expiry/refund.
 6. Надати фінальне погодження на дизайн-поліровку після стабілізації пошуку.
+
+
+## Актуалізація після PR #40–#42: телеметрія, OLX sequence, Vercel/Render (2026-11-09)
+
+### PR, CI, production deploy та rollback
+
+- PR #40 «Document missing control-search trace in release audit» merged у production branch; merge SHA `06375508d6985ed3127a56f35333efa9d8206826`. Vercel Preview Comments — success. PR змінив тільки документацію.
+- PR #41 «Add structured OLX search telemetry and admin dry-run» merged у SHA `75de01ddeb2ee10229a8a119b74ab536d73f05b5`. GitHub Actions: 76 tests passed, 0 failed, 0 skipped; `node --check server.js` виконаний. Render build succeeded, deploy `dep-dbp3kr95efls73ao94dg` досяг Live. Startup: Supabase admin client, worker, server port 10000, Telegram webhook registration.
+- PR #42 «Clarify search funnel telemetry and test admin gate» merged у SHA `43ca8c573d34a721cb88b26dd16f410d5d5ac722`. GitHub Actions: 77 tests passed, 0 failed, 0 skipped; `node --check server.js` виконаний. Render deploy `dep-dbp3m0tg1s2s73btv320` досяг Live о 2026-11-09 21:29:07 UTC. Startup logs: server port 10000, Supabase admin client, background worker enabled, Telegram webhook registration.
+- Поточний rollback anchor: deploy `dep-dbp3m0tg1s2s73btv320` / SHA `43ca8c573d34a721cb88b26dd16f410d5d5ac722`. Попередній робочий deploy до PR #42: `dep-dbp3kr95efls73ao94dg` / SHA `75de01ddeb2ee10229a8a119b74ab536d73f05b5`. Перед rollback повторно перевірити Render events і фактичний Live SHA.
+- Нічого не змінювали в Supabase schema/data, Render тарифі, Telegram credentials, платежах або фільтрах.
+
+### Нова телеметрія
+
+Код у production записує структуровані `[SEARCH_TRACE]` події для:
+- `manual` — ручний пошук з Mini App;
+- `background` — фоновий пошук фільтра;
+- `filter_warmup` — перевірка при створенні фільтра;
+- `diagnostic` — адмінський dry-run.
+
+Поля:
+- request-id (12 hex), UTC timestamp, source, HMAC user hash (без Telegram ID), query hash (без сирого тексту), нормалізовані модель/пам'ять/стан/місто/ціни та кількість include/exclude термінів;
+- на кожну сторінку: requested/final URL з редагованим вільним пошуковим сегментом, HTTP status, duration, response bytes, anti-bot indicator, card container counts, parsed card count, нові після dedup, cumulative unique, parser counters, stop reason;
+- funnel: parsed, afterDedup, afterCardParse, city, критерії моделі/пам'яті/виключень/ціни/стану, returned, capacityUnverified та cityUnverified;
+- до 25 per-listing відмов з псевдонімним listing key, посиланням, етапом, кодом причини й коротким значенням; решта згортається в omitted count;
+- окремі page errors з HTTP 429/5xx, timeout/error code.
+
+Raw Telegram ID, initData, bot token та raw query text у нових trace не записуються. URL очищаються від credentials та секретних query-параметрів. Пошуковий сегмент `/q-...` маскується.
+
+Важливе обмеження: OLX parser поки не класифікує recommendation/promoted sections окремо. Тому поле `recommendationClassification` дорівнює `not_instrumented`; `afterCardParse` означає картки, які парсер витягнув з ad links, а не доведене виключення рекомендацій. `declaredTotal` поки null, бо загальна кількість з HTML/JSON не витягується. Не інтерпретувати ці поля як доведений відсутній блок у відповіді OLX.
+
+### Адмінська dry-run діагностика
+
+Доданий endpoint `POST /api/admin/search-diagnostics`.
+- Вхід: JSON `{"query":"куплю айфон 15 на 256 в чернигове"}`.
+- Авторизація: Telegram initData з заголовка `x-telegram-init-data`, перевірка підпису та існуючий серверний `adminAuthMiddleware`/admin lookup.
+- Частота: не частіше одного запуску на хвилину на admin key.
+- Повертає requestId, page traces, stop reason, funnel, bounded rejected cards і результати.
+- Не створює фільтр, не споживає user quota, не пише в user tables і не надсилає Telegram-повідомлення.
+- Unit test перевіряє, що відсутній користувач і звичайний користувач відхиляються authorization gate; окремий static test перевіряє, що endpoint підключений через adminAuthMiddleware. Це не замінює окремий live HTTP negative test з реальним Telegram initData.
+
+### Факти зі старого production OLX trace — 4 листопада
+
+Відновлений повний лог `[OLX city diagnostics]` від `2026-11-04T19:33:01.716Z` для пошуку iPhone 15/256 у Чернігові:
+- URL: `https://www.olx.ua/uk/chernigov/q-%D0%B0%D0%B9%D1%84%D0%BE%D0%BD%2015%20256/`;
+- parsed=30, cityMatched=5;
+- API search completed 19:33:12.416 UTC: detailsEnriched=3, returned=4, rejected=`{"missing_required_term":1}`, durationMs=22630.
+- Послідовність 30 parsed cards у логах: перші п'ять — Чернігів; позиції 6–30 — інші населені пункти. Місцеві та чужі міста в цьому конкретному витягнутому списку не перемішані.
+
+| № | Назва (скорочено) | Місце з картки | Міський фільтр |
+|---:|---|---|---|
+| 1 | Продам Антон 15 Pro Max на запчастини | Чернігів | пройшов |
+| 2 | Айфон 15 Pro Max, 256 | Чернігів | пройшов |
+| 3 | продаю айфон 15+ | Чернігів | пройшов |
+| 4 | Продам iPhone 15 Pro Max / 256 GB | Чернігів | пройшов |
+| 5 | Продам телефон iPhone 15 Pro Max 256G | Чернігів | пройшов |
+| 6 | Продам Айфон 15 256 GB | Велика Багачка | відсів |
+| 7 | Айфон 15 Pro 256, АКБ 96 | Суми | відсів |
+| 8 | iPhone 15 256 GB Neverlock | Київ, Святошинський | відсів |
+| 9 | iPhone 15 Pro 256 GB | Солонка | відсів |
+| 10 | iPhone 15 Pro Max 256 GB | Львів, Шевченківський | відсів |
+| 11 | iPhone 15 Pro Max 256 GB E-sim | Кропивницький, Фортечний | відсів |
+| 12 | Айфон 15 Pro Max 256, АКБ 95 | Суми | відсів |
+| 13 | iPhone 15 Pro 256 GB | Умань | відсів |
+| 14 | Айфон 15 Pro 256 GB | Київ, Оболонський | відсів |
+| 15 | iPhone 15 256 GB | Київ, Святошинський | відсів |
+| 16 | Apple iPhone 15 Pro Max 256 GB | Львів, Шевченківський | відсів |
+| 17 | Айфон 15 Pro 256 GB | Миколаїв, Центральний | відсів |
+| 18 | Айфон 15 Pro Max 256 GB | Одеса, Приморський | відсів |
+| 19 | Apple iPhone 15 Pro Max 256 GB | Хмельницький | відсів |
+| 20 | iPhone 15 256 GB, магазин | Умань | відсів |
+| 21 | iPhone 15 Pro 256 GB | Кривий Ріг, Центрально-Міський | відсів |
+| 22 | Айфон 15 Pro Max б/у | Харків, Салтівський | відсів |
+| 23 | iPhone 15 Pro 128/256 | Київ, Голосіївський | відсів |
+| 24 | Айфон 15 Pro Max | Київ, Деснянський | відсів |
+| 25 | Айфон 15 Pro Max 256 | Суми | відсів |
+| 26 | Айфон 15 Pro 256 GB E-sim | Вінниця | відсів |
+| 27 | Продам айфон 15 256 | Лохвиця | відсів |
+| 28 | iPhone 15 Pro 256 GB | Хмельницький | відсів |
+| 29 | iPhone 15 Pro 256 GB | Умань | відсів |
+| 30 | Apple iPhone 15 Pro Max 256 GB | Львів, Шевченківський | відсів |
+
+Для позицій 6–30 причина відсіву — невідповідність строгому місту Чернігів, за locationDate і cardText diagnostics. Це не «втрачені чернігівські» оголошення в межах strict-city фільтра. У позиції 1 місто/модель підходили, але картка не підтверджувала 256 GB; єдина агрегована причина відмови в API log — missing_required_term. Позиції 2, 4, 5 містили 256 у заголовку. Позиція 3 не містила пам'ять у заголовку; старий log не записав окремий capacityUnverified count, тому не можна підтвердити, що вона мала саме цей прапорець, хоча вона входить у чотири повернуті результати.
+
+Цей запис був до production пагінації, тому він не показує, чи тоді запитувалася сторінка 2: тодішній код працював з однією сторінкою. Він доводить лише послідовність першої витягнутої сторінки: 5 локальних на позиціях 1–5, потім 25 інших міст. Не доводить, що решта OLX сторінок не містить інших локальних оголошень.
+
+### Чому в старих логах parsed=30
+
+- В коді парсер обмежує rawItems значенням до 200 на сторінку; hard cap=30 у parser code не знайдено.
+- Старі 30 — кількість карток, які були витягнуті з того HTML/DOM у конкретному прогоні, а не доведений application hard limit.
+- Оскільки сирий HTML/JSON OLX не був збережений, а репозиторій не містить OLX HTML fixtures, неможливо встановити, чи це рівно 30 основних результатів OLX, чи основні результати разом з рекомендаціями/іншими секціями. Немає загальної кількості OLX, отриманої з HTML.
+- У repository test directory є smart-search tests, але немає OLX HTML fixture. Створювати синтетичний HTML і називати його реальною відповіддю OLX не можна.
+
+### URL і пагінація за поточним кодом
+
+Для natural-language smart search з містом Чернігів:
+- city slug: `chernigov`;
+- path: `/uk/chernigov/q-<encoded search terms>/`;
+- пам'ять (наприклад, 256) додається до upstream query;
+- мін/макс ціна, якщо задані, додаються як `search[filter_float_price:from]` та `search[filter_float_price:to]`;
+- сортування і радіус у цьому builder не додаються;
+- `buildOlxPageUrl` ставить `?page=2` / `?page=3`, зберігаючи інші параметри;
+- для city-scoped natural query за замовчуванням запитуються 2 сторінки, env limit може бути 1–3; зупинка — порожня сторінка, відсутність нових unique cards, page limit або upstream error/429.
+- Для query, який сам є повним URL, `parseOlx` вимикає city-scoped pagination і обмежується однією сторінкою. Це окрема поведінка direct-URL режиму.
+
+Шлях `/uk/chernigov/` є city-scoped URL, але старий production trace показав у витягнутих DOM-картках 25 інших міст. Тому сам URL не гарантує, що всі card nodes у HTML — місцеві; strict city filter окремо прибирає їх.
+
+Власник не надав посилання OLX і число релевантних оголошень (обидва поля залишилися шаблонами). Одноразовий зовнішній перегляд OLX через доступний web fetch завершився inaccessible. Порівняти браузерний URL параметр-за-параметром, підтвердити 10–16 карток, або довести порядок секцій у вихідному HTML неможливо. Старий trace показує 25 міст, включно з Києвом, Львовом, Одесою, але без HTML заголовків секцій не можна визначити, чи OLX показав блок рекомендацій, змішану видачу або іншу структуру.
+
+Потенційний edge case в коді: cardText fallback для міста виконується тільки коли `locationDate` порожній. Якщо `locationDate` заповнений не-міським текстом/датою, а cardText при цьому містить місцевий location label, картка не пройде. У старому trace всі п'ять місцевих карток мали коректний Чернігів у locationDate, а 25 чужих карток мали інші міста; отже, цей edge case не пояснює зафіксований результат і без HTML fixture не є доведеною причиною втрати. Логіку фільтрів не змінювали.
+
+### Admin dry-run і поточна перевірка після deploy
+
+- Live deploy PR #42: `dep-dbp3m0tg1s2s73btv320`, SHA `43ca8c573d34a721cb88b26dd16f410d5d5ac722`, status=live.
+- Після deploy startup logs показали Supabase admin, worker enabled, server port 10000 та webhook registration.
+- У доступному часовому вікні після deploy не знайдено `[SEARCH_TRACE]`, `API search` або `Worker Diagnostics` подій. Фонових фільтрів у Supabase було 0 за попереднім audit; manual/diagnostic контрольний запит після нового deploy не виконаний.
+- `GET /health` через web fetch не вдалося перевірити. Render service metadata має порожній `healthCheckPath`; отже Render не запускає health-check probe за налаштованим шляхом.
+- Telegram webhook registration видно в startup logs, але Bot API `getWebhookInfo` і фактичні pending updates/last_error не перевірені.
+
+### Vercel
+
+- GitHub PR comments показують Vercel project `olx-checker-backend`, project ID `prj_71cAWnDiVzwQ8LHAcDcwfcej4tu4`, пов'язаний з цим repository. Для PR #41 Vercel створив Preview deployment і позначив його Ready; PR #40 і #42 також мали Vercel Preview Comments check success.
+- Це доводить наявність Vercel GitHub integration та PR Preview deployments, але не доводить, що production alias `olx-checker-backend.vercel.app` активний або що він містить працездатну копію бекенда.
+- Перевірка `https://olx-checker-backend.vercel.app` через web fetch завершилася Cache miss; live HTTP статус і вміст не підтверджені.
+- У `index.html` `BACKEND_URL = window.location.origin`. Тому якщо ця сторінка відкрита з Vercel, її API calls адресуються на Vercel origin. У repository root немає `vercel.json`; dashboard-level rewrites/domain settings не доступні для перевірки. Це ризик дублюючого/непрацюючого frontend origin, але не доказ доступу до Supabase.
+- Vercel environment variable settings недоступні через наявні GitHub/Render connectors. Фактичні імена змінних у Vercel, чи вони однакові з Render, чи там є `SUPABASE_SERVICE_ROLE_KEY`/Telegram production secrets, і чи Vercel вказує на той самий Supabase — **не підтверджено**. Не стверджувати, що production secrets присутні або відсутні.
+- Vercel Preview Comments check — integration/deployment feedback check; GitHub Actions `smart-search-tests` — окрема code-test workflow. PR #40–#42 успішно merged після успішного Vercel status. Доступу до branch protection settings немає, тому чи Vercel check є обов'язковим ruleset не підтверджено.
+- Код сервера читає env names: `ADMIN_IDS`, `ALLOWED_ORIGINS`, `ENABLE_BACKGROUND_WORKER`, `ENABLE_TEST_PREMIUM_BYPASS`, `MONOBANK_JAR_LINK`, `MONOBANK_JAR_URL`, `OLX_SEARCH_MAX_PAGES`, `PAYMENTS_ENABLED`, `REGISTER_TELEGRAM_WEBHOOK`, `SERVER_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_STARS_PREMIUM_PRICE`, `TELEGRAM_WEBHOOK_SECRET`. Це лише env names, які читає код; це не перелік реально заданих Vercel variables.
+
+### Render — план і вплив простою
+
+- Service metadata: plan=Free, numInstances=1, region=Frankfurt, suspended=not_suspended, autoDeploy=commit, healthCheckPath порожній.
+- Render Free web service зупиняється після 15 хвилин без inbound traffic і прокидається приблизно за одну хвилину після нового HTTP request. Free не підтримує scale beyond one instance. Офіційно Render не рекомендує Free для production: https://render.com/docs/free
+- Внутрішній setInterval worker сам по собі не є inbound traffic і не гарантує, що Free instance залишиться активним. Коли service засинає, фонові перевірки припиняються; перший webhook/API request може затриматися на wake-up.
+- Telegram Bot API повідомляє, що при неуспішному webhook response Telegram повторює доставку та зрештою припиняє після «reasonable number of attempts»; точна кількість не фіксується в нашому audit. https://core.telegram.org/bots/api
+- Рекомендація: для стабільних webhook/background scans перевести Render на платний always-on compute після рішення власника. Тариф не змінювали.
+
+### Висновок після PR #42
+
+**Вердикт залишається: НЕТ для публічного запуску.** Телеметрія та адмінська діагностика вже в production; це інструменти для доказової перевірки, а не доказ того, що OLX search дає повну коректну видачу. Контрольний запит на новому deploy ще не виконаний.
+
+- Пошук: 🛠 телеметрія/endpoint у Live; ⚠️ фактична сторінкова воронка після нового deploy не перевірена.
+- Юридичні документи: ⚠️ checklist є; owner identity/contact/terms і legal review відсутні.
+- Дизайн: ⚠️ окремий UI/UX і mobile QA не зроблені.
+- Платежі: ⚠️ production payment flow не тестувався.
+
+### Що лишається власнику
+
+1. Запустити admin dry-run і ручний Mini App пошук з однаковим текстом; надіслати requestId dry-run, час ручного запиту та кількість/посилання оголошень OLX.
+2. Надати фактичний URL OLX для порівняння параметрів; вирішити окремо, чи потрібен лише strict Чернігів, чи окремий явний режим «Чернігів + радіус/сусідні населені пункти».
+3. Перевірити Vercel project settings: production domain, rewrites, environment variable names/targets; переконатися, що service-role key і Telegram bot token не дублюються у непотрібному Vercel environment.
+4. Перевірити Supabase backup/PITR і вирішити Render Free vs paid.
+5. Надати юридичні реквізити/умови та отримати правову перевірку.
+6. Після юридичної готовності — реальний мінімальний платіж і Premium lifecycle QA.
+7. Погодити окрему дизайн-поліровку після перевірки пошуку.
