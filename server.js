@@ -731,7 +731,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
       const merged = mergeUniqueOlxItems(pages, 600);
       const newAfterDedup = Math.max(0, merged.length - previousUniqueCount);
       const pageTrace = {
-        page, requestedUrl: result.pageMeta?.requestedUrl || sanitizeSearchUrl(pageUrl),
+        at: new Date().toISOString(), page, requestedUrl: result.pageMeta?.requestedUrl || sanitizeSearchUrl(pageUrl),
         finalUrl: result.pageMeta?.finalUrl || sanitizeSearchUrl(pageUrl),
         httpStatus: result.pageMeta?.status || null,
         durationMs: result.pageMeta?.durationMs ?? null,
@@ -1128,7 +1128,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       ...(parsedNaturalQuery ? { parsedQuery: parsedNaturalQuery.query, criteria: parsedCriteria } : {})
     });
   } catch (error) {
-    console.error(`[API search] Failed: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}, requestId=${typeof requestId === 'string' ? requestId : 'not-created'}, durationMs=${Date.now() - startedAt}`);
+    console.error(`[API search] Failed: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}, durationMs=${Date.now() - startedAt}`);
     if (error.code === 'OLX_BLOCKED') {
       return res.status(503).json({ success: false, error: error.message });
     }
