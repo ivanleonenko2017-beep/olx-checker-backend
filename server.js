@@ -1128,7 +1128,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       ...(parsedNaturalQuery ? { parsedQuery: parsedNaturalQuery.query, criteria: parsedCriteria } : {})
     });
   } catch (error) {
-    console.error(`[API search] Failed: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}, message=${String(error.message || 'unknown').slice(0, 180)}, durationMs=${Date.now() - startedAt}`);
+    console.error(`[API search] Failed: code=${error.code || 'unknown'}, status=${error.response?.status || 'none'}, requestId=${typeof requestId === 'string' ? requestId : 'not-created'}, durationMs=${Date.now() - startedAt}`);
     if (error.code === 'OLX_BLOCKED') {
       return res.status(503).json({ success: false, error: error.message });
     }
@@ -2211,7 +2211,7 @@ async function runBackgroundWorker() {
           console.log(`[OLX search] filter=${filter.id} cityScope=${citySlug || 'all'}`);
         }
 
-        const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city, { source: 'background', userId: filter.user_id, criteria });
+        const { items: parsedItems, averagePrice, requestId: searchRequestId } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city, { source: 'background', userId: filter.user_id, criteria });
         const requestedLocation = String(filter.city || '').trim();
         // Advanced term filters need the listing page, not just the often-incomplete
         // search card. Fetch full descriptions only after date and city filtering below,
@@ -2235,6 +2235,8 @@ async function runBackgroundWorker() {
           locationMatches(item.locationDate, requestedLocation) ||
           (!item.locationDate && locationMatchesCardText(item.cardText, requestedLocation))
         );
+        const dateRejected = parsedItems.filter(item => !dateEligibleItems.includes(item));
+        const cityRejected = dateEligibleItems.filter(item => !locationEligibleItems.includes(item));
         if (needsFullDescription) {
           // Limit detail-page requests to ads that could actually be notified.
           // A small concurrency cap keeps the worker responsive without hammering OLX.
@@ -2279,7 +2281,34 @@ async function runBackgroundWorker() {
           if (!result.matches) counts[result.reason] = (counts[result.reason] || 0) + 1;
           return counts;
         }, {});
-        console.log(`[Worker Diagnostics] filter=${filter.id} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} rejected=${JSON.stringify(rejectionCounts)} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
+        const traceRejected = [
+          ...dateRejected.map(item => ({ item, stage: 'date', reason: 'not_published_today_or_seen' })),
+          ...cityRejected.map(item => ({ item, stage: 'city', reason: 'city_mismatch' })),
+          ...criteriaEvaluations.filter(result => !result.matches).map(result => ({
+            item: result.item, stage: result.reason === 'condition_mismatch' ? 'condition' :
+              (result.reason === 'below_min_price' || result.reason === 'above_max_price' ? 'price' :
+                (result.reason === 'missing_required_term' ? 'memory_or_required_terms' :
+                  (result.reason === 'model_mismatch' || result.reason === 'wrong_product_type' ? 'model' : 'other'))),
+            reason: result.reason
+          }))
+        ].map(entry => ({
+          listingKey: hashUserId(entry.item.link, TELEGRAM_WEBHOOK_SECRET),
+          url: sanitizeSearchUrl(entry.item.link), stage: entry.stage, reason: entry.reason,
+          value: safeText(entry.stage === 'city' ? entry.item.locationDate : entry.item.title, 100)
+        }));
+        console.log('[SEARCH_TRACE] ' + JSON.stringify({
+          event: 'search_funnel', requestId: searchRequestId, source: 'background',
+          parsed: parsedItems.length, afterDedup: parsedItems.length, afterAdsOnly: parsedItems.length,
+          afterDate: dateEligibleItems.length, afterCity: locationEligibleItems.length,
+          afterCriteria: items.length,
+          capacityUnverified: items.filter(item => item.capacityUnverified === true).length,
+          cityUnverified: locationEligibleItems.filter(item => !item.locationDate).length,
+          rejectedByReason: rejectionCounts,
+          rejectedCards: compactRejectedCards(traceRejected, 25).cards,
+          rejectedCardsOmitted: compactRejectedCards(traceRejected, 25).omitted,
+          knownListings: knownLinks.size
+        }));
+        console.log(`[Worker Diagnostics] filter=${filter.id} requestId=${searchRequestId} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} rejected=${JSON.stringify(rejectionCounts)} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
         const { error: checkedAtError } = await supabase.from('filters')
           .update({ last_checked_at: new Date().toISOString() }).eq('id', filter.id);
         if (checkedAtError) {
