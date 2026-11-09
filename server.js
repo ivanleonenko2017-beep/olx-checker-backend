@@ -587,7 +587,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
 
     // Preserve the complete visible card text: OLX condition badges and specs
     // are not always included in the title or description fields.
-    const cardText = $(element).text().replace(/\\s+/g, ' ').trim().slice(0, 2500);
+    const cardText = $(element).text().replace(/\s+/g, ' ').trim().slice(0, 2500);
     let locationDate = $(element).find('[data-testid="location-date"], [data-cy="location-date"]').first().text().trim();
     if (!locationDate) {
       const locationCandidates = $(element).find('[class*="location"], [class*="date"]').toArray()
