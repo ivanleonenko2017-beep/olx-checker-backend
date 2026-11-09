@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria } = require('./search-telemetry');
+const { safeText, sanitizeSearchUrl, hashUserId, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
 
 test('sanitizes sensitive URL query parameters and credentials', () => {
   const result = new URL(sanitizeSearchUrl('https://user:pass@www.olx.ua/search?q=iphone&token=abc&initData=secret#fragment'));
@@ -66,4 +66,13 @@ test('redacts free-text query from OLX search path and emits only normalized cri
 test('admin diagnostic route is wired through server-side admin authentication', () => {
   const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
   assert.match(source, /app\.post\(['"]\/api\/admin\/search-diagnostics['"],\s*adminAuthMiddleware/);
+});
+
+test('rejects missing users and ordinary users at the admin authorization gate', async () => {
+  let checkedUserId = null;
+  const isAdmin = async id => { checkedUserId = id; return id === 9001; };
+  assert.equal(await isAuthorizedAdmin(null, isAdmin), false);
+  assert.equal(await isAuthorizedAdmin({ id: 7007 }, isAdmin), false);
+  assert.equal(checkedUserId, 7007);
+  assert.equal(await isAuthorizedAdmin({ id: 9001 }, isAdmin), true);
 });
