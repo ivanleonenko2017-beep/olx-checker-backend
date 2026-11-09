@@ -792,7 +792,7 @@ async function fetchListingDescription(inputUrl) {
 
 app.get('/api/search', userAuthMiddleware, async (req, res) => {
   const startedAt = Date.now();
-  const testPremiumBypass = process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
+  const testPremiumBypass = process.env.NODE_ENV === 'test' && process.env.RENDER !== 'true' && process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
   console.log(`[API search] Request received: queryProvided=${Boolean(req.query.query)}, categoryUrlProvided=${Boolean(req.query.categoryUrl)}, filters=${Boolean(req.query.minPrice || req.query.maxPrice || req.query.city || req.query.condition)}`);
   try {
     // Enforce trial/Premium access server-side for every search request.
@@ -1049,7 +1049,7 @@ app.get('/api/ad-details', async (req, res) => {
 
 app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
   try {
-    const testPremiumBypass = process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
+    const testPremiumBypass = process.env.NODE_ENV === 'test' && process.env.RENDER !== 'true' && process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
     const userId = req.telegramUser.id;
     const isAdmin = await checkIsAdmin(userId);
     let userData = { tariff: 'free', premium_until: null, trial_started_at: null };
@@ -1067,7 +1067,7 @@ app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
         if (upsertError) throw upsertError;
         userData.trial_started_at = new Date().toISOString();
       }
-      // Start the one-time 5-day trial on the first Mini App profile request.
+      // Start the one-time 4-day trial on the first Mini App profile request.
       if (!userData.trial_started_at) {
         const trialStartedAt = new Date().toISOString();
         const { data: initializedUser, error: trialInitError } = await supabase.from('users')
@@ -1168,7 +1168,7 @@ app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
 
 app.post('/api/filters', userAuthMiddleware, async (req, res) => {
   try {
-    const testPremiumBypass = process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
+    const testPremiumBypass = process.env.NODE_ENV === 'test' && process.env.RENDER !== 'true' && process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
     if (!supabase) {
       return res.status(503).json({ success: false, error: 'Перевірка доступу тимчасово недоступна. Спробуйте пізніше.' });
     }
