@@ -1931,6 +1931,7 @@ app.post('/telegram-webhook', async (req, res) => {
   }
 });
 
+const WORKER_INSTANCE_ID = process.env.RENDER_INSTANCE_ID || crypto.randomUUID();
 let isWorkerRunning = false;
 async function runBackgroundWorker() {
   if (isWorkerRunning || !supabase || !TELEGRAM_BOT_TOKEN) return;
@@ -1938,25 +1939,45 @@ async function runBackgroundWorker() {
   try {
     isWorkerRunning = true;
     const { data: filters, error: filtersError } = await supabase.from('filters').select('*').order('created_at', { ascending: true });
-    const freeFilterProcessed = new Set();
+    const processedFiltersByUser = new Map();
     if (filtersError) throw filtersError;
     if (!filters || filters.length === 0) return;
 
     for (const filter of filters) {
+      const lockClient = supabaseAdmin || supabase;
+      let filterLockAcquired = false;
       try {
+        if (!lockClient) continue;
+        const { data: lockAcquired, error: lockError } = await lockClient.rpc('acquire_filter_processing_lock', {
+          p_filter_id: String(filter.id),
+          p_lock_owner: WORKER_INSTANCE_ID,
+          p_lease_seconds: 180
+        });
+        if (lockError) {
+          console.warn(`[Worker Lock] Не вдалося захопити фільтр ${filter.id}; пропускаємо цей цикл:`, lockError.message);
+          continue;
+        }
+        filterLockAcquired = lockAcquired === true;
+        if (!filterLockAcquired) continue;
+
         const { data: filterOwner, error: ownerError } = await supabase
-          .from('users').select('tariff,premium_until,is_admin,trial_started_at').eq('telegram_id', filter.user_id).maybeSingle();
+          .from('users').select('tariff,premium_until,is_admin,trial_started_at,telegram_blocked_at').eq('telegram_id', filter.user_id).maybeSingle();
         if (ownerError) {
           console.error(`Не вдалося перевірити тариф користувача для фільтра ${filter.id}:`, ownerError.message);
           continue;
         }
-        const access = deriveAccess(filterOwner || {}, filterOwner?.is_admin === true);
-        const ownerTrial = access.hasActiveTrial;
-        const ownerPremium = access.hasActivePremium;
-        if (!ownerPremium && !ownerTrial && filterOwner?.is_admin !== true) {
-          if (freeFilterProcessed.has(String(filter.user_id))) continue;
-          freeFilterProcessed.add(String(filter.user_id));
+        if (filterOwner?.telegram_blocked_at) {
+          console.log(`[Worker] Користувач ${filter.user_id} заблокував бота; фільтр ${filter.id} пропущено.`);
+          continue;
         }
+        const access = deriveAccess(filterOwner || {}, filterOwner?.is_admin === true);
+        const userKey = String(filter.user_id);
+        const processedCount = processedFiltersByUser.get(userKey) || 0;
+        const filterLimit = filterOwner?.is_admin === true
+          ? Infinity
+          : Math.max(1, Number(access.filterLimit) || 1);
+        if (processedCount >= filterLimit) continue;
+        processedFiltersByUser.set(userKey, processedCount + 1);
         const intervalMs = access.checkIntervalMinutes * 60 * 1000;
         const lastCheckedAt = filter.last_checked_at ? Date.parse(filter.last_checked_at) : 0;
         if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0 && Date.now() - lastCheckedAt < intervalMs) continue;
@@ -2190,6 +2211,14 @@ async function runBackgroundWorker() {
         }
       } catch (fErr) {
         console.error(`Помилка воркера для фільтра ${filter.id}:`, fErr.message);
+      } finally {
+        if (filterLockAcquired && lockClient) {
+          const { error: releaseError } = await lockClient.rpc('release_filter_processing_lock', {
+            p_filter_id: String(filter.id),
+            p_lock_owner: WORKER_INSTANCE_ID
+          });
+          if (releaseError) console.warn(`[Worker Lock] Не вдалося звільнити фільтр ${filter.id}:`, releaseError.message);
+        }
       }
     }
   } catch (err) {
