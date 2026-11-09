@@ -33,7 +33,7 @@ test('reports model, memory, condition and price funnel without weakening criter
   const listings = [
     { title: 'Apple iPhone 15 256 GB', price: 20000, cardText: 'Чернігів • Б/у' },
     { title: 'Apple iPhone 15 Pro 256 GB', price: 20000, cardText: 'Чернігів • Б/у' },
-    { title: 'Apple iPhone 15', price: 20000, cardText: 'Чернігів • Новий' },
+    { title: 'Apple iPhone 15', price: 20000, cardText: 'Чернігів • Б/у' },
     { title: 'Apple iPhone 15 256 GB', price: 9000, cardText: 'Чернігів • Новий' }
   ];
   const result = evaluateCriteriaFunnel(listings, {
@@ -43,6 +43,6 @@ test('reports model, memory, condition and price funnel without weakening criter
   assert.equal(result.counts.after_model, 3);
   assert.equal(result.capacityUnverified, 1);
   assert.equal(result.counts.after_price, 2);
-  assert.equal(result.counts.after_condition, 1);
-  assert.equal(result.finalCount, 1);
+  assert.equal(result.counts.after_condition, 2);
+  assert.equal(result.finalCount, 2);
 });
