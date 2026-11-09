@@ -1901,25 +1901,6 @@ async function runBackgroundWorker() {
         const lastCheckedAt = filter.last_checked_at ? Date.parse(filter.last_checked_at) : 0;
         if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0 && Date.now() - lastCheckedAt < intervalMs) continue;
 
-        let targetUrl = filter.query ? filter.query.trim() : '';
-
-        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-          const citySlug = getOlxCitySlug(filter.city);
-          const searchPath = citySlug
-            ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(targetUrl)}/`
-            : `https://www.olx.ua/uk/list/q-${encodeURIComponent(targetUrl)}/`;
-          if (filter.min_price || filter.max_price) {
-            const searchMin = filter.min_price ? `search%5Bfilter_float_price%3Afrom%5D=${filter.min_price}` : '';
-            const searchMax = filter.max_price ? `search%5Bfilter_float_price%3Ato%5D=${filter.max_price}` : '';
-            const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
-            targetUrl = `${searchPath}?${queryParams}`;
-          } else {
-            targetUrl = searchPath;
-          }
-          console.log(`[OLX search] filter=${filter.id} cityScope=${citySlug || 'all'}`);
-        }
-
-        const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city);
         const criteria = normalizeCriteria({
           ...(filter.criteria || {}),
           minPrice: filter.min_price,
@@ -1927,6 +1908,29 @@ async function runBackgroundWorker() {
           city: filter.city,
           condition: filter.condition
         });
+        let targetUrl = filter.query ? filter.query.trim() : '';
+
+        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+          const storageQueryTerms = [...criteria.includeTerms, ...criteria.anyTerms]
+            .map(term => String(term).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1])
+            .filter(Boolean);
+          const upstreamQuery = [...new Set([targetUrl, ...storageQueryTerms])].join(' ').trim();
+          const citySlug = getOlxCitySlug(filter.city);
+          const searchPath = citySlug
+            ? \`https://www.olx.ua/uk/\${citySlug}/q-\${encodeURIComponent(upstreamQuery)}/\`
+            : \`https://www.olx.ua/uk/list/q-\${encodeURIComponent(upstreamQuery)}/\`;
+          if (filter.min_price || filter.max_price) {
+            const searchMin = filter.min_price ? \`search%5Bfilter_float_price%3Afrom%5D=\${filter.min_price}\` : '';
+            const searchMax = filter.max_price ? \`search%5Bfilter_float_price%3Ato%5D=\${filter.max_price}\` : '';
+            const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
+            targetUrl = \`\${searchPath}?\${queryParams}\`;
+          } else {
+            targetUrl = searchPath;
+          }
+          console.log(\`[OLX search] filter=\${filter.id} cityScope=\${citySlug || 'all'}\`);
+        }
+
+        const { items: parsedItems, averagePrice } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city);
         const requestedLocation = String(filter.city || '').trim();
         // Advanced term filters need the listing page, not just the often-incomplete
         // search card. Fetch full descriptions only after date and city filtering below,
