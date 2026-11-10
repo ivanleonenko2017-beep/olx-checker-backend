@@ -36,6 +36,6 @@ test('Telegram bot provides separate terms and privacy links without claiming ap
 test('legal pages do not assert an unverified owner identity or invented registration details', () => {
   assert.doesNotMatch(html, /Іван Леоненко/);
   assert.match(html, /Володілець персональних даних і відповідальна особа: не підтверджені/);
-  assert.match(html, /власник має внести перевірене повне ім’я або найменування/);
+  assert.match(html, /власник має внести перевірене повне ім’я або найменування/i);
   assert.match(html, /@esqide/);
 });
