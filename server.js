@@ -2418,10 +2418,11 @@ async function runBackgroundWorker() {
           console.log(`[Worker] Користувач ${filter.user_id} заблокував бота; фільтр ${filter.id} пропущено.`);
           continue;
         }
-        const access = deriveAccess(filterOwner || {}, filterOwner?.is_admin === true);
+        const filterOwnerIsAdmin = ADMIN_IDS.includes(Number(filter.user_id)) || filterOwner?.is_admin === true;
+        const access = deriveAccess(filterOwner || {}, filterOwnerIsAdmin);
         const userKey = String(filter.user_id);
         const processedCount = processedFiltersByUser.get(userKey) || 0;
-        const filterLimit = filterOwner?.is_admin === true
+        const filterLimit = filterOwnerIsAdmin
           ? Infinity
           : Math.max(1, Number(access.filterLimit) || 1);
         if (processedCount >= filterLimit) continue;
