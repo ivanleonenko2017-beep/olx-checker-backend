@@ -22,6 +22,10 @@ function canonicalAdUrl(inputUrl) {
   }
 }
 
+function shouldStopAfterNoLocalPage(hasSeenLocalPage, localCountOnPage) {
+  return hasSeenLocalPage === true && Number(localCountOnPage) === 0;
+}
+
 function mergeUniqueOlxItems(pages, maxItems = 600) {
   const output = [];
   const seen = new Set();
@@ -37,4 +41,4 @@ function mergeUniqueOlxItems(pages, maxItems = 600) {
   return output;
 }
 
-module.exports = { buildOlxPageUrl, canonicalAdUrl, mergeUniqueOlxItems };
+module.exports = { buildOlxPageUrl, canonicalAdUrl, mergeUniqueOlxItems, shouldStopAfterNoLocalPage };
