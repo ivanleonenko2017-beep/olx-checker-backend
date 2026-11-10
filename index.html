@@ -1555,6 +1555,9 @@
         const itemId = escapeHtml(item.id || '');
         const itemLink = safeOlxUrl(item.link || '');
         const itemTitle = escapeHtml(item.title || '');
+        const itemModelVersion = item.modelVersion
+          ? `<div class="text-[10px] text-emerald-300 mt-1">Версія: ${escapeHtml(item.modelVersion)}</div>`
+          : '';
         const itemPrice = escapeHtml(item.priceText || '');
         const itemLocation = escapeHtml(item.locationDate || '');
         const capacityWarning = item.capacityUnverified
@@ -1567,6 +1570,7 @@
               <img src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-20 h-20 object-cover rounded-xl bg-gray-800 flex-shrink-0">
               <div class="flex-1 min-w-0">
                 <div class="text-xs font-semibold text-white truncate">${itemTitle}</div>
+                ${itemModelVersion}
                 <div class="text-base font-bold ${isCheap ? 'text-emerald-400' : 'text-white'} mt-1">${itemPrice}</div>
                 <div class="text-[10px] text-gray-400 mt-1 truncate">${itemLocation}</div>
                 ${capacityWarning}
