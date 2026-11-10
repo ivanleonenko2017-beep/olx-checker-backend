@@ -164,7 +164,7 @@ test('worker applies Free filter cap by pausing excess rows instead of deleting 
   assert.match(worker, /filterLimit =/);
   assert.doesNotMatch(worker, /from\('filters'\)\.delete\(/);
 });
-\ntest('long Telegram output is split below the safe message limit, including one oversized section', () => {
+test('long Telegram output is split below the safe message limit, including one oversized section', () => {
   const chunks = splitTelegramMessages(['a'.repeat(2000), 'b'.repeat(2000), 'c'.repeat(2000)]);
   assert.equal(chunks.length, 3);
   const diagnostic = formatDiagnosticMessages({
