@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
+const { isTestPremiumBypassEnabled } = require('./premium-bypass');
 const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
@@ -891,7 +892,7 @@ async function fetchListingDescription(inputUrl) {
 
 app.get('/api/search', userAuthMiddleware, async (req, res) => {
   const startedAt = Date.now();
-  const testPremiumBypass = process.env.NODE_ENV === 'test' && process.env.RENDER !== 'true' && process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
+  const testPremiumBypass = isTestPremiumBypassEnabled(process.env);
   console.log(`[API search] Request received: queryProvided=${Boolean(req.query.query)}, categoryUrlProvided=${Boolean(req.query.categoryUrl)}, filters=${Boolean(req.query.minPrice || req.query.maxPrice || req.query.city || req.query.condition)}`);
   try {
     // Enforce trial/Premium access server-side for every search request.
@@ -1197,7 +1198,7 @@ app.get('/api/ad-details', async (req, res) => {
 
 app.get('/api/user/profile', userAuthMiddleware, async (req, res) => {
   try {
-    const testPremiumBypass = process.env.NODE_ENV === 'test' && process.env.RENDER !== 'true' && process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
+    const testPremiumBypass = isTestPremiumBypassEnabled(process.env);
     const userId = req.telegramUser.id;
     const isAdmin = await checkIsAdmin(userId);
     let userData = { tariff: 'free', premium_until: null, trial_started_at: null };
@@ -1316,7 +1317,7 @@ app.get('/api/user/filters', userAuthMiddleware, async (req, res) => {
 
 app.post('/api/filters', userAuthMiddleware, async (req, res) => {
   try {
-    const testPremiumBypass = process.env.NODE_ENV === 'test' && process.env.RENDER !== 'true' && process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true';
+    const testPremiumBypass = isTestPremiumBypassEnabled(process.env);
     if (!supabase) {
       return res.status(503).json({ success: false, error: 'Перевірка доступу тимчасово недоступна. Спробуйте пізніше.' });
     }
