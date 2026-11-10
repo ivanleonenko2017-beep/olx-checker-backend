@@ -759,12 +759,17 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
       lastOlxRequestStatus = error.response?.status ? 'HTTP ' + error.response.status : safeText(error.code || 'upstream_error', 48);
       stopReason = error.response?.status === 429 ? 'http_429' :
         (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT' ? 'timeout' : 'upstream_error');
-      console.error('[SEARCH_TRACE] ' + JSON.stringify({
-        event: 'search_page_error', requestId, source, at: new Date().toISOString(), page,
-        requestedUrl: sanitizeSearchUrl(pageUrl),
-        httpStatus: Number(error.response?.status || 0) || null,
-        errorCode: safeText(error.code || 'UPSTREAM_ERROR', 48),
+      const failedPageTrace = {
+        at: new Date().toISOString(), page, requestedUrl: sanitizeSearchUrl(pageUrl),
+        finalUrl: null, httpStatus: Number(error.response?.status || 0) || null,
+        durationMs: null, responseBytes: null, cardsOnPage: 0, cardsParsed: 0,
+        newAfterDedup: 0, errorCode: safeText(error.code || 'UPSTREAM_ERROR', 48),
         stopReason, antiBotDetected: error.code === 'OLX_BLOCKED' || [403, 429].includes(Number(error.response?.status || 0))
+      };
+      pageTraces.push(failedPageTrace);
+      error.searchPageTrace = failedPageTrace;
+      console.error('[SEARCH_TRACE] ' + JSON.stringify({
+        event: 'search_page_error', requestId, source, ...failedPageTrace
       }));
       if (page === 1) throw error;
       break;
@@ -1640,7 +1645,7 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
       return {
         position: index + 1, title: safeText(item.title, 120),
         price: item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : 'не вказана'),
-        city: safeText(item.locationDate || 'не визначено', 80),
+        city: safeText(item.locationDate ? String(item.locationDate).split(/\\s*[-–—]\\s*/)[0].split(',')[0] : (locationMatchesCardText(item.cardText, city) ? city : 'не визначено'), 80),
         modelVersion,
         memory: memoryMatch ? memoryMatch[1] + ' GB' : 'не визначена',
         decision
@@ -1684,7 +1689,7 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
     return {
       status: error.code === 'OLX_BLOCKED' ? 503 : 502,
       body: { success: false, requestId, at, kyivTime, stopReason: 'upstream_error',
-        pages: [], funnel: {}, cards: [], errors: [errorInfo],
+        pages: error.searchPageTrace ? [error.searchPageTrace] : [], funnel: {}, cards: [], errors: [errorInfo],
         error: 'Не вдалося виконати діагностичний пошук. Перевірте логи за request-id.' }
     };
   }
@@ -1918,7 +1923,7 @@ app.post('/telegram-webhook', async (req, res) => {
     try {
       if (supabase) {
         const { error } = await supabase.from('users')
-          .select('telegram_id', { head: true, count: 'exact' }).limit(1);
+          .select('telegram_id').limit(1);
         supabaseOk = !error;
       }
     } catch (_) { supabaseOk = false; }
