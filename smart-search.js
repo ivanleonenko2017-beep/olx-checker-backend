@@ -70,20 +70,31 @@ function normalizePhoneVariant(value = '') {
   if (normalized === 'promax' || normalized === 'промакс') return 'pro max';
   if (normalized === 'pro' || normalized === 'про') return 'pro';
   if (normalized === 'max' || normalized === 'макс') return 'max';
-  if (normalized === 'plus' || normalized === 'плюс') return 'plus';
+  if (normalized === '+' || normalized === 'plus' || normalized === 'плюс') return 'plus';
   if (normalized === 'mini' || normalized === 'мини' || normalized === 'міні') return 'mini';
   return '';
 }
 
 function parsePhoneModelDescriptor(value = '') {
   const match = String(value || '').match(
-    /(?:iphone|apple(?:\s*iphone)?|айфон|іфон|ифон)\s*(\d{1,2})(?:\s*(pro\s*max|pro|max|plus|mini|про\s*макс|про|макс|плюс|міні|мини))?(?=$|[^\p{L}\p{N}])/iu
+    /(?:iphone|apple(?:\s*iphone)?|айфон|іфон|ифон)\s*(\d{1,2})(?:\s*(pro\s*max|pro|max|plus|mini|про\s*макс|про|макс|плюс|міні|мини|[+]))?(?=$|[^\p{L}\p{N}])/iu
   );
   if (!match) return null;
   return {
     generation: Number(match[1]),
     variant: normalizePhoneVariant(match[2] || '')
   };
+}
+
+function getPhoneModelLabel(value = '') {
+  const descriptor = parsePhoneModelDescriptor(value);
+  if (!descriptor) return '';
+  if (descriptor.variant === 'pro max') return 'Pro Max';
+  if (descriptor.variant === 'pro') return 'Pro';
+  if (descriptor.variant === 'plus') return 'Plus';
+  if (descriptor.variant === 'max') return 'Max';
+  if (descriptor.variant === 'mini') return 'Mini';
+  return 'Базова';
 }
 
 function isNonPhoneOfferTitle(value = '') {
@@ -509,6 +520,8 @@ module.exports = {
   matchesTerms,
   applyCriteriaToListing,
   canUseUnverifiedStorageFallback,
+  parsePhoneModelDescriptor,
+  getPhoneModelLabel,
   parseNaturalLanguageQuery,
   median,
   estimateBargainPrice

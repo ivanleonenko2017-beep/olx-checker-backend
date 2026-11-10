@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median } = require('./smart-search');
+const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { isTestPremiumBypassEnabled } = require('./premium-bypass');
 const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
@@ -1109,6 +1109,10 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       });
       return false;
     });
+    for (const item of items) {
+      const modelVersion = getPhoneModelLabel(item.title);
+      if (modelVersion) item.modelVersion = modelVersion;
+    }
     const comparablePriceValues = items
       .filter(item => item.capacityUnverified !== true)
       .map(item => Number(item.price))
@@ -2317,6 +2321,10 @@ async function runBackgroundWorker() {
         }
 
         const { items: parsedItems, averagePrice, requestId: searchRequestId } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city, { source: 'background', userId: filter.user_id, criteria });
+        for (const item of parsedItems) {
+          const modelVersion = getPhoneModelLabel(item.title);
+          if (modelVersion) item.modelVersion = modelVersion;
+        }
         processedFiltersThisCycle++;
         
         const requestedLocation = String(filter.city || '').trim();
@@ -2481,6 +2489,9 @@ async function runBackgroundWorker() {
 
           const safeFilterQuery = escapeTelegramHtml(filter.query);
           const safeTitle = escapeTelegramHtml(item.title);
+          const modelVersionLine = item.modelVersion
+            ? `📱 <b>Версія:</b> ${escapeTelegramHtml(item.modelVersion)}\n`
+            : '';
           const safeLocation = escapeTelegramHtml(item.locationDate);
           const safeItemLink = escapeTelegramHtml(item.link);
           const capacityWarning = item.capacityUnverified
@@ -2491,6 +2502,7 @@ async function runBackgroundWorker() {
               ? `📉 <b>Ціна знизилася для оголошення у фільтрі “${safeFilterQuery}”</b>\n\n<b>Було:</b> ${previousPrice.toLocaleString('uk-UA')} грн → <b>Стало:</b> ${Number(item.price).toLocaleString('uk-UA')} грн\n\n`
               : `🔎 <b>Знайдено нове оголошення для фільтра “${safeFilterQuery}”</b>\n\n`) +
             `📌 <b>${safeTitle}</b>\n` +
+            modelVersionLine +
             `💰 <b>Ціна:</b> ${item.priceText} ${isCheap ? `🔥 (Нижче медіани на ${discount}%)` : ''}\n` +
             (isCheap && bargain.reliable
               ? `📊 <b>Медіана аналогів:</b> ${Number(bargain.referencePrice).toLocaleString('uk-UA')} грн • ${bargain.comparableCount} оголошень\n`
