@@ -30,11 +30,22 @@ async function isAdminCommandAuthorized(userId, checkAdmin) {
 function splitTelegramMessages(parts, maxLength = 3600) {
   const messages = [];
   let current = '';
+  const units = [];
   for (const part of parts.filter(Boolean)) {
-    const candidate = current ? current + '\n\n' + part : part;
+    for (const line of String(part).split('\n')) {
+      if (line.length <= maxLength) units.push(line);
+      else {
+        for (let offset = 0; offset < line.length; offset += maxLength) {
+          units.push(line.slice(offset, offset + maxLength));
+        }
+      }
+    }
+  }
+  for (const unit of units) {
+    const candidate = current ? current + '\n' + unit : unit;
     if (candidate.length > maxLength && current) {
       messages.push(current);
-      current = part;
+      current = unit;
     } else {
       current = candidate;
     }
