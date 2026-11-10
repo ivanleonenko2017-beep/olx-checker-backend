@@ -143,8 +143,8 @@ test('iPhone 15 base search keeps five local Pro-family listings in a separate s
     { title: 'Iphone 15 pro 256 Gb фіз сім Natural Titanium29 500 грн.Договірна', price: 29500, link: 'local-1', cardText: 'Iphone 15 pro 256 Gb фіз сім Natural Titanium29 500 грн.Договірна Чернігів - 10 листопада 2026 р.' },
     { title: 'Айфон 15 про макс 256гб 100%17 000 грн.', price: 17000, link: 'local-2', cardText: 'Айфон 15 про макс 256гб 100%17 000 грн. Чернігів - 10 листопада 2026 р.' },
     { title: 'Телефон Iphone 15 Pro Max Apple Айфон30 500 грн.', price: 30500, link: 'local-3', cardText: 'Телефон Iphone 15 Pro Max Apple Айфон30 500 грн. Чернігів - 10 листопада 2026 р.' },
-    { title: 'Продам iPhone 15 PRO MAX / 256 gb28 500 грн.', price: 28500, link: 'local-4', cardText: 'Продам iPhone 15 PRO MAX / 256 gb28 500 грн. Чернігів - 10 листопада 2026 р.' },
-    { title: 'Продам IPhone 15 Pro Max 256 GB32 000 грн.', price: 32000, link: 'local-5', cardText: 'Продам IPhone 15 Pro Max 256 GB32 000 грн. Чернігів - 10 листопада 2026 р.' }
+    { title: 'Продам iPhone 15 PRO MAX / 256 gb', price: 28500, link: 'local-4', cardText: 'Продам iPhone 15 PRO MAX / 256 gb28 500 грн. Чернігів - 10 листопада 2026 р.' },
+    { title: 'Продам IPhone 15 Pro Max 256 GB', price: 32000, link: 'local-5', cardText: 'Продам IPhone 15 Pro Max 256 GB32 000 грн. Чернігів - 10 листопада 2026 р.' }
   ];
   const exact = fixture.filter(item => applyCriteriaToListing(item, criteria).matches);
   const similar = findSimilarPhoneListings(fixture, criteria, exact);
