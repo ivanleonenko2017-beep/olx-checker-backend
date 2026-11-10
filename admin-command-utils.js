@@ -156,6 +156,7 @@ function formatSubscriptionMessage(data = {}) {
     '<b>Тариф зараз:</b> ' + escapeTelegramHtml(access.plan || 'невідомо'),
     '<b>Trial початок:</b> ' + escapeTelegramHtml(user.trial_started_at || 'не починався'),
     '<b>Trial завершення:</b> ' + escapeTelegramHtml(access.trialEndsAt || 'немає'),
+    '<b>Premium початок:</b> ' + escapeTelegramHtml(data.premiumStartedAt || 'не зберігається окремо в users'),
     '<b>Premium до:</b> ' + escapeTelegramHtml(user.premium_until || 'немає'),
     '<b>Джерело:</b> ' + escapeTelegramHtml(data.grantSource || 'не визначено'),
     '<b>Ліміти:</b> фільтри ' + (Number.isFinite(access.filterLimit) ? access.filterLimit : 'без ліміту') +
