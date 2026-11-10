@@ -8,7 +8,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel, findSimilarPhoneListings } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { isTestPremiumBypassEnabled } = require('./premium-bypass');
-const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
+const { buildOlxPageUrl, mergeUniqueOlxItems, shouldStopAfterNoLocalPage } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
@@ -492,12 +492,17 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     console.error(`[OLX search] Upstream request failed: status=${requestError.response?.status || 'no-http-status'}, code=${requestError.code || 'unknown'}`);
     throw requestError;
   }
+  const loadDurationMs = Date.now() - pageStartedAt;
+  const parseStartedAt = Date.now();
   const html = String(response.data || '');
   const pageMeta = {
     requestedUrl: sanitizeSearchUrl(targetUrl),
     finalUrl: sanitizeSearchUrl(response.request?.res?.responseUrl || response.request?._redirectable?._currentUrl || targetUrl),
     status: Number(response.status || 0),
-    durationMs: Date.now() - pageStartedAt,
+    durationMs: loadDurationMs,
+    loadDurationMs,
+    parseDurationMs: null,
+    memoryRssBytes: process.memoryUsage().rss,
     responseBytes: Buffer.byteLength(html, 'utf8'),
     declaredTotal: null,
     antiBotDetected: false
@@ -701,6 +706,9 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     throw error;
   }
 
+  pageMeta.parseDurationMs = Date.now() - parseStartedAt;
+  pageMeta.durationMs = Date.now() - pageStartedAt;
+  pageMeta.memoryRssBytes = process.memoryUsage().rss;
   return { items: rawItems, averagePrice, parserStats, pageMeta };
 }
 
@@ -718,6 +726,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
   const pages = [];
   const pageTraces = [];
   let previousUniqueCount = 0;
+  let hasSeenLocalPage = false;
   let stopReason = 'page_limit';
   const startedAt = new Date().toISOString();
   console.log('[SEARCH_TRACE] ' + JSON.stringify({
@@ -734,11 +743,19 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
       pages.push(result.items);
       const merged = mergeUniqueOlxItems(pages, 600);
       const newAfterDedup = Math.max(0, merged.length - previousUniqueCount);
+      const cityMatchedOnPage = cityScoped
+        ? result.items.filter(item => locationMatches(item.locationDate, requestedLocation) ||
+            (!item.locationDate && locationMatchesCardText(item.cardText, requestedLocation))).length
+        : null;
       const pageTrace = {
         at: new Date().toISOString(), page, requestedUrl: result.pageMeta?.requestedUrl || sanitizeSearchUrl(pageUrl),
         finalUrl: result.pageMeta?.finalUrl || sanitizeSearchUrl(pageUrl),
         httpStatus: result.pageMeta?.status || null,
         durationMs: result.pageMeta?.durationMs ?? null,
+        loadDurationMs: result.pageMeta?.loadDurationMs ?? null,
+        parseDurationMs: result.pageMeta?.parseDurationMs ?? null,
+        memoryRssBytes: result.pageMeta?.memoryRssBytes ?? null,
+        cityMatchedOnPage,
         responseBytes: result.pageMeta?.responseBytes ?? null,
         antiBotDetected: Boolean(result.pageMeta?.antiBotDetected),
         declaredTotal: result.pageMeta?.declaredTotal ?? null,
@@ -752,6 +769,11 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
       console.log('[SEARCH_TRACE] ' + JSON.stringify({
         event: 'search_page', requestId, source, ...pageTrace
       }));
+      if (cityScoped && page > 1 && shouldStopAfterNoLocalPage(hasSeenLocalPage, cityMatchedOnPage)) {
+        stopReason = 'no_local_on_page';
+        break;
+      }
+      if (cityMatchedOnPage > 0) hasSeenLocalPage = true;
       if (result.items.length === 0) { stopReason = 'empty_page'; break; }
       if (merged.length === previousUniqueCount) { stopReason = 'no_new_unique_cards'; break; }
       previousUniqueCount = merged.length;
@@ -1148,7 +1170,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       rejectedByReason: rejectionReasons,
       rejectedCards: compactRejectedCards(rejectedCards, 25).cards,
       rejectedCardsOmitted: compactRejectedCards(rejectedCards, 25).omitted,
-      durationMs: Date.now() - startedAt
+      durationMs: performance.totalMs, performance
     }));
     console.log('[API search] Completed: parsed=' + parsedItems.length + ', cityMatched=' + locationItems.length + ', detailsEnriched=' + detailsEnriched + ', returned=' + items.length + ', rejected=' + JSON.stringify(rejectionReasons) + ', city=' + JSON.stringify(requestedLocation) + ', url=' + sanitizeSearchUrl(targetUrl) + ', smart=' + Boolean(parsedNaturalQuery) + ', requestId=' + requestId + ', durationMs=' + (Date.now() - startedAt));
     res.json({
@@ -1620,16 +1642,19 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
       locationMatches(item.locationDate, city) ||
       (!item.locationDate && locationMatchesCardText(item.cardText, city))
     );
+    const detailsEnrichmentStartedAt = Date.now();
     if (storageTerms.length) {
+      const criteriaWithoutModel = { ...criteria, modelTerm: '' };
       const candidates = cityItems.filter(item =>
         /(?:iphone|айфон)/iu.test(String(item.title || '')) &&
-        applyCriteriaToListing(item, criteria).reason === 'missing_required_term'
+        applyCriteriaToListing(item, criteriaWithoutModel).reason === 'missing_required_term'
       ).slice(0, 5);
       for (const item of candidates) {
         const detailContext = await fetchListingDescription(item.link);
         if (detailContext) item.description = [item.description, detailContext].filter(Boolean).join(' ');
       }
     }
+    const detailsEnrichmentMs = Date.now() - detailsEnrichmentStartedAt;
     const funnel = evaluateCriteriaFunnel(cityItems, criteria);
     const results = cityItems.filter(item => {
       const match = applyCriteriaToListing(item, criteria);
@@ -1687,8 +1712,16 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
       (stopReason === 'http_429' || stopReason === 'timeout' || stopReason === 'upstream_error'
         ? [{ httpStatus: null, code: stopReason, antiBotDetected: stopReason === 'http_429' }]
         : []);
+    const performance = {
+      loadMs: pageTraces.reduce((sum, page) => sum + Number(page.loadDurationMs || 0), 0),
+      parseMs: pageTraces.reduce((sum, page) => sum + Number(page.parseDurationMs || 0), 0),
+      detailsEnrichmentMs,
+      totalMs: Date.now() - startedAt,
+      peakRssBytes: Math.max(0, ...pageTraces.map(page => Number(page.memoryRssBytes || 0)))
+    };
     const response = {
       success: true, requestId, at, kyivTime, source: 'diagnostic', parsedQuery: parsed.query,
+      performance,
       criteria: { model: criteria.modelTerm, memory: storageTerms, condition: criteria.condition,
         city, minPrice: criteria.minPrice, maxPrice: criteria.maxPrice, exclusions: criteria.excludeTerms },
       pages: pageTraces, stopReason,
