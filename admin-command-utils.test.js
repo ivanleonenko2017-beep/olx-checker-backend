@@ -91,6 +91,8 @@ test('subscription report masks Telegram ID, reports limits and expiry behavior'
     expiryBehavior: 'Free: 1 фільтр, 5 пошуків/день; зайві фільтри зберігаються, але призупинені'
   }).join('\n');
   assert.ok(message.includes('••••6789'));
+  assert.ok(message.includes('Premium початок:'));
+  assert.ok(message.includes('не зберігається окремо в users'));
   assert.ok(!message.includes('123456789'));
   assert.ok(message.includes('активні 1, призупинені лімітом 2'));
   assert.ok(message.includes('5'));
