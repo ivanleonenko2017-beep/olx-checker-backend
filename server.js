@@ -11,6 +11,7 @@ const { isTestPremiumBypassEnabled } = require('./premium-bypass');
 const { buildOlxPageUrl, mergeUniqueOlxItems, shouldStopAfterNoLocalPage } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
+const { encryptTelegramUpdate, decryptTelegramUpdate, isValidTelegramWebhookSecret, isDuplicateWebhookUpdate } = require('./telegram-webhook-queue');
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
 const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage } = require('./admin-command-utils');
 
@@ -2459,31 +2460,12 @@ async function processTelegramUpdate(update) {
 const telegramWebhookInFlight = new Set();
 let telegramWebhookQueueDrainRunning = false;
 
-function encryptTelegramUpdate(update) {
-  const key = crypto.createHash('sha256')
-    .update('znaideno-telegram-webhook-queue-v1:')
-    .update(TELEGRAM_WEBHOOK_SECRET)
-    .digest();
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(update), 'utf8'), cipher.final()]);
-  return [iv.toString('base64'), cipher.getAuthTag().toString('base64'), encrypted.toString('base64')].join('.');
+function encryptQueuedTelegramUpdate(update) {
+  return encryptTelegramUpdate(update, TELEGRAM_WEBHOOK_SECRET);
 }
 
-function decryptTelegramUpdate(payload) {
-  const parts = String(payload || '').split('.');
-  if (parts.length !== 3) throw new Error('invalid_webhook_queue_payload');
-  const key = crypto.createHash('sha256')
-    .update('znaideno-telegram-webhook-queue-v1:')
-    .update(TELEGRAM_WEBHOOK_SECRET)
-    .digest();
-  const iv = Buffer.from(parts[0], 'base64');
-  const tag = Buffer.from(parts[1], 'base64');
-  const encrypted = Buffer.from(parts[2], 'base64');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(tag);
-  const clear = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
-  return JSON.parse(clear);
+function decryptQueuedTelegramUpdate(payload) {
+  return decryptTelegramUpdate(payload, TELEGRAM_WEBHOOK_SECRET);
 }
 
 async function processTelegramWebhookQueueRow(row) {
@@ -2495,7 +2477,7 @@ async function processTelegramWebhookQueueRow(row) {
     const { error: attemptError } = await supabaseAdmin.from('telegram_webhook_updates')
       .update({ attempts, last_error_code: null }).eq('update_id', updateId);
     if (attemptError) throw attemptError;
-    const update = decryptTelegramUpdate(row.payload_ciphertext);
+    const update = decryptQueuedTelegramUpdate(row.payload_ciphertext);
     if (Number(update.update_id) !== updateId) throw new Error('webhook_update_id_mismatch');
     await processTelegramUpdate(update);
     const { error: completeError } = await supabaseAdmin.from('telegram_webhook_updates')
@@ -2533,22 +2515,19 @@ async function drainTelegramWebhookQueue() {
 
 app.post('/telegram-webhook', async (req, res) => {
   const receivedWebhookSecret = req.get('x-telegram-bot-api-secret-token') || '';
-  const receivedSecretBuffer = Buffer.from(receivedWebhookSecret);
-  const expectedSecretBuffer = Buffer.from(TELEGRAM_WEBHOOK_SECRET);
-  if (!TELEGRAM_WEBHOOK_SECRET || receivedSecretBuffer.length !== expectedSecretBuffer.length ||
-      !crypto.timingSafeEqual(receivedSecretBuffer, expectedSecretBuffer)) return res.sendStatus(401);
+  if (!isValidTelegramWebhookSecret(receivedWebhookSecret, TELEGRAM_WEBHOOK_SECRET)) return res.sendStatus(401);
 
   const update = req.body;
   const updateId = Number(update?.update_id);
   if (!Number.isSafeInteger(updateId) || updateId < 0) return res.sendStatus(400);
   if (!supabaseAdmin) return res.sendStatus(503);
 
-  const payloadCiphertext = encryptTelegramUpdate(update);
+  const payloadCiphertext = encryptQueuedTelegramUpdate(update);
   const { error } = await supabaseAdmin.from('telegram_webhook_updates').insert({
     update_id: updateId, payload_ciphertext: payloadCiphertext, status: 'pending'
   });
   if (error) {
-    if (error.code === '23505') return res.sendStatus(200);
+    if (isDuplicateWebhookUpdate(error)) return res.sendStatus(200);
     console.warn('[Telegram webhook queue] Could not persist update:', safeText(error.code || 'queue_unavailable', 48));
     return res.sendStatus(503);
   }
