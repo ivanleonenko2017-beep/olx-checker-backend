@@ -78,6 +78,18 @@ function formatDiagnosticMessages(data = {}) {
     );
   }
   if (!data.pages?.length) pages.push('Сторінки не отримані');
+  if (data.performance) {
+    pages.push(
+      '<b>Час та пам’ять</b>',
+      'Завантаження: ' + Number(data.performance.loadMs || 0) + ' мс · розбір: ' +
+        Number(data.performance.parseMs || 0) + ' мс · догрузка деталей: ' +
+        Number(data.performance.detailsEnrichmentMs || 0) + ' мс · усього: ' +
+        Number(data.performance.totalMs || 0) + ' мс',
+      'Пік RSS: ' + (Number(data.performance.peakRssBytes || 0)
+        ? Math.round(Number(data.performance.peakRssBytes) / 1048576) + ' МБ'
+        : 'недоступний')
+    );
+  }
 
   const funnel = [
     '<b>Воронка</b>',
