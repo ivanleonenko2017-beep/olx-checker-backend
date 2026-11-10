@@ -4,6 +4,7 @@ const {
   normalizeCriteria,
   applyCriteriaToListing,
   parseNaturalLanguageQuery,
+  getPhoneModelLabel,
   median,
   estimateBargainPrice
 } = require('./smart-search');
@@ -359,4 +360,62 @@ test('recognizes Apple model shorthand without broadening the model family', () 
     title: 'Apple iPhone 14 Pro 256GB',
     price: 18000
   }, parsed.criteria).reason, 'model_mismatch');
+});
+
+test('iPhone 15 without a modification remains base-only and Plus shorthand is explicit', () => {
+  const base = parseNaturalLanguageQuery('iPhone 15 256');
+  assert.equal(base.criteria.modelTerm, 'iPhone 15');
+  assert.equal(getPhoneModelLabel('Apple iPhone 15 256GB'), 'Базова');
+
+  const titles = [
+    'Apple iPhone 15 256GB',
+    'Apple iPhone 15 Plus 256GB',
+    'Apple iPhone 15+ 256GB',
+    'Apple iPhone 15 Pro 256GB',
+    'Apple iPhone 15 Pro Max 256GB',
+    'Apple iPhone 15 Max 256GB',
+    'Apple iPhone 15 Mini 256GB'
+  ];
+  const baseMatches = titles.filter(title =>
+    applyCriteriaToListing({ title, price: 20000 }, base.criteria).matches
+  );
+  assert.deepEqual(baseMatches, ['Apple iPhone 15 256GB']);
+
+  const plusWord = parseNaturalLanguageQuery('iPhone 15 Plus 256');
+  const plusSymbol = parseNaturalLanguageQuery('iPhone 15+ 256');
+  assert.equal(plusWord.criteria.modelTerm, 'iPhone 15 Plus');
+  assert.equal(plusSymbol.criteria.modelTerm, 'iPhone 15 Plus');
+  assert.equal(getPhoneModelLabel('Apple iPhone 15+ 256GB'), 'Plus');
+  assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15+ 256GB', price: 20000 }, plusSymbol.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 256GB', price: 20000 }, plusSymbol.criteria).reason, 'model_mismatch');
+
+  const negativePro = parseNaturalLanguageQuery('iPhone 15 без Pro');
+  assert.equal(negativePro.criteria.modelTerm, 'iPhone 15');
+  assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 256GB', price: 20000 }, negativePro.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 Pro 256GB', price: 20000 }, negativePro.criteria).reason, 'model_mismatch');
+
+  const russianProMax = parseNaturalLanguageQuery('iPhone 15 про макс 256');
+  assert.equal(russianProMax.criteria.modelTerm, 'iPhone 15 Pro Max');
+  assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 Pro Max 256GB', price: 20000 }, russianProMax.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 Plus 256GB', price: 20000 }, russianProMax.criteria).reason, 'model_mismatch');
+});
+
+test('November 4 Chernihiv trace projects zero base-only model matches and five family variants', () => {
+  const oldTraceTitles = [
+    'Продам Антон 15 Pro Max на запчасти',
+    'Айфон 15 Pro Max, 256',
+    'продаю айфон 15+',
+    'Продам iPhone 15 Pro Max / 256 GB',
+    'Продам телефон iPhone 15 Pro Max 256G'
+  ];
+  const baseCriteria = { modelTerm: 'iPhone 15' };
+  const baseCount = oldTraceTitles.filter(title =>
+    applyCriteriaToListing({ title, price: 20000 }, baseCriteria).matches
+  ).length;
+  const familyCount = oldTraceTitles.filter(title =>
+    getPhoneModelLabel(title) !== '' && /(?:iphone|айфон)/iu.test(title)
+  ).length;
+  assert.equal(baseCount, 0);
+  assert.equal(familyCount, 5);
+  assert.deepEqual(oldTraceTitles.map(getPhoneModelLabel), ['Pro Max', 'Pro Max', 'Plus', 'Pro Max', 'Pro Max']);
 });
