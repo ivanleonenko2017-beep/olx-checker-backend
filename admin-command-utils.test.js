@@ -210,5 +210,5 @@ test('diagnostic formatter displays load, parse, detail-enrichment and peak RSS 
   assert.ok(output.includes('Завантаження: 300 мс'));
   assert.ok(output.includes('розбір: 700 мс'));
   assert.ok(output.includes('догрузка деталей: 250 мс'));
-  assert.ok(output.includes('пік RSS: 64 МБ'));
+  assert.ok(output.includes('Пік RSS: 64 МБ'));
 });
