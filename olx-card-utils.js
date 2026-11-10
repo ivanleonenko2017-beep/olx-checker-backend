@@ -17,7 +17,7 @@ function cleanOlxCardTitle(rawTitle, rawPriceText = '') {
       const amountPattern = digits.split('').join('[\\s\\u00a0]*');
       const suffix = new RegExp(
         '[\\s\\u00a0]*' + amountPattern +
-        '[\\s\\u00a0]*(?:грн|₴)' +
+        '[\\s\\u00a0]*(?:грн|₴)[.,]?' +
         '(?:[\\s\\u00a0]*[.,·-]?[\\s\\u00a0]*(?:договірна(?:[\\s\\u00a0]+ціна)?|negotiable))?\\s*$',
         'iu'
       );
