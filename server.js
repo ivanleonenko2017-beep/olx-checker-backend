@@ -12,7 +12,7 @@ const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
-const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage } = require('./admin-command-utils');
+const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage } = require('./admin-command-utils');
 
 const app = express();
 app.disable('x-powered-by');
@@ -1568,6 +1568,7 @@ app.get('/api/legal/privacy', (_req, res) => {
 
 const searchDiagnosticRateLimits = new Map();
 const botStatusRateLimits = new Map();
+const accountAuditRateLimits = new Map();
 
 async function runSearchDiagnostic(rawQuery, adminUserId) {
   const requestId = crypto.randomBytes(6).toString('hex');
@@ -1907,6 +1908,139 @@ app.post('/telegram-webhook', async (req, res) => {
       return;
     }
     const adminKey = hashUserId(senderId, TELEGRAM_WEBHOOK_SECRET) || 'admin';
+
+    if (command === 'sub' || command === 'ref') {
+      const targetRaw = String(adminCommandMatch[2] || '').trim();
+      if (!/^\\d{1,20}$/.test(targetRaw) || !Number.isSafeInteger(Number(targetRaw)) || Number(targetRaw) <= 0) {
+        await sendTelegramMessage(chatId, command === 'sub'
+          ? 'Формат: /sub telegram_id'
+          : 'Формат: /ref telegram_id');
+        return;
+      }
+      if (!consumeRateLimit(accountAuditRateLimits, adminKey)) {
+        await sendTelegramMessage(chatId, 'Адміністративна перевірка доступна не частіше одного разу на хвилину.');
+        return;
+      }
+      const targetId = Number(targetRaw);
+      const readDb = supabaseAdmin || supabase;
+      if (!readDb) {
+        await sendTelegramMessage(chatId, 'Перевірка тимчасово недоступна: база даних не налаштована.');
+        return;
+      }
+
+      try {
+        const { data: targetUser, error: userError } = await readDb.from('users')
+          .select('telegram_id,tariff,premium_until,trial_started_at,is_admin,created_at,total_referrals,referred_by,pending_referrer_telegram_id,referral_attributed_at,telegram_blocked_at')
+          .eq('telegram_id', targetId).maybeSingle();
+        if (userError) throw userError;
+        if (!targetUser) {
+          await sendTelegramMessage(chatId, 'Користувача не знайдено. Telegram ID у відповіді не розкривається.');
+          return;
+        }
+
+        if (command === 'sub') {
+          const isTargetAdmin = await checkIsAdmin(targetId);
+          const access = deriveAccess(targetUser, isTargetAdmin);
+          const trialEnd = targetUser.trial_started_at
+            ? new Date(Date.parse(targetUser.trial_started_at) + TRIAL_DAYS * 86400000).toISOString()
+            : null;
+          const today = new Date().toISOString().slice(0, 10);
+          const [filterResult, usageResult, referralResult, starResult, monoResult, legacyPaymentResult] = await Promise.all([
+            readDb.from('filters').select('id,created_at').eq('user_id', targetId).order('created_at', { ascending: true }),
+            readDb.from('user_daily_usage').select('search_count,usage_date').eq('telegram_id', targetId).maybeSingle(),
+            readDb.from('referrals').select('invitee_telegram_id').eq('inviter_telegram_id', targetId),
+            readDb.from('star_payments').select('activation_status,created_at,premium_until').eq('telegram_id', targetId).order('created_at', { ascending: false }).limit(3),
+            readDb.from('monobank_payments').select('status,created_at,paid_at,premium_until').eq('telegram_id', targetId).order('created_at', { ascending: false }).limit(3),
+            readDb.from('payments').select('provider,days_added,created_at').eq('user_id', targetId).order('created_at', { ascending: false }).limit(3)
+          ]);
+          for (const result of [filterResult, usageResult, referralResult, starResult, monoResult, legacyPaymentResult]) {
+            if (result.error) throw result.error;
+          }
+          const filters = filterResult.data || [];
+          const filterLimit = access.filterLimit;
+          const activeLimit = Number.isFinite(filterLimit) ? Math.max(0, filterLimit) : filters.length;
+          const blocked = Boolean(targetUser.telegram_blocked_at);
+          const activeFilters = blocked ? 0 : Math.min(filters.length, activeLimit);
+          const pausedFilters = filters.length - activeFilters;
+          const usage = usageResult.data && usageResult.data.usage_date === today
+            ? Number(usageResult.data.search_count || 0) : 0;
+
+          const referralCount = (referralResult.data || []).length;
+          const stars = starResult.data || [];
+          const mono = monoResult.data || [];
+          const legacy = legacyPaymentResult.data || [];
+          const evidence = [];
+          if (stars.length) evidence.push('Telegram Stars: ' + stars.length + ' запис(ів), останній статус ' + stars[0].activation_status);
+          if (mono.length) evidence.push('Monobank: ' + mono.length + ' запис(ів), останній статус ' + mono[0].status);
+          if (legacy.length) evidence.push('legacy payments: ' + legacy.length + ' запис(ів), останній провайдер ' + safeText(legacy[0].provider, 30));
+          if (referralCount) evidence.push('реферальні бонуси як запрошувачу: ' + referralCount + ' × 3 дні');
+          const grantSource = targetUser.is_admin || isTargetAdmin
+            ? 'адміністратор'
+            : evidence.length
+              ? evidence.join('; ') + '. Поле users не зберігає єдине точне джерело поточного Premium.'
+              : 'у users немає поля джерела; платіжних/реферальних записів не знайдено';
+          const messages = formatSubscriptionMessage({
+            user: targetUser,
+            access: { ...access, trialEndsAt: trialEnd },
+            filters: { total: filters.length, active: activeFilters, paused: pausedFilters },
+            searchesUsed: usage,
+            grantSource,
+            paymentEvidence: evidence.join('; '),
+            expiryBehavior: blocked
+              ? 'Бот заблокований користувачем; воркер пропускає всі його фільтри. Записи фільтрів не видаляються.'
+              : 'Після 4 днів Trial або завершення Premium застосовується Free: 1 фільтр, 5 пошуків/день, перевірка кожні 15 хв. Фільтри понад ліміт зберігаються, але воркер їх не обробляє.'
+          });
+          for (const message of messages) await sendTelegramMessage(chatId, message);
+          return;
+        }
+
+        const [inviterResult, invitedResult, logInviterResult, logInvitedResult] = await Promise.all([
+          readDb.from('referrals').select('inviter_telegram_id,created_at').eq('invitee_telegram_id', targetId).maybeSingle(),
+          readDb.from('referrals').select('invitee_telegram_id,created_at').eq('inviter_telegram_id', targetId).order('created_at', { ascending: true }),
+          readDb.from('referral_logs').select('referrer_id,created_at').eq('referred_id', targetId).maybeSingle(),
+          readDb.from('referral_logs').select('referred_id,created_at').eq('referrer_id', targetId).order('created_at', { ascending: true })
+        ]);
+        for (const result of [inviterResult, invitedResult, logInviterResult, logInvitedResult]) {
+          if (result.error) throw result.error;
+        }
+        const inviter = inviterResult.data?.inviter_telegram_id || logInviterResult.data?.referrer_id ||
+          targetUser.referred_by || null;
+        const invited = (invitedResult.data || []).map(row => row.invitee_telegram_id);
+        const legacyInvited = (logInvitedResult.data || []).map(row => row.referred_id);
+        const canonicalCount = invited.length;
+        const legacyCount = legacyInvited.length;
+        const discrepancies = [];
+        if (Number(targetUser.total_referrals || 0) !== canonicalCount) {
+          discrepancies.push('users.total_referrals=' + Number(targetUser.total_referrals || 0) + ', referrals=' + canonicalCount);
+        }
+        if (legacyCount !== canonicalCount) {
+          discrepancies.push('referral_logs=' + legacyCount + ', referrals=' + canonicalCount);
+        }
+        if (targetUser.referred_by && inviter && Number(targetUser.referred_by) !== Number(inviter)) {
+          discrepancies.push('users.referred_by не збігається з canonical inviter');
+        }
+        if (targetUser.pending_referrer_telegram_id && targetUser.referral_attributed_at) {
+          discrepancies.push('одночасно задані pending_referrer і referral_attributed_at');
+        }
+        const result = formatReferralMessage({
+          user: targetUser,
+          inviter,
+          invited,
+          invitedCount: canonicalCount,
+          rewardedCount: canonicalCount,
+          rewardedDays: canonicalCount * 3,
+          pendingReferrer: targetUser.pending_referrer_telegram_id,
+          discrepancies
+        });
+        for (const message of result) await sendTelegramMessage(chatId, message);
+        return;
+      } catch (error) {
+        console.error('[Admin account audit] Read-only query failed:', safeText(error.message, 180));
+        await sendTelegramMessage(chatId, 'Не вдалося виконати перевірку. Дані не змінювалися; перевірте доступність Supabase.');
+        return;
+      }
+    }
+
     if (command === 'diag') {
       const rawQuery = String(adminCommandMatch[2] || '').trim().slice(0, 300);
       if (!rawQuery) {
