@@ -212,3 +212,24 @@ test('diagnostic formatter displays load, parse, detail-enrichment and peak RSS 
   assert.ok(output.includes('догрузка деталей: 250 мс'));
   assert.ok(output.includes('Пік RSS: 64 МБ'));
 });
+
+
+test('admin status labels are Ukrainian and webhook error timestamp is formatted in Kyiv time', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /timeZone: 'Europe\/Kyiv'/);
+  const utils = fs.readFileSync(path.join(__dirname, 'admin-command-utils.js'), 'utf8');
+  assert.match(utils, /Час роботи/);
+  assert.match(utils, /домен=/);
+  assert.match(utils, /очікують=/);
+  assert.doesNotMatch(utils, /фактический обход|включён|выключен|не определён|не удалось получить/);
+});
+
+test('Telegram update processor is decoupled from the Express response lifecycle', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  const start = source.indexOf('async function processTelegramUpdate(update)');
+  const end = source.indexOf('const telegramWebhookInFlight', start);
+  const processor = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(processor, /\bres\./);
+  assert.match(processor, /throw err/);
+});
