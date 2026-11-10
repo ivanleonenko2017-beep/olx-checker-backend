@@ -1970,9 +1970,9 @@ app.post('/telegram-webhook', async (req, res) => {
           const mono = monoResult.data || [];
           const legacy = legacyPaymentResult.data || [];
           const evidence = [];
-          if (stars.length) evidence.push('Telegram Stars: ' + stars.length + ' запис(ів), останній статус ' + stars[0].activation_status);
-          if (mono.length) evidence.push('Monobank: ' + mono.length + ' запис(ів), останній статус ' + mono[0].status);
-          if (legacy.length) evidence.push('legacy payments: ' + legacy.length + ' запис(ів), останній провайдер ' + safeText(legacy[0].provider, 30));
+          if (stars.length) evidence.push('Telegram Stars: ' + stars.length + ' запис(ів), останній статус ' + stars[0].activation_status + ', останній запис ' + (stars[0].created_at || 'дата невідома'));
+          if (mono.length) evidence.push('Monobank: ' + mono.length + ' запис(ів), останній статус ' + mono[0].status + ', останній запис ' + (mono[0].paid_at || mono[0].created_at || 'дата невідома'));
+          if (legacy.length) evidence.push('legacy payments: ' + legacy.length + ' запис(ів), останній провайдер ' + safeText(legacy[0].provider, 30) + ', останній запис ' + (legacy[0].created_at || 'дата невідома'));
           if (referralCount) evidence.push('реферальні бонуси як запрошувачу: ' + referralCount + ' × 3 дні');
           const grantSource = targetUser.is_admin || isTargetAdmin
             ? 'адміністратор'
@@ -1985,6 +1985,7 @@ app.post('/telegram-webhook', async (req, res) => {
             filters: { total: filters.length, active: activeFilters, paused: pausedFilters },
             searchesUsed: usage,
             grantSource,
+            premiumStartedAt: 'не зберігається окремо в users; дати останніх записів платежів наведені нижче як свідчення, не як точна дата початку',
             paymentEvidence: evidence.join('; '),
             expiryBehavior: blocked
               ? 'Бот заблокований користувачем; воркер пропускає всі його фільтри. Записи фільтрів не видаляються.'
