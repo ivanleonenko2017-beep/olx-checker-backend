@@ -1131,7 +1131,8 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
               rejectionReasons.missing_required_term ? 'пам’яттю або обов’язковими словами' :
               rejectionReasons.condition_mismatch ? 'станом' :
               (rejectionReasons.below_min_price || rejectionReasons.above_max_price) ? 'ціною' : 'іншими умовами') + '.'
-          : '';
+          : ''
+    };
     const comparablePriceValues = items
       .filter(item => item.capacityUnverified !== true)
       .map(item => Number(item.price))
