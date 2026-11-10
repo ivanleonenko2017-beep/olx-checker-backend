@@ -143,7 +143,7 @@ function termMatches(haystack, rawTerm, title = '') {
   const phoneStorage = term.match(/^(\d{2,4})\s*(?:gb|гб)$/iu);
   if (phoneStorage) {
     const capacity = phoneStorage[1];
-    const explicitCapacityPattern = new RegExp('(?:^|[^\\d])' + capacity + '\\s*(?:gb|гб)(?=$|[^\\p{L}])', 'iu');
+    const explicitCapacityPattern = new RegExp('(?:^|[^\\d])' + capacity + '\\s*(?:gb|гб)(?=$|[^\\p{L}\\p{N}])', 'iu');
     if (explicitCapacityPattern.test(haystack)) return true;
 
     const titleText = String(title || '').toLocaleLowerCase('uk-UA');
@@ -461,6 +461,40 @@ function parseNaturalLanguageQuery(input) {
   return { original, criteria: normalizeCriteria(criteria), query: criteria.query };
 }
 
+function findSimilarPhoneListings(listings, criteriaInput = {}, exactItems = [], options = {}) {
+  const criteria = normalizeCriteria(criteriaInput);
+  const requested = parsePhoneModelDescriptor(criteria.modelTerm);
+  if (!requested || requested.variant || options.explicitModelModifier === true) return [];
+
+  const relaxedCriteria = { ...criteria, modelTerm: '' };
+  const exactLinks = new Set((Array.isArray(exactItems) ? exactItems : [])
+    .map(item => String(item?.link || '').trim()).filter(Boolean));
+  const output = [];
+  const seen = new Set(exactLinks);
+
+  for (const item of (Array.isArray(listings) ? listings : [])) {
+    const link = String(item?.link || '').trim();
+    if (!link || seen.has(link)) continue;
+    const descriptor = parsePhoneModelDescriptor(item?.title || '');
+    if (!descriptor || descriptor.generation !== requested.generation || !descriptor.variant) continue;
+
+    const match = applyCriteriaToListing(item, relaxedCriteria);
+    const unverifiedStorage = !match.matches &&
+      match.reason === 'missing_required_term' &&
+      canUseUnverifiedStorageFallback(item, relaxedCriteria);
+    if (!match.matches && !unverifiedStorage) continue;
+
+    if (unverifiedStorage) {
+      item.capacityUnverified = true;
+      item.capacityVerificationNote = 'Пам’ять не підтверджена — її не вказано в картці OLX';
+    }
+    item.modelVersion = getPhoneModelLabel(item.title);
+    output.push(item);
+    seen.add(link);
+  }
+  return output;
+}
+
 function canUseUnverifiedStorageFallback(listing, criteriaInput = {}) {
   const criteria = normalizeCriteria(criteriaInput);
   const storageTerms = [...criteria.includeTerms, ...criteria.anyTerms]
@@ -473,7 +507,7 @@ function canUseUnverifiedStorageFallback(listing, criteriaInput = {}) {
 
   const text = [title, listing?.cardText, listing?.description, listing?.conditionText]
     .filter(Boolean).join(' ').toLocaleLowerCase('uk-UA');
-  const explicitCapacities = [...text.matchAll(/(?:^|[^\d])(\d{2,4})\s*(?:гб|gb)(?=$|[^\p{L}])/giu)]
+  const explicitCapacities = [...text.matchAll(/(?:^|[^\d])(\d{2,4})\s*(?:гб|gb)(?=$|[^\p{L}\p{N}])/giu)]
     .map(match => match[1]);
 
   if (explicitCapacities.length && !explicitCapacities.some(value => storageTerms.includes(value))) {
@@ -520,6 +554,7 @@ module.exports = {
   matchesTerms,
   applyCriteriaToListing,
   canUseUnverifiedStorageFallback,
+  findSimilarPhoneListings,
   parsePhoneModelDescriptor,
   getPhoneModelLabel,
   parseNaturalLanguageQuery,

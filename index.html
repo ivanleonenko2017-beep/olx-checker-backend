@@ -1695,11 +1695,11 @@
       alert('Реферальне посилання скопійовано!');
     }
 
-    function renderSearchResults(items) {
+    function renderSearchResults(items, append = false, heading = '') {
       const resultsDiv = document.getElementById('results');
       const favs = getFavorites();
 
-      resultsDiv.innerHTML = items.map(item => {
+      const cardsHtml = items.map(item => {
         const isCheap = item.price > 0 && window.lastAvgPrice > 0 && item.price < window.lastAvgPrice * 0.85;
         const discount = isCheap ? Math.round((1 - item.price / window.lastAvgPrice) * 100) : 0;
         const isFav = favs.some(f => f.link === item.link);
@@ -1737,6 +1737,11 @@
           </div>
         `;
       }).join('');
+      const sectionHeading = heading
+        ? '<h3 class="text-sm font-bold text-white mt-4 mb-2">' + escapeHtml(heading) + '</h3>'
+        : '';
+      if (append) resultsDiv.insertAdjacentHTML('beforeend', sectionHeading + cardsHtml);
+      else resultsDiv.innerHTML = sectionHeading + cardsHtml;
     }
 
     function renderAiCriteria(criteria, parsedQuery) {
@@ -1744,7 +1749,10 @@
       const chips = document.getElementById('aiCriteriaChips');
       if (!box || !chips) return;
       const labels = [];
-      if (parsedQuery) labels.push('Товар: ' + parsedQuery);
+      const modelTerm = String(criteria.modelTerm || '');
+      const baseModel = modelTerm.match(/(?:iphone|айфон|іфон|ифон)\s*(\d{1,2})$/iu);
+      if (baseModel) labels.push('Товар: iPhone ' + baseModel[1] + ' (базова модель)');
+      else if (parsedQuery) labels.push('Товар: ' + parsedQuery);
       if (criteria.city) labels.push('Місто: ' + criteria.city);
       if (criteria.minPrice) labels.push('Від ' + Number(criteria.minPrice).toLocaleString('uk-UA') + ' ₴');
       if (criteria.maxPrice) labels.push('До ' + Number(criteria.maxPrice).toLocaleString('uk-UA') + ' ₴');
@@ -1840,17 +1848,22 @@
           analyticsDiv.classList.add('hidden');
           return;
         }
-        if (!Array.isArray(data.items) || data.items.length === 0) {
-          resultsDiv.innerHTML = '<div class="text-center text-gray-300 py-6 bg-gray-900 rounded-2xl border border-gray-800">За цими умовами оголошень не знайдено. Спробуйте послабити вимоги або перевірити їх у налаштуваннях.</div>';
+        const exactItems = Array.isArray(data.items) ? data.items : [];
+        const similarItems = Array.isArray(data.similarItems) ? data.similarItems : [];
+        if (exactItems.length === 0 && similarItems.length === 0) {
+          resultsDiv.innerHTML = '<div class="text-center text-gray-300 py-6 bg-gray-900 rounded-2xl border border-gray-800">' +
+            escapeHtml(data.searchSummary?.message || 'За цими умовами оголошень не знайдено. Перевірте модель, пам’ять та інші умови.') + '</div>';
           analyticsDiv.classList.add('hidden');
           return;
         }
         window.lastAvgPrice = data.averagePrice;
-        currentSearchResults = data.items;
+        currentSearchResults = [...exactItems, ...similarItems];
         document.getElementById('avgPrice').innerText = data.averagePrice > 0 ? data.averagePrice.toLocaleString('uk-UA') + ' грн' : 'Недостатньо даних';
-        document.getElementById('itemsCount').innerText = 'Знайдено ' + data.count + ' оголошень';
+        document.getElementById('itemsCount').innerText = 'Знайдено ' + (exactItems.length + similarItems.length) + ' оголошень';
         analyticsDiv.classList.remove('hidden');
-        renderSearchResults(data.items);
+        if (exactItems.length) renderSearchResults(exactItems, false, similarItems.length ? 'Точні збіги' : '');
+        else resultsDiv.innerHTML = '<div class="text-center text-amber-300 py-3">' + escapeHtml(data.searchSummary?.message || 'Точних збігів немає.') + '</div>';
+        if (similarItems.length) renderSearchResults(similarItems, exactItems.length > 0, 'Схожі варіанти');
       } catch (err) {
         console.error('[AI Search]', err);
         resultsDiv.innerHTML = '<div class="text-center text-red-400 py-4 bg-gray-900 rounded-2xl border border-gray-800">' +

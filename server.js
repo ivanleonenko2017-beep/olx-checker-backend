@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel } = require('./smart-search');
+const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel, findSimilarPhoneListings } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { isTestPremiumBypassEnabled } = require('./premium-bypass');
 const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
@@ -1058,9 +1058,10 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       .filter(term => /^\d{2,4}\s*(?:гб|gb)$/iu.test(term));
     let detailsEnriched = 0;
     if (storageRequirements.length) {
+      const criteriaWithoutModel = { ...criteria, modelTerm: '' };
       const candidates = locationItems.filter(item =>
         /(?:iphone|айфон)/iu.test(String(item.title || '')) &&
-        applyCriteriaToListing(item, criteria).reason === 'missing_required_term'
+        applyCriteriaToListing(item, criteriaWithoutModel).reason === 'missing_required_term'
       ).slice(0, 5); // Bound detail-page requests; unknown specs use the safe fallback below.
       let nextCandidate = 0;
       const workerCount = Math.min(5, candidates.length);
@@ -1113,6 +1114,25 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       const modelVersion = getPhoneModelLabel(item.title);
       if (modelVersion) item.modelVersion = modelVersion;
     }
+    const explicitModelModifier = /(?:iphone|айфон|іфон|ифон)?\s*\d{1,2}\s*(?:pro\s*max|pro|max|plus|mini|\+|без\s+pro|без\s+прошк)/iu.test(String(rawQuery || ''));
+    const similarItems = findSimilarPhoneListings(locationItems, criteria, items, { explicitModelModifier });
+    const similarVariants = [...new Set(similarItems.map(item => item.modelVersion).filter(Boolean))];
+    const searchSummary = {
+      exactCount: items.length,
+      similarCount: similarItems.length,
+      message: similarItems.length && items.length === 0
+        ? 'Точних ' + (criteria.modelTerm || 'моделей') + (city ? ' у ' + city : '') +
+          ' немає. Є схожі: ' + similarVariants.join(' / ')
+        : items.length === 0
+          ? 'Знайшли ' + parsedItems.length + ' оголошень, ' +
+            (city ? 'у ' + city + ' — ' : 'після перевірки умов — ') + locationItems.length +
+            '; жодне не збігається з ' +
+            (rejectionReasons.model_mismatch ? 'моделлю' :
+              rejectionReasons.missing_required_term ? 'пам’яттю або обов’язковими словами' :
+              rejectionReasons.condition_mismatch ? 'станом' :
+              (rejectionReasons.below_min_price || rejectionReasons.above_max_price) ? 'ціною' : 'іншими умовами') + '.'
+          : ''
+    };
     const comparablePriceValues = items
       .filter(item => item.capacityUnverified !== true)
       .map(item => Number(item.price))
@@ -1133,10 +1153,14 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     console.log('[API search] Completed: parsed=' + parsedItems.length + ', cityMatched=' + locationItems.length + ', detailsEnriched=' + detailsEnriched + ', returned=' + items.length + ', rejected=' + JSON.stringify(rejectionReasons) + ', city=' + JSON.stringify(requestedLocation) + ', url=' + sanitizeSearchUrl(targetUrl) + ', smart=' + Boolean(parsedNaturalQuery) + ', requestId=' + requestId + ', durationMs=' + (Date.now() - startedAt));
     res.json({
       success: true,
-      count: items.length,
+      count: items.length + similarItems.length,
+      exactCount: items.length,
+      similarCount: similarItems.length,
+      searchSummary,
       searchRequestId: requestId,
       averagePrice: matchingAveragePrice,
       items,
+      similarItems,
       plan: access.plan,
       searchesUsedToday: searchQuota.used,
       searchesLimitToday: Number.isFinite(access.searchLimit) ? access.searchLimit : null,
