@@ -2,11 +2,11 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>ЗНАЙДЕНО — розумний пошук</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#0b0d0c">
   <meta name="description" content="ЗНАЙДЕНО — розумний моніторинг оголошень і вигідних знахідок.">
   <style>
@@ -70,6 +70,89 @@
     .nav-btn:active { transform:scale(.94); }
     .tab-content button { -webkit-tap-highlight-color:transparent; }
     @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; animation:none!important; scroll-behavior:auto!important; } }
+  
+    /* Знайдено UI system: consistent spacing, type, controls and Telegram safe areas. */
+    :root {
+      --zd-space-1:4px; --zd-space-2:8px; --zd-space-3:12px; --zd-space-4:16px;
+      --zd-radius-sm:8px; --zd-radius-md:12px; --zd-radius-lg:16px;
+      --zd-focus:var(--zd-emerald);
+    }
+    html, body { min-height:100%; }
+    body {
+      padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+        calc(88px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)) !important;
+      background:var(--zd-bg)!important;
+    }
+    .rounded-3xl,.rounded-2xl { border-radius:var(--zd-radius-lg)!important; }
+    .rounded-xl { border-radius:var(--zd-radius-md)!important; }
+    .rounded-lg,.rounded-full { border-radius:var(--zd-radius-sm)!important; }
+    .shadow,.shadow-sm,.shadow-md,.shadow-lg,.shadow-xl,.shadow-2xl { box-shadow:none!important; }
+    .bg-gradient-to-br,.bg-gradient-to-r,.bg-gradient-to-l {
+      background-image:none!important;
+      background-color:var(--zd-panel)!important;
+    }
+    .backdrop-blur,.backdrop-blur-sm,.backdrop-blur-md,.backdrop-blur-lg,.backdrop-blur-xl {
+      backdrop-filter:none!important; -webkit-backdrop-filter:none!important;
+    }
+    .tab-content:not(.hidden),#app { animation:none!important; }
+    [class~="animate-pulse"] { animation:none!important; }
+    body { font-size:13px!important; font-weight:400!important; }
+    .font-medium,.font-semibold,.font-bold,.font-extrabold { font-weight:600!important; }
+    [class~="text-[10px]"],[class~="text-[11px]"] { font-size:11px!important; }
+    .text-xs { font-size:12px!important; }
+    .text-sm { font-size:14px!important; }
+    button,a[role="button"],.nav-btn { min-height:44px; }
+    input,select,textarea { min-height:44px!important; border-radius:var(--zd-radius-md)!important; }
+    button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible {
+      outline:2px solid var(--zd-focus)!important; outline-offset:3px!important;
+    }
+    button:disabled { opacity:.48!important; cursor:not-allowed!important; transform:none!important; }
+    button:active,.nav-btn:active { transform:scale(.98); }
+    button svg,.nav-btn svg { flex-shrink:0; }
+    .fixed.bottom-0 {
+      padding-bottom:calc(8px + env(safe-area-inset-bottom))!important;
+      background:var(--zd-panel)!important;
+      backdrop-filter:none!important; -webkit-backdrop-filter:none!important;
+      box-shadow:none!important;
+    }
+    #tab-home .bg-gradient-to-br,#premiumSection {
+      background:var(--zd-panel)!important; border-color:var(--zd-line)!important;
+    }
+    #addFilterModal > div,#adPreviewModal > div,#legalModal > div,#limitModal > div {
+      box-shadow:none!important; border-radius:var(--zd-radius-lg)!important;
+    }
+    html[data-tg-theme="light"] {
+      color-scheme:light;
+      --zd-bg:var(--tg-bg,#f4f6f8);
+      --zd-panel:var(--tg-secondary-bg,#ffffff);
+      --zd-panel-2:#eef1f4;
+      --zd-line:rgba(15,23,42,.14);
+      --zd-muted:var(--tg-hint,#64748b);
+      --zd-emerald:var(--tg-button,#0f766e);
+      --zd-focus:var(--tg-link,#0f766e);
+    }
+    html[data-tg-theme="light"] body { background:var(--zd-bg)!important; color:var(--tg-text,#17212b)!important; }
+    html[data-tg-theme="light"] .bg-gray-900,
+    html[data-tg-theme="light"] .bg-gray-900\/90,
+    html[data-tg-theme="light"] .bg-gray-950,
+    html[data-tg-theme="light"] .bg-gray-950\/80,
+    html[data-tg-theme="light"] .bg-gray-800,
+    html[data-tg-theme="light"] .bg-black { background-color:var(--zd-panel)!important; }
+    html[data-tg-theme="light"] .text-white { color:var(--tg-text,#17212b)!important; }
+    html[data-tg-theme="light"] .text-gray-300 { color:#334155!important; }
+    html[data-tg-theme="light"] .text-gray-400,html[data-tg-theme="light"] .text-gray-500 { color:var(--zd-muted)!important; }
+    html[data-tg-theme="light"] .border-gray-800,
+    html[data-tg-theme="light"] .border-gray-700,
+    html[data-tg-theme="light"] .border-gray-800\/80 { border-color:var(--zd-line)!important; }
+    html[data-tg-theme="light"] input,
+    html[data-tg-theme="light"] select,
+    html[data-tg-theme="light"] textarea { color:var(--tg-text,#17212b)!important; background:var(--tg-secondary-bg,#fff)!important; }
+    html[data-tg-theme="light"] .bg-emerald-950,
+    html[data-tg-theme="light"] .bg-emerald-950\/70 { background-color:#d1fae5!important; }
+    @media (max-width:380px) {
+      body { padding-left:max(12px,env(safe-area-inset-left))!important; padding-right:max(12px,env(safe-area-inset-right))!important; }
+    }
+
   </style>
 </head>
 <body class="p-4">
@@ -692,6 +775,69 @@
         document.getElementById('profileId').innerText = userId;
         document.getElementById('avatarLetter').innerText = name.charAt(0).toUpperCase();
       }
+
+      const applyTelegramTheme = () => {
+        const params = tg.themeParams || {};
+        const root = document.documentElement;
+        root.dataset.tgTheme = tg.colorScheme === 'light' ? 'light' : 'dark';
+        const themeMap = {
+          '--tg-bg': params.bg_color,
+          '--tg-text': params.text_color,
+          '--tg-hint': params.hint_color,
+          '--tg-link': params.link_color,
+          '--tg-button': params.button_color,
+          '--tg-button-text': params.button_text_color,
+          '--tg-secondary-bg': params.secondary_bg_color
+        };
+        for (const [key, value] of Object.entries(themeMap)) {
+          if (value) root.style.setProperty(key, value);
+        }
+        const themeColor = document.querySelector('meta[name="theme-color"]');
+        if (themeColor && params.bg_color) themeColor.setAttribute('content', params.bg_color);
+      };
+      applyTelegramTheme();
+      if (typeof tg.onEvent === 'function') tg.onEvent('themeChanged', applyTelegramTheme);
+
+      const modalIds = ['addFilterModal','adPreviewModal','limitModal','legalModal'];
+      const closeModal = {
+        addFilterModal: () => closeAddFilterModal(),
+        adPreviewModal: () => closeAdModal(),
+        limitModal: () => closeLimitModal(),
+        legalModal: () => closeLegalModal()
+      };
+      const syncBackButton = () => {
+        if (!tg.BackButton) return;
+        const openModal = modalIds.find(id => {
+          const element = document.getElementById(id);
+          return element && !element.classList.contains('hidden');
+        });
+        if (openModal) tg.BackButton.show();
+        else tg.BackButton.hide();
+      };
+      if (tg.BackButton && typeof tg.BackButton.onClick === 'function') {
+        tg.BackButton.onClick(() => {
+          const openModal = modalIds.find(id => {
+            const element = document.getElementById(id);
+            return element && !element.classList.contains('hidden');
+          });
+          if (openModal) closeModal[openModal]();
+          syncBackButton();
+        });
+        const modalObserver = new MutationObserver(syncBackButton);
+        modalIds.forEach(id => {
+          const element = document.getElementById(id);
+          if (element) modalObserver.observe(element, { attributes: true, attributeFilter: ['class'] });
+        });
+        syncBackButton();
+      }
+      document.addEventListener('click', event => {
+        const target = event.target && event.target.closest
+          ? event.target.closest('.nav-btn,button.bg-emerald-400')
+          : null;
+        if (target && tg.HapticFeedback && typeof tg.HapticFeedback.impactOccurred === 'function') {
+          tg.HapticFeedback.impactOccurred('light');
+        }
+      }, { passive: true });
     }
 
     const BACKEND_URL = window.location.origin;
@@ -1171,7 +1317,7 @@
       const imgContainer = document.getElementById('modalAdImgContainer');
       const imgSrc = safeImageUrl(item.proxyImg || item.img);
       
-      imgContainer.innerHTML = `<img src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-full h-full object-cover">`;
+      imgContainer.innerHTML = `<img loading="lazy" decoding="async" src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-full h-full object-cover">`;
 
       const favBtn = document.getElementById('modalFavBtn');
       favBtn.innerText = isFav ? '❤️ В Обраному' : 'Додати в обране';
@@ -1465,7 +1611,7 @@
         return `
           <div class="p-3 rounded-2xl bg-gray-900 border border-gray-800 space-y-2">
             <div class="flex gap-3 cursor-pointer" data-ad-id="${favoriteId}" onclick="openAdModal(this.dataset.adId)">
-              <img src="${favoriteImage}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-16 h-16 object-cover rounded-xl bg-gray-800 flex-shrink-0">
+              <img loading="lazy" decoding="async" src="${favoriteImage}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-16 h-16 object-cover rounded-xl bg-gray-800 flex-shrink-0">
               <div class="flex-1 min-w-0">
                 <div class="text-xs font-semibold text-white truncate">${favoriteTitle}</div>
                 <div class="text-sm font-bold text-emerald-400 mt-0.5">${favoritePrice}</div>
@@ -1567,7 +1713,7 @@
         return `
           <div class="p-3 rounded-2xl bg-gray-900 border ${isCheap ? 'border-emerald-500/80 bg-emerald-950/10' : 'border-gray-800'} space-y-2">
             <div data-ad-id="${itemId}" onclick="openAdModal(this.dataset.adId)" class="flex gap-3 cursor-pointer">
-              <img src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-20 h-20 object-cover rounded-xl bg-gray-800 flex-shrink-0">
+              <img loading="lazy" decoding="async" src="${imgSrc}" onerror="this.onerror=null; this.src='${BACKEND_URL}/assets/no-photo.svg';" class="w-20 h-20 object-cover rounded-xl bg-gray-800 flex-shrink-0">
               <div class="flex-1 min-w-0">
                 <div class="text-xs font-semibold text-white truncate">${itemTitle}</div>
                 ${itemModelVersion}
