@@ -1299,7 +1299,7 @@
       const isFav = favs.some(f => f.link === item.link);
 
       document.getElementById('modalAdTitle').innerText = item.title;
-      document.getElementById('modalAdPrice').innerText = item.priceText;
+      document.getElementById('modalAdPrice').innerText = displayListingPrice(item);
       document.getElementById('modalAdLocation').innerText = item.locationDate || 'Україна';
       const descEl = document.getElementById('modalAdDesc');
       if (descEl) {
@@ -1609,7 +1609,7 @@
         const favoriteLink = safeOlxUrl(item.link || '');
         const favoriteImage = safeImageUrl(item.proxyImg || item.img);
         const favoriteTitle = escapeHtml(item.title || '');
-        const favoritePrice = escapeHtml(item.priceText || '');
+        const favoritePrice = escapeHtml(displayListingPrice(item));
         const favoriteLocation = escapeHtml(item.locationDate || '');
         const favoriteCapacityWarning = item.capacityUnverified
           ? `<div class="text-[10px] text-amber-300 mt-1">⚠️ ${escapeHtml(item.capacityVerificationNote || 'Обсяг пам’яті не підтверджено')}</div>`
@@ -1695,6 +1695,12 @@
       alert('Реферальне посилання скопійовано!');
     }
 
+    function displayListingPrice(item) {
+      const base = String(item?.priceText || '').trim();
+      if (item?.isNegotiable && base && !/договірна/iu.test(base)) return base + ' · договірна';
+      return base || (item?.isNegotiable ? 'Договірна' : 'Ціну не вказано');
+    }
+
     function renderSearchResults(items, append = false, heading = '') {
       const resultsDiv = document.getElementById('results');
       const favs = getFavorites();
@@ -1710,7 +1716,7 @@
         const itemModelVersion = item.modelVersion
           ? `<div class="text-[10px] text-emerald-300 mt-1">Версія: ${escapeHtml(item.modelVersion)}</div>`
           : '';
-        const itemPrice = escapeHtml(item.priceText || '');
+        const itemPrice = escapeHtml(displayListingPrice(item));
         const itemLocation = escapeHtml(item.locationDate || '');
         const capacityWarning = item.capacityUnverified
           ? `<div class="text-[10px] text-amber-300 mt-1">⚠️ ${escapeHtml(item.capacityVerificationNote || 'Обсяг пам’яті не підтверджено')}</div>`
