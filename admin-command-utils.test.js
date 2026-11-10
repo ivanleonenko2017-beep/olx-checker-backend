@@ -53,8 +53,18 @@ test('Telegram status formatting redacts bot token and never emits URL path', ()
   assert.ok(!result.includes('/telegram-webhook'));
 });
 
-test('long Telegram output is split below the safe message limit', () => {
+test('long Telegram output is split below the safe message limit, including one oversized section', () => {
   const chunks = splitTelegramMessages(['a'.repeat(2000), 'b'.repeat(2000), 'c'.repeat(2000)]);
   assert.equal(chunks.length, 3);
+  const diagnostic = formatDiagnosticMessages({
+    requestId: 'long',
+    cards: Array.from({ length: 40 }, (_, index) => ({
+      position: index + 1, title: 'iPhone 15 Pro Max 256 GB ' + 'x'.repeat(90),
+      price: '20 000 грн', city: 'Чернігів', modelVersion: 'Pro Max',
+      memory: '256 GB', decision: 'відсів: memory_mismatch'
+    }))
+  });
+  assert.ok(diagnostic.length > 1);
+  assert.ok(diagnostic.every(chunk => chunk.length <= 3600));
   assert.ok(chunks.every(chunk => chunk.length <= 3600));
 });
