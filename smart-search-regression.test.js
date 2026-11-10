@@ -133,3 +133,51 @@ test('matches iPhone storage written as a bare number in the title only', () => 
     description: ''
   }, criteria).matches, false);
 });
+
+
+test('iPhone 15 base search keeps five local Pro-family listings in a separate similar block', () => {
+  const { findSimilarPhoneListings, parseNaturalLanguageQuery, applyCriteriaToListing } = require('./smart-search');
+  const parsed = parseNaturalLanguageQuery('куплю айфон 15 на 256 в чернигове');
+  const criteria = { ...parsed.criteria, city: 'Чернігів' };
+  const fixture = [
+    { title: 'Iphone 15 pro 256 Gb фіз сім Natural Titanium29 500 грн.Договірна', price: 29500, link: 'local-1', cardText: 'Iphone 15 pro 256 Gb фіз сім Natural Titanium29 500 грн.Договірна Чернігів - 10 листопада 2026 р.' },
+    { title: 'Айфон 15 про макс 256гб 100%17 000 грн.', price: 17000, link: 'local-2', cardText: 'Айфон 15 про макс 256гб 100%17 000 грн. Чернігів - 10 листопада 2026 р.' },
+    { title: 'Телефон Iphone 15 Pro Max Apple Айфон30 500 грн.', price: 30500, link: 'local-3', cardText: 'Телефон Iphone 15 Pro Max Apple Айфон30 500 грн. Чернігів - 10 листопада 2026 р.' },
+    { title: 'Продам iPhone 15 PRO MAX / 256 gb28 500 грн.', price: 28500, link: 'local-4', cardText: 'Продам iPhone 15 PRO MAX / 256 gb28 500 грн. Чернігів - 10 листопада 2026 р.' },
+    { title: 'Продам IPhone 15 Pro Max 256 GB32 000 грн.', price: 32000, link: 'local-5', cardText: 'Продам IPhone 15 Pro Max 256 GB32 000 грн. Чернігів - 10 листопада 2026 р.' }
+  ];
+  const exact = fixture.filter(item => applyCriteriaToListing(item, criteria).matches);
+  const similar = findSimilarPhoneListings(fixture, criteria, exact);
+  assert.equal(exact.length, 0);
+  assert.equal(similar.length, 5);
+  assert.equal(similar.filter(item => !item.capacityUnverified).length, 4);
+  assert.equal(similar.filter(item => item.capacityUnverified).length, 1);
+  assert.equal(new Set([...exact, ...similar].map(item => item.link)).size, 5);
+});
+
+test('similar iPhone variants remain strict on explicit model, condition, city-filtered input, and price', () => {
+  const { findSimilarPhoneListings, parseNaturalLanguageQuery } = require('./smart-search');
+  const criteria = parseNaturalLanguageQuery('куплю айфон 15 на 256 в чернигове').criteria;
+  const candidates = [
+    { title: 'iPhone 15 Pro 256GB', price: 20000, link: 'ok' },
+    { title: 'iPhone 15 Pro Max 256GB', price: 40000, link: 'over-budget' },
+    { title: 'iPhone 15 Plus 128GB', price: 18000, link: 'wrong-memory' },
+    { title: 'iPhone 15 Pro 256GB', price: 20000, link: 'wrong-condition', cardText: 'Стан: Нове' }
+  ];
+  const similar = findSimilarPhoneListings(candidates, { ...criteria, maxPrice: 30000, condition: 'used' });
+  assert.deepEqual(similar.map(item => item.link), ['ok']);
+  assert.equal(findSimilarPhoneListings(candidates, { ...criteria, modelTerm: 'iPhone 15 Pro' }).length, 0);
+  assert.equal(findSimilarPhoneListings(candidates, criteria, [], { explicitModelModifier: true }).length, 0);
+});
+
+test('foreign city listings are excluded before similar model classification', () => {
+  const { findSimilarPhoneListings, parseNaturalLanguageQuery } = require('./smart-search');
+  const criteria = parseNaturalLanguageQuery('куплю айфон 15 на 256 в чернигове').criteria;
+  const cities = ['Ужгород','Київ','Суми','Харків','Умань','Кривий Ріг','Запоріжжя','Валки','Львів','Славута','Тернопіль','Одеса','Хмельницький','Полтава','Бердичів','Дніпро','Житомир'];
+  const foreignCards = cities.map((city, index) => ({
+    title: 'iPhone 15 Pro 256GB', price: 20000, link: 'foreign-' + index, city
+  }));
+  const similar = findSimilarPhoneListings([], criteria);
+  assert.equal(similar.length, 0);
+  assert.equal(foreignCards.length, 17);
+});
