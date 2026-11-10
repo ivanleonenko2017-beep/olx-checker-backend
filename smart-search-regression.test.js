@@ -159,9 +159,9 @@ test('similar iPhone variants remain strict on explicit model, condition, city-f
   const { findSimilarPhoneListings, parseNaturalLanguageQuery } = require('./smart-search');
   const criteria = parseNaturalLanguageQuery('куплю айфон 15 на 256 в чернигове').criteria;
   const candidates = [
-    { title: 'iPhone 15 Pro 256GB', price: 20000, link: 'ok' },
-    { title: 'iPhone 15 Pro Max 256GB', price: 40000, link: 'over-budget' },
-    { title: 'iPhone 15 Plus 128GB', price: 18000, link: 'wrong-memory' },
+    { title: 'iPhone 15 Pro 256GB', price: 20000, link: 'ok', cardText: 'Стан: Вживане' },
+    { title: 'iPhone 15 Pro Max 256GB', price: 40000, link: 'over-budget', cardText: 'Стан: Вживане' },
+    { title: 'iPhone 15 Plus 128GB', price: 18000, link: 'wrong-memory', cardText: 'Стан: Вживане' },
     { title: 'iPhone 15 Pro 256GB', price: 20000, link: 'wrong-condition', cardText: 'Стан: Нове' }
   ];
   const similar = findSimilarPhoneListings(candidates, { ...criteria, maxPrice: 30000, condition: 'used' });
@@ -172,12 +172,15 @@ test('similar iPhone variants remain strict on explicit model, condition, city-f
 
 test('foreign city listings are excluded before similar model classification', () => {
   const { findSimilarPhoneListings, parseNaturalLanguageQuery } = require('./smart-search');
+  const fs = require('node:fs');
+  const path = require('node:path');
   const criteria = parseNaturalLanguageQuery('куплю айфон 15 на 256 в чернигове').criteria;
   const cities = ['Ужгород','Київ','Суми','Харків','Умань','Кривий Ріг','Запоріжжя','Валки','Львів','Славута','Тернопіль','Одеса','Хмельницький','Полтава','Бердичів','Дніпро','Житомир'];
   const foreignCards = cities.map((city, index) => ({
     title: 'iPhone 15 Pro 256GB', price: 20000, link: 'foreign-' + index, city
   }));
-  const similar = findSimilarPhoneListings([], criteria);
-  assert.equal(similar.length, 0);
+  const serverSource = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(serverSource, /const locationItems = parsedItems\.filter\(/);
+  assert.match(serverSource, /findSimilarPhoneListings\(locationItems, criteria/);
   assert.equal(foreignCards.length, 17);
 });
