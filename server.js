@@ -1645,7 +1645,7 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
       return {
         position: index + 1, title: safeText(item.title, 120),
         price: item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : 'не вказана'),
-        city: safeText(item.locationDate ? String(item.locationDate).split(/\\s*[-–—]\\s*/)[0].split(',')[0] : (locationMatchesCardText(item.cardText, city) ? city : 'не визначено'), 80),
+        city: safeText(item.locationDate ? String(item.locationDate).split(/\s*[-–—]\s*/)[0].split(',')[0] : (locationMatchesCardText(item.cardText, city) ? city : 'не визначено'), 80),
         modelVersion,
         memory: memoryMatch ? memoryMatch[1] + ' GB' : 'не визначена',
         decision
