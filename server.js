@@ -1655,9 +1655,13 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
         decision
       };
     });
-    const errors = stopReason === 'http_429' || stopReason === 'timeout' || stopReason === 'upstream_error'
-      ? [{ httpStatus: null, code: stopReason, antiBotDetected: stopReason === 'http_429' }]
-      : [];
+    const pageErrors = pageTraces.filter(page => page.errorCode).map(page => ({
+      httpStatus: page.httpStatus, code: page.errorCode, antiBotDetected: page.antiBotDetected === true
+    }));
+    const errors = pageErrors.length ? pageErrors :
+      (stopReason === 'http_429' || stopReason === 'timeout' || stopReason === 'upstream_error'
+        ? [{ httpStatus: null, code: stopReason, antiBotDetected: stopReason === 'http_429' }]
+        : []);
     const response = {
       success: true, requestId, at, kyivTime, source: 'diagnostic', parsedQuery: parsed.query,
       criteria: { model: criteria.modelTerm, memory: storageTerms, condition: criteria.condition,
@@ -2260,6 +2264,7 @@ async function runBackgroundWorker() {
           p_lease_seconds: 600
         });
         if (lockError) {
+          workerCycleHadError = true;
           console.warn(`[Worker Lock] Не вдалося захопити фільтр ${filter.id}; пропускаємо цей цикл:`, lockError.message);
           continue;
         }
@@ -2269,6 +2274,7 @@ async function runBackgroundWorker() {
         const { data: filterOwner, error: ownerError } = await supabase
           .from('users').select('tariff,premium_until,is_admin,trial_started_at,telegram_blocked_at').eq('telegram_id', filter.user_id).maybeSingle();
         if (ownerError) {
+          workerCycleHadError = true;
           console.error(`Не вдалося перевірити тариф користувача для фільтра ${filter.id}:`, ownerError.message);
           continue;
         }
@@ -2338,6 +2344,7 @@ async function runBackgroundWorker() {
         const { data: knownRows, error: knownError } = await supabase
           .from('seen_ads').select('ad_link').eq('filter_id', filter.id);
         if (knownError) {
+          workerCycleHadError = true;
           console.error(`Не вдалося перевірити seen_ads для фільтра ${filter.id}:`, knownError.message);
           continue;
         }
@@ -2427,6 +2434,7 @@ async function runBackgroundWorker() {
         const { error: checkedAtError } = await supabase.from('filters')
           .update({ last_checked_at: new Date().toISOString() }).eq('id', filter.id);
         if (checkedAtError) {
+          workerCycleHadError = true;
           console.error(`Не вдалося оновити час перевірки фільтра ${filter.id}:`, checkedAtError.message);
         }
 
