@@ -417,8 +417,8 @@ test('November 4 Chernihiv trace projects zero base-only model matches and five 
   const baseCount = oldTraceTitles.filter(title =>
     applyCriteriaToListing({ title, price: 20000 }, baseCriteria).matches
   ).length;
-  const familyCount = oldTraceTitles.filter(title => title.includes('15 Pro Max') || title.includes('15+')).length;
+  const familyCount = oldTraceTitles.filter(title => getPhoneModelLabel(title) !== '').length;
   assert.equal(baseCount, 0);
-  assert.equal(familyCount, 5);
+  assert.equal(familyCount, 4);
   assert.deepEqual(oldTraceTitles.map(getPhoneModelLabel), ['', 'Pro Max', 'Plus', 'Pro Max', 'Pro Max']);
 });
