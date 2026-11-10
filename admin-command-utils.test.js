@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   consumeRateLimit, isAdminCommandAuthorized, splitTelegramMessages,
-  formatDiagnosticMessages, formatStatusMessage
+  formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, maskTelegramId
 } = require('./admin-command-utils');
 
 test('admin command authorization rejects missing and ordinary users', async () => {
@@ -77,7 +77,44 @@ test('admin status reports only boolean Premium bypass state', () => {
   assert.ok(!result.includes('TELEGRAM_BOT_TOKEN'));
 });
 
-test('long Telegram output is split below the safe message limit, including one oversized section', () => {
+
+test('subscription report masks Telegram ID, reports limits and expiry behavior', () => {
+  const message = formatSubscriptionMessage({
+    user: { telegram_id: 123456789, trial_started_at: '2026-11-01T00:00:00Z' },
+    access: { plan: 'free', filterLimit: 1, searchLimit: 5, checkIntervalMinutes: 15 },
+    filters: { total: 3, active: 1, paused: 2 },
+    searchesUsed: 2,
+    grantSource: 'реферальні записи є; точне джерело поточного Premium не зберігається',
+    expiryBehavior: 'Free: 1 фільтр, 5 пошуків/день; зайві фільтри зберігаються, але призупинені'
+  }).join('\\n');
+  assert.ok(message.includes('••••6789'));
+  assert.ok(!message.includes('123456789'));
+  assert.ok(message.includes('активні 1, призупинені лімітом 2'));
+  assert.ok(message.includes('5'));
+});
+
+test('referral report masks IDs and escapes user-derived values', () => {
+  const message = formatReferralMessage({
+    user: { telegram_id: 123456789, referral_attributed_at: null },
+    inviter: 987654321,
+    invited: [111122223333],
+    invitedCount: 1,
+    rewardedCount: 1,
+    rewardedDays: 3,
+    discrepancies: ['legacy count < canonical count']
+  }).join('\\n');
+  assert.ok(message.includes('••••6789'));
+  assert.ok(message.includes('••••4321'));
+  assert.ok(message.includes('&lt;'));
+  assert.ok(!message.includes('123456789'));
+  assert.ok(!message.includes('987654321'));
+});
+
+test('Telegram ID masking never returns a full identifier', () => {
+  assert.equal(maskTelegramId('123456789'), '••••6789');
+  assert.equal(maskTelegramId(''), 'не визначено');
+});
+\ntest('long Telegram output is split below the safe message limit, including one oversized section', () => {
   const chunks = splitTelegramMessages(['a'.repeat(2000), 'b'.repeat(2000), 'c'.repeat(2000)]);
   assert.equal(chunks.length, 3);
   const diagnostic = formatDiagnosticMessages({
