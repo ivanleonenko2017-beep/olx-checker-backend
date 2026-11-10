@@ -183,6 +183,9 @@ function formatReferralMessage(data = {}) {
     '<b>Запрошено:</b> ' + Number(data.invitedCount || 0),
     ...(data.invited || []).slice(0, 20).map((id, index) =>
       (index + 1) + '. ' + escapeTelegramHtml(maskTelegramId(id))),
+    '<b>Legacy referral_logs:</b> ' + Number(data.legacyInvitedCount || 0),
+    ...(data.legacyInvited || []).slice(0, 20).map((id, index) =>
+      'legacy ' + (index + 1) + '. ' + escapeTelegramHtml(maskTelegramId(id))),
     '<b>Начислення:</b> ' + Number(data.rewardedCount || 0) + ' × 3 дні = ' +
       Number(data.rewardedDays || 0) + ' днів за рефералів',
     '<b>Pending referrer:</b> ' + escapeTelegramHtml(data.pendingReferrer ? maskTelegramId(data.pendingReferrer) : 'немає'),

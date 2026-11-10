@@ -2028,6 +2028,8 @@ app.post('/telegram-webhook', async (req, res) => {
           inviter,
           invited,
           invitedCount: canonicalCount,
+          legacyInvited,
+          legacyInvitedCount: legacyCount,
           rewardedCount: canonicalCount,
           rewardedDays: canonicalCount * 3,
           pendingReferrer: targetUser.pending_referrer_telegram_id,
