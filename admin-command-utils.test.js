@@ -104,6 +104,8 @@ test('referral report masks IDs and escapes user-derived values', () => {
     inviter: 987654321,
     invited: [111122223333],
     invitedCount: 1,
+    legacyInvited: [222233334444],
+    legacyInvitedCount: 1,
     rewardedCount: 1,
     rewardedDays: 3,
     discrepancies: ['legacy count < canonical count']
@@ -111,6 +113,8 @@ test('referral report masks IDs and escapes user-derived values', () => {
   assert.ok(message.includes('••••6789'));
   assert.ok(message.includes('••••4321'));
   assert.ok(message.includes('&lt;'));
+  assert.ok(message.includes('Legacy referral_logs:</b> 1'));
+  assert.ok(message.includes('legacy ••••4444'));
   assert.ok(!message.includes('123456789'));
   assert.ok(!message.includes('987654321'));
 });
