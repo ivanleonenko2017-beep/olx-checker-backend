@@ -9,6 +9,7 @@ const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallba
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { isTestPremiumBypassEnabled } = require('./premium-bypass');
 const { buildOlxPageUrl, mergeUniqueOlxItems, shouldStopAfterNoLocalPage } = require('./olx-pagination');
+const { cleanOlxCardTitle, hasNegotiablePrice } = require('./olx-card-utils');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
@@ -584,17 +585,20 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     }
 
     $(element).find('style, script').remove();
-    const title = $(element).find(
+    const rawTitle = $(element).find(
       'h1, h2, h3, h4, h5, h6, [data-testid*="title"], [data-cy*="title"]'
-    ).first().text().trim();
-    if (!title) { parserStats.skippedNoTitle++; return; }
+    ).first().text().replace(/\s+/g, ' ').trim();
 
     const priceElement = $(element).find('[data-testid="ad-price"], [data-testid="ad-price-container"], [data-cy="ad-price"], [class*="price"]').first();
     priceElement.find('style, script').remove();
-    let rawPriceText = priceElement.text().trim();
+    const sourcePriceText = priceElement.text().replace(/\s+/g, ' ').trim();
+    const isNegotiable = hasNegotiablePrice(sourcePriceText);
+    const title = cleanOlxCardTitle(rawTitle, sourcePriceText);
+    if (!title) { parserStats.skippedNoTitle++; return; }
 
+    let rawPriceText = sourcePriceText;
     if (rawPriceText.includes('грн')) {
-      rawPriceText = rawPriceText.split('грн')[0] + ' грн';
+      rawPriceText = rawPriceText.split(/грн/i)[0] + ' грн';
     }
 
     const match = rawPriceText.match(/(\d[\d\s]*)/);
@@ -603,7 +607,12 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
       numericPrice = parseInt(match[1].replace(/\s/g, ''), 10);
     }
 
-    if (!Number.isFinite(numericPrice) || numericPrice <= 0) { parserStats.skippedNoPrice++; return; }
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      if (!isNegotiable) { parserStats.skippedNoPrice++; return; }
+      numericPrice = 0;
+    }
+    // Unknown/negotiable-only prices cannot satisfy a numeric price range.
+    if ((minPrice || maxPrice) && numericPrice <= 0) return;
     if (minPrice && numericPrice < parseInt(minPrice, 10)) return;
     if (maxPrice && numericPrice > parseInt(maxPrice, 10)) return;
 
@@ -683,7 +692,8 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
         id: 'ad_' + crypto.randomBytes(4).toString('hex'),
         title,
         price: numericPrice,
-        priceText: `${numericPrice.toLocaleString('uk-UA')} грн`,
+        priceText: numericPrice > 0 ? `${numericPrice.toLocaleString('uk-UA')} грн` : 'Договірна',
+        isNegotiable,
         link,
         rawImgUrl,
         proxyImg: rawImgUrl ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(rawImgUrl)}` : `${SERVER_URL}/assets/no-photo.svg`,
