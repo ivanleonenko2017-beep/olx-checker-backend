@@ -39,6 +39,18 @@ test('Telegram diagnostic formatting includes pages, funnel, cards and splits lo
   assert.ok(messages.every(message => message.length <= 3600));
 });
 
+test('diagnostic funnel formatter reports actual price-before-condition order', () => {
+  const messages = formatDiagnosticMessages({
+    funnel: { parsed: 10, afterDedup: 10, afterCity: 8, after_model: 7,
+      afterMemoryIncludingUnverified: 6, after_excluded_words: 5,
+      after_price: 4, after_condition: 3, final: 3 }
+  });
+  const output = messages.join('\\n');
+  assert.ok(output.includes('Виключення: 5'));
+  assert.ok(output.includes('Ціна: 4 → стан: 3'));
+  assert.ok(output.includes('рекомендацій OLX не інструментована'));
+});
+
 test('Telegram status formatting redacts bot token and never emits URL path', () => {
   const result = formatStatusMessage({
     commit: 'abc123',

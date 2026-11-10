@@ -71,8 +71,9 @@ function formatDiagnosticMessages(data = {}) {
       '#' + Number(p.page || 0) +
       ' · HTTP ' + escapeTelegramHtml(String(p.httpStatus ?? '—')) +
       ' · ' + Number(p.durationMs || 0) + ' мс' +
-      ' · ' + Number(p.responseBytes || 0) + ' байт' +
-      ' · карток ' + Number(p.cardsParsed || 0) +
+      ' · ' + (p.responseBytes == null ? 'розмір невідомий' : Number(p.responseBytes) + ' байт') +
+      ' · карток DOM ' + Number(p.cardsOnPage || 0) +
+      ' · розпарсено ' + Number(p.cardsParsed || 0) +
       ' · нових ' + Number(p.newAfterDedup || 0)
     );
   }
@@ -84,7 +85,9 @@ function formatDiagnosticMessages(data = {}) {
     'Місто: ' + Number(f.afterCity || 0) + ' → модель: ' + Number(f.after_model ?? f.afterModel ?? 0),
     'Пам’ять: ' + Number(f.afterMemoryIncludingUnverified ?? f.after_memory ?? 0) +
       ' (не підтверджена: ' + Number(f.capacityUnverified || 0) + ')',
-    'Стан: ' + Number(f.after_condition ?? 0) + ' → ціна: ' + Number(f.after_price ?? 0),
+    'Виключення: ' + Number(f.after_excluded_words ?? 0),
+    'Ціна: ' + Number(f.after_price ?? 0) + ' → стан: ' + Number(f.after_condition ?? 0),
+    'Порядок конвеєра: ціна перед станом; класифікація рекомендацій OLX не інструментована.',
     'Підсумок: ' + Number(f.final || 0) +
       ' · місто не підтверджено: ' + Number(f.cityUnverified || 0)
   ].join('\n');
