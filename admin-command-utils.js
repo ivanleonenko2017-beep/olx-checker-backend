@@ -137,15 +137,15 @@ function formatStatusMessage(s = {}) {
   return [
     '<b>ЗНАЙДЕНО · Статус сервісу</b>',
     '<b>Коміт:</b> ' + escapeTelegramHtml(safe(s.commit || 'не доступний', 48)),
-    '<b>Uptime:</b> ' + escapeTelegramHtml(safe(s.uptime || 'невідомо', 40)),
+    '<b>Час роботи:</b> ' + escapeTelegramHtml(safe(s.uptime || 'невідомо', 40)),
     '<b>Фоновий воркер:</b> останній успішний цикл ' +
       escapeTelegramHtml(safe(worker.lastSuccessAt || 'ще не зафіксовано', 48)) +
       ', фільтрів: ' + Number(worker.processedFilters || 0),
     '<b>Supabase:</b> ' + (s.supabaseOk ? 'доступна' : 'недоступна'),
     '<b>ENABLE_TEST_PREMIUM_BYPASS:</b> ' + (s.testPremiumBypassConfigured ? 'увімкнено' : 'вимкнено') +
       ' · фактичний обхід: ' + (s.testPremiumBypassEffective ? 'дозволено' : 'заблоковано'),
-    '<b>Telegram webhook:</b> host=' + escapeTelegramHtml(safe(webhook.host || 'не визначено', 120)) +
-      ', pending=' + Number(webhook.pendingUpdates || 0),
+    '<b>Telegram webhook:</b> домен=' + escapeTelegramHtml(safe(webhook.host || 'не визначено', 120)) +
+      ', очікують=' + Number(webhook.pendingUpdates || 0),
     '<b>Остання помилка Telegram:</b> ' +
       escapeTelegramHtml(safe(webhook.lastError || 'немає', 220)),
     '<b>Останній запит OLX:</b> ' + escapeTelegramHtml(safe(s.lastOlxStatus || 'не зафіксовано', 100))

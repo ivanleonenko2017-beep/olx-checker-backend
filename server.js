@@ -12,6 +12,7 @@ const { buildOlxPageUrl, mergeUniqueOlxItems, shouldStopAfterNoLocalPage } = req
 const { cleanOlxCardTitle, hasNegotiablePrice } = require('./olx-card-utils');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
+const { encryptTelegramUpdate, decryptTelegramUpdate, isValidTelegramWebhookSecret, isDuplicateWebhookUpdate } = require('./telegram-webhook-queue');
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
 const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage } = require('./admin-command-utils');
 
@@ -1954,527 +1955,600 @@ app.post('/api/payments/stars/invoice-link', userAuthMiddleware, async (req, res
   }
 });
 
-app.post('/telegram-webhook', async (req, res) => {
-  const receivedWebhookSecret = req.get('x-telegram-bot-api-secret-token') || '';
-  const receivedSecretBuffer = Buffer.from(receivedWebhookSecret);
-  const expectedSecretBuffer = Buffer.from(TELEGRAM_WEBHOOK_SECRET);
-  if (!TELEGRAM_WEBHOOK_SECRET || receivedSecretBuffer.length !== expectedSecretBuffer.length ||
-      !crypto.timingSafeEqual(receivedSecretBuffer, expectedSecretBuffer)) {
-    return res.sendStatus(401);
-  }
+async function processTelegramUpdate(update) {
   try {
-  const update = req.body;
-  if (!update) return;
-
-  // Telegram Stars checkout: approve only the expected digital Premium product.
-  if (update.pre_checkout_query) {
-    const query = update.pre_checkout_query;
-    const configuredStarsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
-    const valid = process.env.PAYMENTS_ENABLED === 'true' &&
-      Number.isSafeInteger(configuredStarsPrice) && configuredStarsPrice > 0 &&
-      query.currency === 'XTR' && query.invoice_payload === 'znaideno_premium_monthly_v1' &&
-      Number(query.total_amount) === configuredStarsPrice;
-    try {
-      await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery`, {
-        pre_checkout_query_id: query.id,
-        ok: valid,
-        ...(valid ? {} : { error_message: 'Цей рахунок недійсний. Будь ласка, створіть новий.' })
-      });
-    } catch (err) {
-      console.error('Не вдалося підтвердити Telegram Stars checkout:', err.message);
-    }
-    return;
-  }
-
-  if (!update.message) return;
-  const msg = update.message;
-  const chatId = msg.chat.id;
-  const text = msg.text || '';
-
-  const adminCommandMatch = text.match(/^\/(diag|status|sub|ref)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
-  if (adminCommandMatch) {
-    const command = adminCommandMatch[1].toLowerCase();
-    const senderId = msg.from?.id;
-    if (!(await isAdminCommandAuthorized(senderId, checkIsAdmin))) {
-      await sendTelegramMessage(chatId, 'Команда недоступна.');
+  
+    // Telegram Stars checkout: approve only the expected digital Premium product.
+    if (update.pre_checkout_query) {
+      const query = update.pre_checkout_query;
+      const configuredStarsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+      const valid = process.env.PAYMENTS_ENABLED === 'true' &&
+        Number.isSafeInteger(configuredStarsPrice) && configuredStarsPrice > 0 &&
+        query.currency === 'XTR' && query.invoice_payload === 'znaideno_premium_monthly_v1' &&
+        Number(query.total_amount) === configuredStarsPrice;
+      try {
+        await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery`, {
+          pre_checkout_query_id: query.id,
+          ok: valid,
+          ...(valid ? {} : { error_message: 'Цей рахунок недійсний. Будь ласка, створіть новий.' })
+        });
+      } catch (err) {
+        console.error('Не вдалося підтвердити Telegram Stars checkout:', err.message);
+      }
       return;
     }
-    const adminKey = hashUserId(senderId, TELEGRAM_WEBHOOK_SECRET) || 'admin';
-
-    if (command === 'sub' || command === 'ref') {
-      const targetRaw = String(adminCommandMatch[2] || '').trim();
-      if (!/^\d{1,20}$/.test(targetRaw) || !Number.isSafeInteger(Number(targetRaw)) || Number(targetRaw) <= 0) {
-        await sendTelegramMessage(chatId, command === 'sub'
-          ? 'Формат: /sub telegram_id'
-          : 'Формат: /ref telegram_id');
+  
+    if (!update.message) return;
+    const msg = update.message;
+    const chatId = msg.chat.id;
+    const text = msg.text || '';
+  
+    const adminCommandMatch = text.match(/^\/(diag|status|sub|ref)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+    if (adminCommandMatch) {
+      const command = adminCommandMatch[1].toLowerCase();
+      const senderId = msg.from?.id;
+      if (!(await isAdminCommandAuthorized(senderId, checkIsAdmin))) {
+        await sendTelegramMessage(chatId, 'Команда недоступна.');
         return;
       }
-      if (!consumeRateLimit(accountAuditRateLimits, adminKey)) {
-        await sendTelegramMessage(chatId, 'Адміністративна перевірка доступна не частіше одного разу на хвилину.');
-        return;
-      }
-      const targetId = Number(targetRaw);
-      const readDb = supabaseAdmin || supabase;
-      if (!readDb) {
-        await sendTelegramMessage(chatId, 'Перевірка тимчасово недоступна: база даних не налаштована.');
-        return;
-      }
-
-      try {
-        const { data: targetUser, error: userError } = await readDb.from('users')
-          .select('telegram_id,tariff,premium_until,trial_started_at,is_admin,created_at,total_referrals,referred_by,pending_referrer_telegram_id,referral_attributed_at,telegram_blocked_at')
-          .eq('telegram_id', targetId).maybeSingle();
-        if (userError) throw userError;
-        if (!targetUser) {
-          await sendTelegramMessage(chatId, 'Користувача не знайдено. Telegram ID у відповіді не розкривається.');
+      const adminKey = hashUserId(senderId, TELEGRAM_WEBHOOK_SECRET) || 'admin';
+  
+      if (command === 'sub' || command === 'ref') {
+        const targetRaw = String(adminCommandMatch[2] || '').trim();
+        if (!/^\d{1,20}$/.test(targetRaw) || !Number.isSafeInteger(Number(targetRaw)) || Number(targetRaw) <= 0) {
+          await sendTelegramMessage(chatId, command === 'sub'
+            ? 'Формат: /sub telegram_id'
+            : 'Формат: /ref telegram_id');
           return;
         }
-
-        if (command === 'sub') {
-          const isTargetAdmin = await checkIsAdmin(targetId);
-          const access = deriveAccess(targetUser, isTargetAdmin);
-          const trialEnd = targetUser.trial_started_at
-            ? new Date(Date.parse(targetUser.trial_started_at) + TRIAL_DAYS * 86400000).toISOString()
-            : null;
-          const today = new Date().toISOString().slice(0, 10);
-          const [filterResult, usageResult, referralResult, starResult, monoResult, legacyPaymentResult] = await Promise.all([
-            readDb.from('filters').select('id,created_at').eq('user_id', targetId).order('created_at', { ascending: true }),
-            readDb.from('user_daily_usage').select('search_count,usage_date').eq('telegram_id', targetId).maybeSingle(),
-            readDb.from('referrals').select('invitee_telegram_id').eq('inviter_telegram_id', targetId),
-            readDb.from('star_payments').select('activation_status,created_at,premium_until').eq('telegram_id', targetId).order('created_at', { ascending: false }).limit(3),
-            readDb.from('monobank_payments').select('status,created_at,paid_at,premium_until').eq('telegram_id', targetId).order('created_at', { ascending: false }).limit(3),
-            readDb.from('payments').select('provider,days_added,created_at').eq('user_id', targetId).order('created_at', { ascending: false }).limit(3)
+        if (!consumeRateLimit(accountAuditRateLimits, adminKey)) {
+          await sendTelegramMessage(chatId, 'Адміністративна перевірка доступна не частіше одного разу на хвилину.');
+          return;
+        }
+        const targetId = Number(targetRaw);
+        const readDb = supabaseAdmin || supabase;
+        if (!readDb) {
+          await sendTelegramMessage(chatId, 'Перевірка тимчасово недоступна: база даних не налаштована.');
+          return;
+        }
+  
+        try {
+          const { data: targetUser, error: userError } = await readDb.from('users')
+            .select('telegram_id,tariff,premium_until,trial_started_at,is_admin,created_at,total_referrals,referred_by,pending_referrer_telegram_id,referral_attributed_at,telegram_blocked_at')
+            .eq('telegram_id', targetId).maybeSingle();
+          if (userError) throw userError;
+          if (!targetUser) {
+            await sendTelegramMessage(chatId, 'Користувача не знайдено. Telegram ID у відповіді не розкривається.');
+            return;
+          }
+  
+          if (command === 'sub') {
+            const isTargetAdmin = await checkIsAdmin(targetId);
+            const access = deriveAccess(targetUser, isTargetAdmin);
+            const trialEnd = targetUser.trial_started_at
+              ? new Date(Date.parse(targetUser.trial_started_at) + TRIAL_DAYS * 86400000).toISOString()
+              : null;
+            const today = new Date().toISOString().slice(0, 10);
+            const [filterResult, usageResult, referralResult, starResult, monoResult, legacyPaymentResult] = await Promise.all([
+              readDb.from('filters').select('id,created_at').eq('user_id', targetId).order('created_at', { ascending: true }),
+              readDb.from('user_daily_usage').select('search_count,usage_date').eq('telegram_id', targetId).maybeSingle(),
+              readDb.from('referrals').select('invitee_telegram_id').eq('inviter_telegram_id', targetId),
+              readDb.from('star_payments').select('activation_status,created_at,premium_until').eq('telegram_id', targetId).order('created_at', { ascending: false }).limit(3),
+              readDb.from('monobank_payments').select('status,created_at,paid_at,premium_until').eq('telegram_id', targetId).order('created_at', { ascending: false }).limit(3),
+              readDb.from('payments').select('provider,days_added,created_at').eq('user_id', targetId).order('created_at', { ascending: false }).limit(3)
+            ]);
+            for (const result of [filterResult, usageResult, referralResult, starResult, monoResult, legacyPaymentResult]) {
+              if (result.error) throw result.error;
+            }
+            const filters = filterResult.data || [];
+            const filterLimit = access.filterLimit;
+            const activeLimit = Number.isFinite(filterLimit) ? Math.max(0, filterLimit) : filters.length;
+            const blocked = Boolean(targetUser.telegram_blocked_at);
+            const activeFilters = blocked ? 0 : Math.min(filters.length, activeLimit);
+            const pausedFilters = filters.length - activeFilters;
+            const usage = usageResult.data && usageResult.data.usage_date === today
+              ? Number(usageResult.data.search_count || 0) : 0;
+  
+            const referralCount = (referralResult.data || []).length;
+            const stars = starResult.data || [];
+            const mono = monoResult.data || [];
+            const legacy = legacyPaymentResult.data || [];
+            const evidence = [];
+            if (stars.length) evidence.push('Telegram Stars: ' + stars.length + ' запис(ів), останній статус ' + stars[0].activation_status + ', останній запис ' + (stars[0].created_at || 'дата невідома'));
+            if (mono.length) evidence.push('Monobank: ' + mono.length + ' запис(ів), останній статус ' + mono[0].status + ', останній запис ' + (mono[0].paid_at || mono[0].created_at || 'дата невідома'));
+            if (legacy.length) evidence.push('legacy payments: ' + legacy.length + ' запис(ів), останній провайдер ' + safeText(legacy[0].provider, 30) + ', останній запис ' + (legacy[0].created_at || 'дата невідома'));
+            if (referralCount) evidence.push('реферальні бонуси як запрошувачу: ' + referralCount + ' × 3 дні');
+            const grantSource = targetUser.is_admin || isTargetAdmin
+              ? 'адміністратор'
+              : evidence.length
+                ? evidence.join('; ') + '. Поле users не зберігає єдине точне джерело поточного Premium.'
+                : 'у users немає поля джерела; платіжних/реферальних записів не знайдено';
+            const messages = formatSubscriptionMessage({
+              user: targetUser,
+              access: { ...access, trialEndsAt: trialEnd },
+              filters: { total: filters.length, active: activeFilters, paused: pausedFilters },
+              searchesUsed: usage,
+              grantSource,
+              premiumStartedAt: 'не зберігається окремо в users; дати останніх записів платежів наведені нижче як свідчення, не як точна дата початку',
+              paymentEvidence: evidence.join('; '),
+              expiryBehavior: blocked
+                ? 'Бот заблокований користувачем; воркер пропускає всі його фільтри. Записи фільтрів не видаляються.'
+                : 'Після 4 днів Trial або завершення Premium застосовується Free: 1 фільтр, 5 пошуків/день, перевірка кожні 15 хв. Фільтри понад ліміт зберігаються, але воркер їх не обробляє.'
+            });
+            for (const message of messages) await sendTelegramMessage(chatId, message);
+            return;
+          }
+  
+          const [inviterResult, invitedResult, logInviterResult, logInvitedResult] = await Promise.all([
+            readDb.from('referrals').select('inviter_telegram_id,created_at').eq('invitee_telegram_id', targetId).maybeSingle(),
+            readDb.from('referrals').select('invitee_telegram_id,created_at').eq('inviter_telegram_id', targetId).order('created_at', { ascending: true }),
+            readDb.from('referral_logs').select('referrer_id,created_at').eq('referred_id', targetId).maybeSingle(),
+            readDb.from('referral_logs').select('referred_id,created_at').eq('referrer_id', targetId).order('created_at', { ascending: true })
           ]);
-          for (const result of [filterResult, usageResult, referralResult, starResult, monoResult, legacyPaymentResult]) {
+          for (const result of [inviterResult, invitedResult, logInviterResult, logInvitedResult]) {
             if (result.error) throw result.error;
           }
-          const filters = filterResult.data || [];
-          const filterLimit = access.filterLimit;
-          const activeLimit = Number.isFinite(filterLimit) ? Math.max(0, filterLimit) : filters.length;
-          const blocked = Boolean(targetUser.telegram_blocked_at);
-          const activeFilters = blocked ? 0 : Math.min(filters.length, activeLimit);
-          const pausedFilters = filters.length - activeFilters;
-          const usage = usageResult.data && usageResult.data.usage_date === today
-            ? Number(usageResult.data.search_count || 0) : 0;
-
-          const referralCount = (referralResult.data || []).length;
-          const stars = starResult.data || [];
-          const mono = monoResult.data || [];
-          const legacy = legacyPaymentResult.data || [];
-          const evidence = [];
-          if (stars.length) evidence.push('Telegram Stars: ' + stars.length + ' запис(ів), останній статус ' + stars[0].activation_status + ', останній запис ' + (stars[0].created_at || 'дата невідома'));
-          if (mono.length) evidence.push('Monobank: ' + mono.length + ' запис(ів), останній статус ' + mono[0].status + ', останній запис ' + (mono[0].paid_at || mono[0].created_at || 'дата невідома'));
-          if (legacy.length) evidence.push('legacy payments: ' + legacy.length + ' запис(ів), останній провайдер ' + safeText(legacy[0].provider, 30) + ', останній запис ' + (legacy[0].created_at || 'дата невідома'));
-          if (referralCount) evidence.push('реферальні бонуси як запрошувачу: ' + referralCount + ' × 3 дні');
-          const grantSource = targetUser.is_admin || isTargetAdmin
-            ? 'адміністратор'
-            : evidence.length
-              ? evidence.join('; ') + '. Поле users не зберігає єдине точне джерело поточного Premium.'
-              : 'у users немає поля джерела; платіжних/реферальних записів не знайдено';
-          const messages = formatSubscriptionMessage({
+          const inviter = inviterResult.data?.inviter_telegram_id || logInviterResult.data?.referrer_id ||
+            targetUser.referred_by || null;
+          const invited = (invitedResult.data || []).map(row => row.invitee_telegram_id);
+          const legacyInvited = (logInvitedResult.data || []).map(row => row.referred_id);
+          const canonicalCount = invited.length;
+          const legacyCount = legacyInvited.length;
+          const discrepancies = [];
+          if (Number(targetUser.total_referrals || 0) !== canonicalCount) {
+            discrepancies.push('users.total_referrals=' + Number(targetUser.total_referrals || 0) + ', referrals=' + canonicalCount);
+          }
+          if (legacyCount !== canonicalCount) {
+            discrepancies.push('referral_logs=' + legacyCount + ', referrals=' + canonicalCount);
+          }
+          if (targetUser.referred_by && inviter && Number(targetUser.referred_by) !== Number(inviter)) {
+            discrepancies.push('users.referred_by не збігається з canonical inviter');
+          }
+          if (targetUser.pending_referrer_telegram_id && targetUser.referral_attributed_at) {
+            discrepancies.push('одночасно задані pending_referrer і referral_attributed_at');
+          }
+          const result = formatReferralMessage({
             user: targetUser,
-            access: { ...access, trialEndsAt: trialEnd },
-            filters: { total: filters.length, active: activeFilters, paused: pausedFilters },
-            searchesUsed: usage,
-            grantSource,
-            premiumStartedAt: 'не зберігається окремо в users; дати останніх записів платежів наведені нижче як свідчення, не як точна дата початку',
-            paymentEvidence: evidence.join('; '),
-            expiryBehavior: blocked
-              ? 'Бот заблокований користувачем; воркер пропускає всі його фільтри. Записи фільтрів не видаляються.'
-              : 'Після 4 днів Trial або завершення Premium застосовується Free: 1 фільтр, 5 пошуків/день, перевірка кожні 15 хв. Фільтри понад ліміт зберігаються, але воркер їх не обробляє.'
+            inviter,
+            invited,
+            invitedCount: canonicalCount,
+            legacyInvited,
+            legacyInvitedCount: legacyCount,
+            rewardedCount: canonicalCount,
+            rewardedDays: canonicalCount * 3,
+            pendingReferrer: targetUser.pending_referrer_telegram_id,
+            discrepancies
           });
-          for (const message of messages) await sendTelegramMessage(chatId, message);
+          for (const message of result) await sendTelegramMessage(chatId, message);
+          return;
+        } catch (error) {
+          console.error('[Admin account audit] Read-only query failed:', safeText(error.message, 180));
+          await sendTelegramMessage(chatId, 'Не вдалося виконати перевірку. Дані не змінювалися; перевірте доступність Supabase.');
           return;
         }
-
-        const [inviterResult, invitedResult, logInviterResult, logInvitedResult] = await Promise.all([
-          readDb.from('referrals').select('inviter_telegram_id,created_at').eq('invitee_telegram_id', targetId).maybeSingle(),
-          readDb.from('referrals').select('invitee_telegram_id,created_at').eq('inviter_telegram_id', targetId).order('created_at', { ascending: true }),
-          readDb.from('referral_logs').select('referrer_id,created_at').eq('referred_id', targetId).maybeSingle(),
-          readDb.from('referral_logs').select('referred_id,created_at').eq('referrer_id', targetId).order('created_at', { ascending: true })
-        ]);
-        for (const result of [inviterResult, invitedResult, logInviterResult, logInvitedResult]) {
-          if (result.error) throw result.error;
+      }
+  
+      if (command === 'diag') {
+        const rawQuery = String(adminCommandMatch[2] || '').trim().slice(0, 300);
+        if (!rawQuery) {
+          await sendTelegramMessage(chatId, 'Формат: /diag текст пошукового запиту');
+          return;
         }
-        const inviter = inviterResult.data?.inviter_telegram_id || logInviterResult.data?.referrer_id ||
-          targetUser.referred_by || null;
-        const invited = (invitedResult.data || []).map(row => row.invitee_telegram_id);
-        const legacyInvited = (logInvitedResult.data || []).map(row => row.referred_id);
-        const canonicalCount = invited.length;
-        const legacyCount = legacyInvited.length;
-        const discrepancies = [];
-        if (Number(targetUser.total_referrals || 0) !== canonicalCount) {
-          discrepancies.push('users.total_referrals=' + Number(targetUser.total_referrals || 0) + ', referrals=' + canonicalCount);
+        if (!consumeRateLimit(searchDiagnosticRateLimits, adminKey)) {
+          await sendTelegramMessage(chatId, 'Діагностика доступна не частіше одного разу на хвилину.');
+          return;
         }
-        if (legacyCount !== canonicalCount) {
-          discrepancies.push('referral_logs=' + legacyCount + ', referrals=' + canonicalCount);
-        }
-        if (targetUser.referred_by && inviter && Number(targetUser.referred_by) !== Number(inviter)) {
-          discrepancies.push('users.referred_by не збігається з canonical inviter');
-        }
-        if (targetUser.pending_referrer_telegram_id && targetUser.referral_attributed_at) {
-          discrepancies.push('одночасно задані pending_referrer і referral_attributed_at');
-        }
-        const result = formatReferralMessage({
-          user: targetUser,
-          inviter,
-          invited,
-          invitedCount: canonicalCount,
-          legacyInvited,
-          legacyInvitedCount: legacyCount,
-          rewardedCount: canonicalCount,
-          rewardedDays: canonicalCount * 3,
-          pendingReferrer: targetUser.pending_referrer_telegram_id,
-          discrepancies
-        });
-        for (const message of result) await sendTelegramMessage(chatId, message);
-        return;
-      } catch (error) {
-        console.error('[Admin account audit] Read-only query failed:', safeText(error.message, 180));
-        await sendTelegramMessage(chatId, 'Не вдалося виконати перевірку. Дані не змінювалися; перевірте доступність Supabase.');
+        const diagnostic = await runSearchDiagnostic(rawQuery, senderId);
+        const messages = formatDiagnosticMessages(diagnostic.body);
+        for (const message of messages) await sendTelegramMessage(chatId, message);
         return;
       }
-    }
-
-    if (command === 'diag') {
-      const rawQuery = String(adminCommandMatch[2] || '').trim().slice(0, 300);
-      if (!rawQuery) {
-        await sendTelegramMessage(chatId, 'Формат: /diag текст пошукового запиту');
+  
+      if (!consumeRateLimit(botStatusRateLimits, adminKey)) {
+        await sendTelegramMessage(chatId, 'Команда /status доступна не частіше одного разу на хвилину.');
         return;
       }
-      if (!consumeRateLimit(searchDiagnosticRateLimits, adminKey)) {
-        await sendTelegramMessage(chatId, 'Діагностика доступна не частіше одного разу на хвилину.');
-        return;
-      }
-      const diagnostic = await runSearchDiagnostic(rawQuery, senderId);
-      const messages = formatDiagnosticMessages(diagnostic.body);
-      for (const message of messages) await sendTelegramMessage(chatId, message);
-      return;
-    }
-
-    if (!consumeRateLimit(botStatusRateLimits, adminKey)) {
-      await sendTelegramMessage(chatId, 'Команда /status доступна не частіше одного разу на хвилину.');
-      return;
-    }
-    let supabaseOk = false;
-    try {
-      if (supabase) {
-        const { error } = await supabase.from('users')
-          .select('telegram_id').limit(1);
-        supabaseOk = !error;
-      }
-    } catch (_) { supabaseOk = false; }
-
-    let webhook = { host: 'не определён', pendingUpdates: 0, lastError: 'не удалось получить getWebhookInfo' };
-    try {
-      if (TELEGRAM_BOT_TOKEN) {
-        const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo`, { timeout: 8000 });
-        const info = response.data?.result || {};
-        let host = 'не определён';
-        try { if (info.url) host = new URL(info.url).hostname; } catch (_) {}
-        const lastErrorDate = info.last_error_date
-          ? new Date(Number(info.last_error_date) * 1000).toISOString()
+      let supabaseOk = false;
+      try {
+        if (supabase) {
+          const { error } = await supabase.from('users')
+            .select('telegram_id').limit(1);
+          supabaseOk = !error;
+        }
+      } catch (_) { supabaseOk = false; }
+  
+      let webhook = { host: 'не визначено', pendingUpdates: 0, lastError: 'не вдалося отримати getWebhookInfo' };
+      try {
+        if (TELEGRAM_BOT_TOKEN) {
+          const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo`, { timeout: 8000 });
+          const info = response.data?.result || {};
+          let host = 'не визначено';
+          try { if (info.url) host = new URL(info.url).hostname; } catch (_) {}
+          const lastErrorDate = info.last_error_date
+          ? new Intl.DateTimeFormat('uk-UA', {
+              timeZone: 'Europe/Kyiv', dateStyle: 'short', timeStyle: 'medium', hour12: false
+            }).format(new Date(Number(info.last_error_date) * 1000))
           : '';
-        webhook = {
-          host,
-          pendingUpdates: Number(info.pending_update_count || 0),
-          lastError: [lastErrorDate, safeText(info.last_error_message || 'нет', 180)].filter(Boolean).join(' · ')
-        };
-      }
-    } catch (error) {
-      webhook.lastError = safeText(error.response?.status ? 'getWebhookInfo HTTP ' + error.response.status : 'getWebhookInfo недоступен', 180);
-    }
-    const uptimeSeconds = Math.floor(process.uptime());
-    const uptime = [Math.floor(uptimeSeconds / 86400) + 'д',
-      Math.floor((uptimeSeconds % 86400) / 3600) + 'ч',
-      Math.floor((uptimeSeconds % 3600) / 60) + 'м'].join(' ');
-    const commitCandidate = String(process.env.RENDER_GIT_COMMIT || '').trim();
-    const commit = /^[a-f0-9]{7,40}$/i.test(commitCandidate) ? commitCandidate : 'не доступен';
-    const statusMessage = formatStatusMessage({
-      commit, uptime, supabaseOk, webhook,
-      testPremiumBypassConfigured: process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true',
-      testPremiumBypassEffective: isTestPremiumBypassEnabled(process.env),
-      worker: { lastSuccessAt: workerLastSuccessAt, processedFilters: workerLastProcessedFilters },
-      lastOlxStatus: lastOlxRequestStatus
-    });
-    await sendTelegramMessage(chatId, statusMessage);
-    return;
-  }
-
-  // Grant Premium only after Telegram confirms a successful Stars payment.
-  if (msg.successful_payment) {
-    const payment = msg.successful_payment;
-    const expectedStars = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
-    if (payment.currency !== 'XTR' || payment.invoice_payload !== 'znaideno_premium_monthly_v1' ||
-        Number(payment.total_amount) !== expectedStars || !payment.telegram_payment_charge_id) {
-      console.error('Отримано платіж із неочікуваними параметрами; Premium не нараховано.');
-      await sendTelegramMessage(chatId, 'Не вдалося автоматично підтвердити платіж. Напишіть на @esqide.');
-      return;
-    }
-    const paymentDb = supabaseAdmin || supabase;
-    if (!paymentDb) {
-      await sendTelegramMessage(chatId, 'Платіж отримано, але тимчасово недоступна база даних. Напишіть на @esqide.');
-      return;
-    }
-    try {
-      const { data: existingPayment, error: paymentReadError } = await paymentDb
-        .from('star_payments')
-        .select('telegram_payment_charge_id,activation_status,premium_until,is_recurring,is_first_recurring')
-        .eq('telegram_payment_charge_id', payment.telegram_payment_charge_id).maybeSingle();
-      if (paymentReadError) throw paymentReadError;
-
-      let premiumUntil;
-      if (existingPayment) {
-        if (existingPayment.activation_status === 'active' && existingPayment.premium_until) {
-          await sendTelegramMessage(chatId, 'Цей платіж уже оброблено. Premium залишається активним до вказаної дати.');
-          return;
+          webhook = {
+            host,
+            pendingUpdates: Number(info.pending_update_count || 0),
+            lastError: [lastErrorDate, safeText(info.last_error_message || 'нет', 180)].filter(Boolean).join(' · ')
+          };
         }
-        premiumUntil = existingPayment.premium_until;
-        if (!premiumUntil) {
+      } catch (error) {
+        webhook.lastError = safeText(error.response?.status ? 'getWebhookInfo HTTP ' + error.response.status : 'getWebhookInfo недоступний', 180);
+      }
+      const uptimeSeconds = Math.floor(process.uptime());
+      const uptime = [Math.floor(uptimeSeconds / 86400) + 'д',
+        Math.floor((uptimeSeconds % 86400) / 3600) + 'ч',
+        Math.floor((uptimeSeconds % 3600) / 60) + 'м'].join(' ');
+      const commitCandidate = String(process.env.RENDER_GIT_COMMIT || '').trim();
+      const commit = /^[a-f0-9]{7,40}$/i.test(commitCandidate) ? commitCandidate : 'не доступен';
+      const statusMessage = formatStatusMessage({
+        commit, uptime, supabaseOk, webhook,
+        testPremiumBypassConfigured: process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true',
+        testPremiumBypassEffective: isTestPremiumBypassEnabled(process.env),
+        worker: { lastSuccessAt: workerLastSuccessAt, processedFilters: workerLastProcessedFilters },
+        lastOlxStatus: lastOlxRequestStatus
+      });
+      await sendTelegramMessage(chatId, statusMessage);
+      return;
+    }
+  
+    // Grant Premium only after Telegram confirms a successful Stars payment.
+    if (msg.successful_payment) {
+      const payment = msg.successful_payment;
+      const expectedStars = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+      if (payment.currency !== 'XTR' || payment.invoice_payload !== 'znaideno_premium_monthly_v1' ||
+          Number(payment.total_amount) !== expectedStars || !payment.telegram_payment_charge_id) {
+        console.error('Отримано платіж із неочікуваними параметрами; Premium не нараховано.');
+        await sendTelegramMessage(chatId, 'Не вдалося автоматично підтвердити платіж. Напишіть на @esqide.');
+        return;
+      }
+      const paymentDb = supabaseAdmin || supabase;
+      if (!paymentDb) {
+        await sendTelegramMessage(chatId, 'Платіж отримано, але тимчасово недоступна база даних. Напишіть на @esqide.');
+        return;
+      }
+      try {
+        const { data: existingPayment, error: paymentReadError } = await paymentDb
+          .from('star_payments')
+          .select('telegram_payment_charge_id,activation_status,premium_until,is_recurring,is_first_recurring')
+          .eq('telegram_payment_charge_id', payment.telegram_payment_charge_id).maybeSingle();
+        if (paymentReadError) throw paymentReadError;
+  
+        let premiumUntil;
+        if (existingPayment) {
+          if (existingPayment.activation_status === 'active' && existingPayment.premium_until) {
+            await sendTelegramMessage(chatId, 'Цей платіж уже оброблено. Premium залишається активним до вказаної дати.');
+            return;
+          }
+          premiumUntil = existingPayment.premium_until;
+          if (!premiumUntil) {
+            const { data: currentUser, error: userReadError } = await paymentDb
+              .from('users').select('premium_until').eq('telegram_id', chatId).maybeSingle();
+            if (userReadError) throw userReadError;
+            const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
+            const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
+            premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
+            const { error: saveExpiryError } = await paymentDb.from('star_payments')
+              .update({ premium_until: premiumUntil }).eq('telegram_payment_charge_id', payment.telegram_payment_charge_id);
+            if (saveExpiryError) throw saveExpiryError;
+          }
+        } else {
           const { data: currentUser, error: userReadError } = await paymentDb
             .from('users').select('premium_until').eq('telegram_id', chatId).maybeSingle();
           if (userReadError) throw userReadError;
           const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
           const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
           premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
-          const { error: saveExpiryError } = await paymentDb.from('star_payments')
-            .update({ premium_until: premiumUntil }).eq('telegram_payment_charge_id', payment.telegram_payment_charge_id);
-          if (saveExpiryError) throw saveExpiryError;
+          const { error: paymentInsertError } = await paymentDb.from('star_payments').insert([{
+            telegram_payment_charge_id: payment.telegram_payment_charge_id,
+            provider_payment_charge_id: payment.provider_payment_charge_id || null,
+            telegram_id: chatId,
+            currency: payment.currency,
+            total_amount: payment.total_amount,
+            invoice_payload: payment.invoice_payload,
+            activation_status: 'pending',
+            premium_until: premiumUntil,
+            is_recurring: payment.is_recurring === true,
+            is_first_recurring: payment.is_first_recurring === true
+          }]);
+          if (paymentInsertError) throw paymentInsertError;
         }
-      } else {
-        const { data: currentUser, error: userReadError } = await paymentDb
-          .from('users').select('premium_until').eq('telegram_id', chatId).maybeSingle();
-        if (userReadError) throw userReadError;
-        const currentExpiry = currentUser?.premium_until ? Date.parse(currentUser.premium_until) : 0;
-        const rewardBase = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
-        premiumUntil = new Date(rewardBase + 30 * 24 * 60 * 60 * 1000).toISOString();
-        const { error: paymentInsertError } = await paymentDb.from('star_payments').insert([{
-          telegram_payment_charge_id: payment.telegram_payment_charge_id,
-          provider_payment_charge_id: payment.provider_payment_charge_id || null,
+  
+        const { error: grantError } = await paymentDb.from('users').upsert({
           telegram_id: chatId,
-          currency: payment.currency,
-          total_amount: payment.total_amount,
-          invoice_payload: payment.invoice_payload,
-          activation_status: 'pending',
+          first_name: msg.from?.first_name || 'User',
+          tariff: 'premium',
+          premium_until: premiumUntil
+        }, { onConflict: 'telegram_id' });
+        if (grantError) throw grantError;
+        const { error: activateError } = await paymentDb.from('star_payments').update({
+          activation_status: 'active',
           premium_until: premiumUntil,
-          is_recurring: payment.is_recurring === true,
-          is_first_recurring: payment.is_first_recurring === true
-        }]);
-        if (paymentInsertError) throw paymentInsertError;
-      }
-
-      const { error: grantError } = await paymentDb.from('users').upsert({
-        telegram_id: chatId,
-        first_name: msg.from?.first_name || 'User',
-        tariff: 'premium',
-        premium_until: premiumUntil
-      }, { onConflict: 'telegram_id' });
-      if (grantError) throw grantError;
-      const { error: activateError } = await paymentDb.from('star_payments').update({
-        activation_status: 'active',
-        premium_until: premiumUntil,
-        is_recurring: payment.is_recurring === true || existingPayment?.is_recurring === true,
-        is_first_recurring: payment.is_first_recurring === true || existingPayment?.is_first_recurring === true
-      }).eq('telegram_payment_charge_id', payment.telegram_payment_charge_id);
-      if (activateError) throw activateError;
-      await sendTelegramMessage(chatId, 'Оплату Telegram Stars підтверджено! Premium активовано на 30 днів. Дякуємо за підтримку ЗНАЙДЕНО.');
-    } catch (err) {
-      console.error('Помилка обробки Telegram Stars платежу:', err.message);
-      await sendTelegramMessage(chatId, 'Платіж отримано, але не вдалося завершити активацію автоматично. Напишіть на @esqide.');
-    }
-    return;
-  }
-
-  let isNewTelegramUser = false;
-  if (supabaseAdmin || supabase) {
-    const userDb = supabaseAdmin || supabase;
-    try {
-      const { data: previousUser, error: previousUserError } = await userDb.from('users')
-        .select('telegram_id').eq('telegram_id', chatId).maybeSingle();
-      if (previousUserError) throw previousUserError;
-      isNewTelegramUser = !previousUser;
-
-      const firstStartPayload = text.startsWith('/start') ? text.trim().split(/\s+/, 2)[1] || '' : '';
-      const firstReferralMatch = /^ref_(\d{1,20})$/.exec(firstStartPayload);
-      const inviterCandidate = firstReferralMatch ? Number(firstReferralMatch[1]) : 0;
-      const inviteeCandidate = Number(chatId);
-      const pendingReferrer = isNewTelegramUser &&
-        Number.isSafeInteger(inviterCandidate) && inviterCandidate > 0 &&
-        Number.isSafeInteger(inviteeCandidate) && inviteeCandidate > 0 &&
-        inviterCandidate !== inviteeCandidate
-          ? inviterCandidate
-          : null;
-
-      const userPayload = {
-        telegram_id: chatId,
-        first_name: msg.from?.first_name || 'User',
-        telegram_blocked_at: null,
-        ...(isNewTelegramUser ? { trial_started_at: new Date().toISOString() } : {}),
-        ...(pendingReferrer ? { pending_referrer_telegram_id: pendingReferrer } : {})
-      };
-      const { error: userUpsertError } = await userDb.from('users').upsert(userPayload, { onConflict: 'telegram_id' });
-      if (userUpsertError) throw userUpsertError;
-    } catch (userError) {
-      console.error('[Telegram] Не вдалося зберегти користувача для розсилок:', userError.message);
-    }
-  }
-
-  if (text.startsWith('/start')) {
-    const startPayload = text.trim().split(/\s+/, 2)[1] || '';
-    if (startPayload === 'buy_premium') {
-      const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
-      if (process.env.PAYMENTS_ENABLED !== 'true' || !Number.isSafeInteger(starsPrice) || starsPrice < 1) {
-        await sendTelegramMessage(chatId, 'Оплата Premium тимчасово вимкнена. Планова ціна — 180 ⭐ за 30 днів без автоматичного продовження.');
-        return;
-      }
-      try {
-        await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendInvoice`, {
-          chat_id: chatId,
-          title: 'ЗНАЙДЕНО Premium — 30 днів',
-          description: 'Premium на 30 днів: до 20 активних фільтрів та перевірка кожні 2 хвилини.',
-          payload: 'znaideno_premium_monthly_v1',
-          provider_token: '',
-          currency: 'XTR',
-          prices: [{ label: 'Premium на 30 днів', amount: starsPrice }]
-        });
+          is_recurring: payment.is_recurring === true || existingPayment?.is_recurring === true,
+          is_first_recurring: payment.is_first_recurring === true || existingPayment?.is_first_recurring === true
+        }).eq('telegram_payment_charge_id', payment.telegram_payment_charge_id);
+        if (activateError) throw activateError;
+        await sendTelegramMessage(chatId, 'Оплату Telegram Stars підтверджено! Premium активовано на 30 днів. Дякуємо за підтримку ЗНАЙДЕНО.');
       } catch (err) {
-        console.error('Не вдалося створити Telegram Stars рахунок:', err.message);
-        await sendTelegramMessage(chatId, 'Не вдалося створити рахунок. Спробуйте пізніше або напишіть на @esqide.');
+        console.error('Помилка обробки Telegram Stars платежу:', err.message);
+        await sendTelegramMessage(chatId, 'Платіж отримано, але не вдалося завершити активацію автоматично. Напишіть на @esqide.');
       }
       return;
     }
-    // Referral attribution is persisted on the invitee's first start and retried
-    // on later /start updates if the atomic database operation previously failed.
-    const referralDb = supabaseAdmin || supabase;
-    if (referralDb) {
-      const inviteeId = Number(chatId);
-      const { data: pendingReferralUser, error: pendingReferralError } = await referralDb
-        .from('users')
-        .select('pending_referrer_telegram_id')
-        .eq('telegram_id', inviteeId)
-        .maybeSingle();
-      if (pendingReferralError) {
-        console.warn('Не вдалося прочитати відкладене реферальне запрошення:', pendingReferralError.message);
-      } else if (pendingReferralUser?.pending_referrer_telegram_id) {
-        const inviterId = Number(pendingReferralUser.pending_referrer_telegram_id);
-        const { data: rewardData, error: rewardError } = await referralDb.rpc('grant_referral_reward', {
-          p_inviter_telegram_id: inviterId,
-          p_invitee_telegram_id: inviteeId
-        });
-        if (rewardError) {
-          console.warn('Не вдалося атомарно обробити реферальне запрошення; воно залишиться для повторної спроби:', rewardError.message);
-        } else {
-          const rewardResult = Array.isArray(rewardData) ? rewardData[0] : rewardData;
-          if (rewardResult?.rewarded === true) {
-            console.log('[Referral] Premium bonus atomically granted for invitee:', inviteeId);
-          } else if (rewardResult?.reason) {
-            console.log('[Referral] Attribution result:', rewardResult.reason);
+  
+    let isNewTelegramUser = false;
+    if (supabaseAdmin || supabase) {
+      const userDb = supabaseAdmin || supabase;
+      try {
+        const { data: previousUser, error: previousUserError } = await userDb.from('users')
+          .select('telegram_id').eq('telegram_id', chatId).maybeSingle();
+        if (previousUserError) throw previousUserError;
+        isNewTelegramUser = !previousUser;
+  
+        const firstStartPayload = text.startsWith('/start') ? text.trim().split(/\s+/, 2)[1] || '' : '';
+        const firstReferralMatch = /^ref_(\d{1,20})$/.exec(firstStartPayload);
+        const inviterCandidate = firstReferralMatch ? Number(firstReferralMatch[1]) : 0;
+        const inviteeCandidate = Number(chatId);
+        const pendingReferrer = isNewTelegramUser &&
+          Number.isSafeInteger(inviterCandidate) && inviterCandidate > 0 &&
+          Number.isSafeInteger(inviteeCandidate) && inviteeCandidate > 0 &&
+          inviterCandidate !== inviteeCandidate
+            ? inviterCandidate
+            : null;
+  
+        const userPayload = {
+          telegram_id: chatId,
+          first_name: msg.from?.first_name || 'User',
+          telegram_blocked_at: null,
+          ...(isNewTelegramUser ? { trial_started_at: new Date().toISOString() } : {}),
+          ...(pendingReferrer ? { pending_referrer_telegram_id: pendingReferrer } : {})
+        };
+        const { error: userUpsertError } = await userDb.from('users').upsert(userPayload, { onConflict: 'telegram_id' });
+        if (userUpsertError) throw userUpsertError;
+      } catch (userError) {
+        console.error('[Telegram] Не вдалося зберегти користувача для розсилок:', userError.message);
+      }
+    }
+  
+    if (text.startsWith('/start')) {
+      const startPayload = text.trim().split(/\s+/, 2)[1] || '';
+      if (startPayload === 'buy_premium') {
+        const starsPrice = Number(process.env.TELEGRAM_STARS_PREMIUM_PRICE || 0);
+        if (process.env.PAYMENTS_ENABLED !== 'true' || !Number.isSafeInteger(starsPrice) || starsPrice < 1) {
+          await sendTelegramMessage(chatId, 'Оплата Premium тимчасово вимкнена. Планова ціна — 180 ⭐ за 30 днів без автоматичного продовження.');
+          return;
+        }
+        try {
+          await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendInvoice`, {
+            chat_id: chatId,
+            title: 'ЗНАЙДЕНО Premium — 30 днів',
+            description: 'Premium на 30 днів: до 20 активних фільтрів та перевірка кожні 2 хвилини.',
+            payload: 'znaideno_premium_monthly_v1',
+            provider_token: '',
+            currency: 'XTR',
+            prices: [{ label: 'Premium на 30 днів', amount: starsPrice }]
+          });
+        } catch (err) {
+          console.error('Не вдалося створити Telegram Stars рахунок:', err.message);
+          await sendTelegramMessage(chatId, 'Не вдалося створити рахунок. Спробуйте пізніше або напишіть на @esqide.');
+        }
+        return;
+      }
+      // Referral attribution is persisted on the invitee's first start and retried
+      // on later /start updates if the atomic database operation previously failed.
+      const referralDb = supabaseAdmin || supabase;
+      if (referralDb) {
+        const inviteeId = Number(chatId);
+        const { data: pendingReferralUser, error: pendingReferralError } = await referralDb
+          .from('users')
+          .select('pending_referrer_telegram_id')
+          .eq('telegram_id', inviteeId)
+          .maybeSingle();
+        if (pendingReferralError) {
+          console.warn('Не вдалося прочитати відкладене реферальне запрошення:', pendingReferralError.message);
+        } else if (pendingReferralUser?.pending_referrer_telegram_id) {
+          const inviterId = Number(pendingReferralUser.pending_referrer_telegram_id);
+          const { data: rewardData, error: rewardError } = await referralDb.rpc('grant_referral_reward', {
+            p_inviter_telegram_id: inviterId,
+            p_invitee_telegram_id: inviteeId
+          });
+          if (rewardError) {
+            console.warn('Не вдалося атомарно обробити реферальне запрошення; воно залишиться для повторної спроби:', rewardError.message);
+          } else {
+            const rewardResult = Array.isArray(rewardData) ? rewardData[0] : rewardData;
+            if (rewardResult?.rewarded === true) {
+              console.log('[Referral] Premium bonus atomically granted for invitee:', inviteeId);
+            } else if (rewardResult?.reason) {
+              console.log('[Referral] Attribution result:', rewardResult.reason);
+            }
           }
         }
       }
-    }
-
-    const welcomeText =
-      `👋 <b>Вітаємо у ЗНАЙДЕНО 1.0.0!</b>\n\n` +
-      `🔎 <b>Розумний пошук, який працює за тебе.</b>\n` +
-      `Створи фільтр — і отримуй сповіщення, коли з’являються нові оголошення, що відповідають твоїм критеріям. Менше ручних перевірок, більше часу на важливе.\n\n` +
-      `<b>Що вміє ЗНАЙДЕНО:</b>\n` +
-      `🧠 <b>Пошук своїми словами:</b> опиши потрібний товар, бюджет, місто та стан.\n` +
-      `🎯 <b>Гнучкі фільтри:</b> уточнюй критерії та відсіюй небажані варіанти.\n` +
-      `🔔 <b>Автоматичні сповіщення:</b> отримуй ціну, опис, доступне фото та посилання на знайдену пропозицію.\n` +
-      `📊 <b>Аналітика цін:</b> порівнюй пропозиції та переглядай орієнтовну медіанну ціну, коли достатньо схожих оголошень.\n` +
-      `📉 <b>Контроль ціни:</b> отримуй сповіщення, якщо ціна вже відстежуваного оголошення знизилася.\n\n` +
-      `🎁 <b>4 дні пробного періоду</b>\n` +
-      `• До <b>3 фільтрів</b> одночасно.\n` +
-      `• До <b>30 пошукових перевірок на день</b>.\n` +
-      `• Перевірка приблизно кожні <b>5 хвилин</b>.\n\n` +
-      `💎 <b>PREMIUM — 180 ⭐ / 30 днів у Mini App</b>\n` +
-      `• До <b>20 фільтрів</b> і до <b>100 пошукових перевірок на день</b>.\n` +
-      `• Перевірка приблизно кожні <b>2 хвилини</b>.\n\n` +
-      `Після пробного періоду можна продовжити користуватися безкоштовним тарифом: <b>1 фільтр</b>, до <b>5 перевірок на день</b> і перевірка приблизно кожні <b>15 хвилин</b>.\n\n` +
-      `👇 <i>Натисни кнопку нижче, відкрий ЗНАЙДЕНО та створи свій перший пошук.</i>\n\n` +
-      `<i>Сервіс не гарантує виявлення кожного оголошення. Частота перевірок залежить від тарифу та доступності джерела.</i>`;
-
-    const keyboard = {
-      inline_keyboard: [[{ text: 'Відкрити ЗНАЙДЕНО', web_app: { url: SERVER_URL } }]]
-    };
-    await sendTelegramMessage(chatId, welcomeText, keyboard);
-    return;
-  }
-
-  if (text.startsWith('/cancel_subscription')) {
-    try {
-      if (!(supabaseAdmin || supabase) || !TELEGRAM_BOT_TOKEN) throw new Error('Платіжний сервіс тимчасово недоступний');
-      const { data: lastRecurringPayment, error: recurringReadError } = await (supabaseAdmin || supabase)
-        .from('star_payments')
-        .select('telegram_payment_charge_id,premium_until')
-        .eq('telegram_id', chatId)
-        .eq('activation_status', 'active')
-        .eq('is_recurring', true)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (recurringReadError) throw recurringReadError;
-      if (!lastRecurringPayment) {
-        await sendTelegramMessage(chatId, 'Не знайшли активної автопродовжуваної підписки для скасування. Якщо потрібна допомога, напишіть у підтримку платежів.');
-        return;
-      }
-      const cancelResponse = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editUserStarSubscription`, {
-        user_id: chatId,
-        telegram_payment_charge_id: lastRecurringPayment.telegram_payment_charge_id,
-        is_canceled: true
-      }, { timeout: 10000 });
-      if (!cancelResponse.data?.ok) throw new Error(cancelResponse.data?.description || 'Telegram не підтвердив скасування');
-      await sendTelegramMessage(chatId, 'Автопродовження скасовано. Premium залишиться доступним до ' +
-        new Date(lastRecurringPayment.premium_until || Date.now()).toLocaleDateString('uk-UA') +
-        '. Повторного списання не буде.');
-    } catch (err) {
-      console.error('[Stars] Не вдалося скасувати підписку:', err.response?.data?.description || err.message);
-      await sendTelegramMessage(chatId, 'Не вдалося скасувати автопродовження автоматично. Напишіть у підтримку платежів: @esqide.');
-    }
-    return;
-  }
-
-  if (text.startsWith('/paysupport') || text.startsWith('/support')) {
-    await sendTelegramMessage(chatId,
-      'Підтримка платежів ЗНАЙДЕНО. Опишіть проблему та, якщо є, дату платежу. Контакт: @esqide. Не надсилайте дані банківської картки чи паролі.');
-    return;
-  }
-
-  if (text.startsWith('/terms')) {
-    await sendTelegramMessage(chatId,
-      'Умови використання ЗНАЙДЕНО відкриваються в Mini App → Документи. Поточна редакція — проєкт, не юридично затверджений документ; реквізити постачальника та остаточні умови потрібно підтвердити до комерційного запуску.',
-      { inline_keyboard: [[{ text: 'Відкрити умови', web_app: { url: SERVER_URL + '/?document=terms' } }]] });
-    return;
-  }
-
-  if (text.startsWith('/privacy')) {
-    await sendTelegramMessage(chatId,
-      'Політика конфіденційності ЗНАЙДЕНО відкривається в Mini App → Документи. Поточна редакція — проєкт; власник має підтвердити відповідальну особу, правові підстави та строки зберігання даних.',
-      { inline_keyboard: [[{ text: 'Відкрити політику', web_app: { url: SERVER_URL + '/?document=privacy' } }]] });
-    return;
-  }
-
-  if (text.startsWith('/admin')) {
-    const isAdmin = await checkIsAdmin(chatId);
-    if (!isAdmin) {
-      await sendTelegramMessage(chatId, `❌ У доступі відмовлено.`);
+  
+      const welcomeText =
+        `👋 <b>Вітаємо у ЗНАЙДЕНО 1.0.0!</b>\n\n` +
+        `🔎 <b>Розумний пошук, який працює за тебе.</b>\n` +
+        `Створи фільтр — і отримуй сповіщення, коли з’являються нові оголошення, що відповідають твоїм критеріям. Менше ручних перевірок, більше часу на важливе.\n\n` +
+        `<b>Що вміє ЗНАЙДЕНО:</b>\n` +
+        `🧠 <b>Пошук своїми словами:</b> опиши потрібний товар, бюджет, місто та стан.\n` +
+        `🎯 <b>Гнучкі фільтри:</b> уточнюй критерії та відсіюй небажані варіанти.\n` +
+        `🔔 <b>Автоматичні сповіщення:</b> отримуй ціну, опис, доступне фото та посилання на знайдену пропозицію.\n` +
+        `📊 <b>Аналітика цін:</b> порівнюй пропозиції та переглядай орієнтовну медіанну ціну, коли достатньо схожих оголошень.\n` +
+        `📉 <b>Контроль ціни:</b> отримуй сповіщення, якщо ціна вже відстежуваного оголошення знизилася.\n\n` +
+        `🎁 <b>4 дні пробного періоду</b>\n` +
+        `• До <b>3 фільтрів</b> одночасно.\n` +
+        `• До <b>30 пошукових перевірок на день</b>.\n` +
+        `• Перевірка приблизно кожні <b>5 хвилин</b>.\n\n` +
+        `💎 <b>PREMIUM — 180 ⭐ / 30 днів у Mini App</b>\n` +
+        `• До <b>20 фільтрів</b> і до <b>100 пошукових перевірок на день</b>.\n` +
+        `• Перевірка приблизно кожні <b>2 хвилини</b>.\n\n` +
+        `Після пробного періоду можна продовжити користуватися безкоштовним тарифом: <b>1 фільтр</b>, до <b>5 перевірок на день</b> і перевірка приблизно кожні <b>15 хвилин</b>.\n\n` +
+        `👇 <i>Натисни кнопку нижче, відкрий ЗНАЙДЕНО та створи свій перший пошук.</i>\n\n` +
+        `<i>Сервіс не гарантує виявлення кожного оголошення. Частота перевірок залежить від тарифу та доступності джерела.</i>`;
+  
+      const keyboard = {
+        inline_keyboard: [[{ text: 'Відкрити ЗНАЙДЕНО', web_app: { url: SERVER_URL } }]]
+      };
+      await sendTelegramMessage(chatId, welcomeText, keyboard);
       return;
     }
-    const keyboard = {
-      inline_keyboard: [[{ text: 'Відкрити адмінпанель', web_app: { url: SERVER_URL } }]]
-    };
-    await sendTelegramMessage(chatId, `⚙️ <b>Панель Адміністратора</b>`, keyboard);
-    return;
-  }
+  
+    if (text.startsWith('/cancel_subscription')) {
+      try {
+        if (!(supabaseAdmin || supabase) || !TELEGRAM_BOT_TOKEN) throw new Error('Платіжний сервіс тимчасово недоступний');
+        const { data: lastRecurringPayment, error: recurringReadError } = await (supabaseAdmin || supabase)
+          .from('star_payments')
+          .select('telegram_payment_charge_id,premium_until')
+          .eq('telegram_id', chatId)
+          .eq('activation_status', 'active')
+          .eq('is_recurring', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (recurringReadError) throw recurringReadError;
+        if (!lastRecurringPayment) {
+          await sendTelegramMessage(chatId, 'Не знайшли активної автопродовжуваної підписки для скасування. Якщо потрібна допомога, напишіть у підтримку платежів.');
+          return;
+        }
+        const cancelResponse = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editUserStarSubscription`, {
+          user_id: chatId,
+          telegram_payment_charge_id: lastRecurringPayment.telegram_payment_charge_id,
+          is_canceled: true
+        }, { timeout: 10000 });
+        if (!cancelResponse.data?.ok) throw new Error(cancelResponse.data?.description || 'Telegram не підтвердив скасування');
+        await sendTelegramMessage(chatId, 'Автопродовження скасовано. Premium залишиться доступним до ' +
+          new Date(lastRecurringPayment.premium_until || Date.now()).toLocaleDateString('uk-UA') +
+          '. Повторного списання не буде.');
+      } catch (err) {
+        console.error('[Stars] Не вдалося скасувати підписку:', err.response?.data?.description || err.message);
+        await sendTelegramMessage(chatId, 'Не вдалося скасувати автопродовження автоматично. Напишіть у підтримку платежів: @esqide.');
+      }
+      return;
+    }
+  
+    if (text.startsWith('/paysupport') || text.startsWith('/support')) {
+      await sendTelegramMessage(chatId,
+        'Підтримка платежів ЗНАЙДЕНО. Опишіть проблему та, якщо є, дату платежу. Контакт: @esqide. Не надсилайте дані банківської картки чи паролі.');
+      return;
+    }
+  
+    if (text.startsWith('/terms')) {
+      await sendTelegramMessage(chatId,
+        'Умови використання ЗНАЙДЕНО відкриваються в Mini App → Документи. Поточна редакція — проєкт, не юридично затверджений документ; реквізити постачальника та остаточні умови потрібно підтвердити до комерційного запуску.',
+        { inline_keyboard: [[{ text: 'Відкрити умови', web_app: { url: SERVER_URL + '/?document=terms' } }]] });
+      return;
+    }
+  
+    if (text.startsWith('/privacy')) {
+      await sendTelegramMessage(chatId,
+        'Політика конфіденційності ЗНАЙДЕНО відкривається в Mini App → Документи. Поточна редакція — проєкт; власник має підтвердити відповідальну особу, правові підстави та строки зберігання даних.',
+        { inline_keyboard: [[{ text: 'Відкрити політику', web_app: { url: SERVER_URL + '/?document=privacy' } }]] });
+      return;
+    }
+  
+    if (text.startsWith('/admin')) {
+      const isAdmin = await checkIsAdmin(chatId);
+      if (!isAdmin) {
+        await sendTelegramMessage(chatId, `❌ У доступі відмовлено.`);
+        return;
+      }
+      const keyboard = {
+        inline_keyboard: [[{ text: 'Відкрити адмінпанель', web_app: { url: SERVER_URL } }]]
+      };
+      await sendTelegramMessage(chatId, `⚙️ <b>Панель Адміністратора</b>`, keyboard);
+      return;
+    }
   } catch (err) {
-    console.error('[Telegram Webhook] Непередбачена помилка обробки update:', err.message);
-    if (!res.headersSent) res.sendStatus(500);
-  } finally {
-    // Acknowledge only after processing finishes so Telegram can retry unexpected failures.
-    if (!res.headersSent) res.sendStatus(200);
+    console.error('[Telegram Webhook] Помилка обробки update:', safeText(err.code || err.response?.status || 'processing_failed', 48));
+    throw err;
   }
+}
+
+const telegramWebhookInFlight = new Set();
+let telegramWebhookQueueDrainRunning = false;
+
+function encryptQueuedTelegramUpdate(update) {
+  return encryptTelegramUpdate(update, TELEGRAM_WEBHOOK_SECRET);
+}
+
+function decryptQueuedTelegramUpdate(payload) {
+  return decryptTelegramUpdate(payload, TELEGRAM_WEBHOOK_SECRET);
+}
+
+async function processTelegramWebhookQueueRow(row) {
+  const updateId = Number(row?.update_id);
+  if (!Number.isSafeInteger(updateId) || telegramWebhookInFlight.has(updateId)) return;
+  telegramWebhookInFlight.add(updateId);
+  const attempts = Number(row.attempts || 0) + 1;
+  try {
+    const { error: attemptError } = await supabaseAdmin.from('telegram_webhook_updates')
+      .update({ attempts, last_error_code: null }).eq('update_id', updateId);
+    if (attemptError) throw attemptError;
+    const update = decryptQueuedTelegramUpdate(row.payload_ciphertext);
+    if (Number(update.update_id) !== updateId) throw new Error('webhook_update_id_mismatch');
+    await processTelegramUpdate(update);
+    const { error: completeError } = await supabaseAdmin.from('telegram_webhook_updates')
+      .update({ status: 'processed', payload_ciphertext: '', processed_at: new Date().toISOString(), last_error_code: null })
+      .eq('update_id', updateId);
+    if (completeError) throw completeError;
+  } catch (error) {
+    const errorCode = safeText(error.code || error.response?.status || 'processing_failed', 48);
+    try {
+      await supabaseAdmin.from('telegram_webhook_updates')
+        .update({ status: 'pending', attempts, last_error_code: errorCode })
+        .eq('update_id', updateId);
+    } catch (_) {}
+    console.error('[Telegram webhook queue] Update processing failed:', errorCode);
+  } finally {
+    telegramWebhookInFlight.delete(updateId);
+  }
+}
+
+async function drainTelegramWebhookQueue() {
+  if (telegramWebhookQueueDrainRunning || !supabaseAdmin) return;
+  telegramWebhookQueueDrainRunning = true;
+  try {
+    const { data, error } = await supabaseAdmin.from('telegram_webhook_updates')
+      .select('update_id,payload_ciphertext,attempts')
+      .eq('status', 'pending').order('created_at', { ascending: true }).limit(5);
+    if (error) throw error;
+    for (const row of (data || [])) await processTelegramWebhookQueueRow(row);
+  } catch (error) {
+    console.warn('[Telegram webhook queue] Queue poll failed:', safeText(error.code || 'queue_unavailable', 48));
+  } finally {
+    telegramWebhookQueueDrainRunning = false;
+  }
+}
+
+app.post('/telegram-webhook', async (req, res) => {
+  const receivedWebhookSecret = req.get('x-telegram-bot-api-secret-token') || '';
+  if (!isValidTelegramWebhookSecret(receivedWebhookSecret, TELEGRAM_WEBHOOK_SECRET)) return res.sendStatus(401);
+
+  const update = req.body;
+  const updateId = Number(update?.update_id);
+  if (!Number.isSafeInteger(updateId) || updateId < 0) return res.sendStatus(400);
+  if (!supabaseAdmin) return res.sendStatus(503);
+
+  const payloadCiphertext = encryptQueuedTelegramUpdate(update);
+  const { error } = await supabaseAdmin.from('telegram_webhook_updates').insert({
+    update_id: updateId, payload_ciphertext: payloadCiphertext, status: 'pending'
+  });
+  if (error) {
+    if (isDuplicateWebhookUpdate(error)) return res.sendStatus(200);
+    console.warn('[Telegram webhook queue] Could not persist update:', safeText(error.code || 'queue_unavailable', 48));
+    return res.sendStatus(503);
+  }
+
+  res.sendStatus(200);
+  setImmediate(() => processTelegramWebhookQueueRow({ update_id: updateId, payload_ciphertext: payloadCiphertext, attempts: 0 }));
 });
+
+const telegramWebhookQueueTimer = setInterval(() => { void drainTelegramWebhookQueue(); }, 15000);
+if (typeof telegramWebhookQueueTimer.unref === 'function') telegramWebhookQueueTimer.unref();
+setImmediate(() => void drainTelegramWebhookQueue());
 
 const WORKER_INSTANCE_ID = process.env.RENDER_INSTANCE_ID || crypto.randomUUID();
 let isWorkerRunning = false;
