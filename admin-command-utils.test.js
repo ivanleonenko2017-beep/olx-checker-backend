@@ -74,8 +74,8 @@ test('admin status reports only boolean Premium bypass state', () => {
     testPremiumBypassConfigured: true,
     testPremiumBypassEffective: false
   });
-  assert.ok(result.includes('ENABLE_TEST_PREMIUM_BYPASS:</b> включён'));
-  assert.ok(result.includes('фактический обход: заблокирован'));
+  assert.ok(result.includes('ENABLE_TEST_PREMIUM_BYPASS:</b> увімкнено'));
+  assert.ok(result.includes('фактичний обхід: заблоковано'));
   assert.ok(!result.includes('RENDER_SERVICE_ID'));
   assert.ok(!result.includes('TELEGRAM_BOT_TOKEN'));
 });
