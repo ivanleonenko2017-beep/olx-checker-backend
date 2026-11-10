@@ -143,7 +143,7 @@ function termMatches(haystack, rawTerm, title = '') {
   const phoneStorage = term.match(/^(\d{2,4})\s*(?:gb|гб)$/iu);
   if (phoneStorage) {
     const capacity = phoneStorage[1];
-    const explicitCapacityPattern = new RegExp('(?:^|[^\\d])' + capacity + '\\s*(?:gb|гб)(?=$|[^\\p{L}])', 'iu');
+    const explicitCapacityPattern = new RegExp('(?:^|[^\\d])' + capacity + '\\s*(?:gb|гб)(?=$|[^\\p{L}\\p{N}])', 'iu');
     if (explicitCapacityPattern.test(haystack)) return true;
 
     const titleText = String(title || '').toLocaleLowerCase('uk-UA');
@@ -507,7 +507,7 @@ function canUseUnverifiedStorageFallback(listing, criteriaInput = {}) {
 
   const text = [title, listing?.cardText, listing?.description, listing?.conditionText]
     .filter(Boolean).join(' ').toLocaleLowerCase('uk-UA');
-  const explicitCapacities = [...text.matchAll(/(?:^|[^\d])(\d{2,4})\s*(?:гб|gb)(?=$|[^\p{L}])/giu)]
+  const explicitCapacities = [...text.matchAll(/(?:^|[^\d])(\d{2,4})\s*(?:гб|gb)(?=$|[^\p{L}\p{N}])/giu)]
     .map(match => match[1]);
 
   if (explicitCapacities.length && !explicitCapacities.some(value => storageTerms.includes(value))) {
