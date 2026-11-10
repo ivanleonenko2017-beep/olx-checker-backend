@@ -169,7 +169,7 @@ function formatSubscriptionMessage(data = {}) {
       'Trial/Premium переходить на Free; зайві фільтри залишаються в базі, але не обробляються воркером.')
   ];
   if (data.paymentEvidence) lines.push('<b>Платіжні записи:</b> ' + escapeTelegramHtml(data.paymentEvidence));
-  return splitTelegramMessages([lines.join('\\n')]);
+  return splitTelegramMessages([lines.join('\n')]);
 }
 
 function formatReferralMessage(data = {}) {
@@ -188,12 +188,15 @@ function formatReferralMessage(data = {}) {
     '<b>Атрибуція:</b> ' + escapeTelegramHtml(user.referral_attributed_at || 'не зафіксована'),
     '<b>Розбіжності:</b> ' + escapeTelegramHtml((data.discrepancies || []).join('; ') || 'не виявлено')
   ];
-  return splitTelegramMessages([lines.join('\\n')]);
+  return splitTelegramMessages([lines.join('\n')]);
 }
-\nmodule.exports = {
+module.exports = {
   consumeRateLimit,
   isAdminCommandAuthorized,
   splitTelegramMessages,
   formatDiagnosticMessages,
-  formatStatusMessage
+  formatStatusMessage,
+  maskTelegramId,
+  formatSubscriptionMessage,
+  formatReferralMessage
 };
