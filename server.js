@@ -104,6 +104,8 @@ const HEADERS = {
   'Cache-Control': 'no-cache'
 };
 
+let lastOlxRequestStatus = 'not_run';
+
 function verifyTelegramWebAppData(initDataRaw) {
   if (!initDataRaw || !TELEGRAM_BOT_TOKEN) return null;
   try {
@@ -746,6 +748,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
         uniqueTotal: merged.length, parserStats: result.parserStats || {}
       };
       pageTraces.push(pageTrace);
+      lastOlxRequestStatus = pageTrace.httpStatus ? 'HTTP ' + pageTrace.httpStatus : 'HTTP статус не определён';
       console.log('[SEARCH_TRACE] ' + JSON.stringify({
         event: 'search_page', requestId, source, ...pageTrace
       }));
@@ -753,6 +756,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
       if (merged.length === previousUniqueCount) { stopReason = 'no_new_unique_cards'; break; }
       previousUniqueCount = merged.length;
     } catch (error) {
+      lastOlxRequestStatus = error.response?.status ? 'HTTP ' + error.response.status : safeText(error.code || 'upstream_error', 48);
       stopReason = error.response?.status === 429 ? 'http_429' :
         (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT' ? 'timeout' : 'upstream_error');
       console.error('[SEARCH_TRACE] ' + JSON.stringify({
@@ -1881,6 +1885,78 @@ app.post('/telegram-webhook', async (req, res) => {
   const chatId = msg.chat.id;
   const text = msg.text || '';
 
+  const adminCommandMatch = text.match(/^\/(diag|status)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+  if (adminCommandMatch) {
+    const command = adminCommandMatch[1].toLowerCase();
+    const senderId = msg.from?.id;
+    if (!(await isAdminCommandAuthorized(senderId, checkIsAdmin))) {
+      await sendTelegramMessage(chatId, 'Команда недоступна.');
+      return;
+    }
+    const adminKey = hashUserId(senderId, TELEGRAM_WEBHOOK_SECRET) || 'admin';
+    if (command === 'diag') {
+      const rawQuery = String(adminCommandMatch[2] || '').trim().slice(0, 300);
+      if (!rawQuery) {
+        await sendTelegramMessage(chatId, 'Формат: /diag текст пошукового запиту');
+        return;
+      }
+      if (!consumeRateLimit(searchDiagnosticRateLimits, adminKey)) {
+        await sendTelegramMessage(chatId, 'Діагностика доступна не частіше одного разу на хвилину.');
+        return;
+      }
+      const diagnostic = await runSearchDiagnostic(rawQuery, senderId);
+      const messages = formatDiagnosticMessages(diagnostic.body);
+      for (const message of messages) await sendTelegramMessage(chatId, message);
+      return;
+    }
+
+    if (!consumeRateLimit(botStatusRateLimits, adminKey)) {
+      await sendTelegramMessage(chatId, 'Команда /status доступна не частіше одного разу на хвилину.');
+      return;
+    }
+    let supabaseOk = false;
+    try {
+      if (supabase) {
+        const { error } = await supabase.from('users')
+          .select('telegram_id', { head: true, count: 'exact' }).limit(1);
+        supabaseOk = !error;
+      }
+    } catch (_) { supabaseOk = false; }
+
+    let webhook = { host: 'не определён', pendingUpdates: 0, lastError: 'не удалось получить getWebhookInfo' };
+    try {
+      if (TELEGRAM_BOT_TOKEN) {
+        const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo`, { timeout: 8000 });
+        const info = response.data?.result || {};
+        let host = 'не определён';
+        try { if (info.url) host = new URL(info.url).hostname; } catch (_) {}
+        const lastErrorDate = info.last_error_date
+          ? new Date(Number(info.last_error_date) * 1000).toISOString()
+          : '';
+        webhook = {
+          host,
+          pendingUpdates: Number(info.pending_update_count || 0),
+          lastError: [lastErrorDate, safeText(info.last_error_message || 'нет', 180)].filter(Boolean).join(' · ')
+        };
+      }
+    } catch (error) {
+      webhook.lastError = safeText(error.response?.status ? 'getWebhookInfo HTTP ' + error.response.status : 'getWebhookInfo недоступен', 180);
+    }
+    const uptimeSeconds = Math.floor(process.uptime());
+    const uptime = [Math.floor(uptimeSeconds / 86400) + 'д',
+      Math.floor((uptimeSeconds % 86400) / 3600) + 'ч',
+      Math.floor((uptimeSeconds % 3600) / 60) + 'м'].join(' ');
+    const commitCandidate = String(process.env.RENDER_GIT_COMMIT || '').trim();
+    const commit = /^[a-f0-9]{7,40}$/i.test(commitCandidate) ? commitCandidate : 'не доступен';
+    const statusMessage = formatStatusMessage({
+      commit, uptime, supabaseOk, webhook,
+      worker: { lastSuccessAt: workerLastSuccessAt, processedFilters: workerLastProcessedFilters },
+      lastOlxStatus: lastOlxRequestStatus
+    });
+    await sendTelegramMessage(chatId, statusMessage);
+    return;
+  }
+
   // Grant Premium only after Telegram confirms a successful Stars payment.
   if (msg.successful_payment) {
     const payment = msg.successful_payment;
@@ -2150,8 +2226,12 @@ app.post('/telegram-webhook', async (req, res) => {
 
 const WORKER_INSTANCE_ID = process.env.RENDER_INSTANCE_ID || crypto.randomUUID();
 let isWorkerRunning = false;
+let workerLastSuccessAt = null;
+let workerLastProcessedFilters = 0;
 async function runBackgroundWorker() {
   if (isWorkerRunning || !supabase || !TELEGRAM_BOT_TOKEN) return;
+  let workerCycleHadError = false;
+  let processedFiltersThisCycle = 0;
 
   try {
     isWorkerRunning = true;
@@ -2232,6 +2312,8 @@ async function runBackgroundWorker() {
         }
 
         const { items: parsedItems, averagePrice, requestId: searchRequestId } = await parseOlx(targetUrl, filter.min_price, filter.max_price, filter.query, filter.city, { source: 'background', userId: filter.user_id, criteria });
+        processedFiltersThisCycle++;
+        
         const requestedLocation = String(filter.city || '').trim();
         // Advanced term filters need the listing page, not just the often-incomplete
         // search card. Fetch full descriptions only after date and city filtering below,
@@ -2456,6 +2538,7 @@ async function runBackgroundWorker() {
           await new Promise(r => setTimeout(r, 1500));
         }
       } catch (fErr) {
+        workerCycleHadError = true;
         console.error(`Помилка воркера для фільтра ${filter.id}:`, fErr.message);
       } finally {
         if (filterLockAcquired && lockClient) {
@@ -2472,8 +2555,13 @@ async function runBackgroundWorker() {
       }
     }
   } catch (err) {
+    workerCycleHadError = true;
     console.error('Помилка воркера:', err.message);
   } finally {
+    if (!workerCycleHadError) {
+      workerLastSuccessAt = new Date().toISOString();
+      workerLastProcessedFilters = processedFiltersThisCycle;
+    }
     isWorkerRunning = false;
   }
 }
