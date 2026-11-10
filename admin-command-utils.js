@@ -130,6 +130,8 @@ function formatStatusMessage(s = {}) {
       escapeTelegramHtml(safe(worker.lastSuccessAt || 'ще не зафіксовано', 48)) +
       ', фільтрів: ' + Number(worker.processedFilters || 0),
     '<b>Supabase:</b> ' + (s.supabaseOk ? 'доступна' : 'недоступна'),
+    '<b>ENABLE_TEST_PREMIUM_BYPASS:</b> ' + (s.testPremiumBypassConfigured ? 'включён' : 'выключен') +
+      ' · фактический обход: ' + (s.testPremiumBypassEffective ? 'разрешён' : 'заблокирован'),
     '<b>Telegram webhook:</b> host=' + escapeTelegramHtml(safe(webhook.host || 'не визначено', 120)) +
       ', pending=' + Number(webhook.pendingUpdates || 0),
     '<b>Остання помилка Telegram:</b> ' +

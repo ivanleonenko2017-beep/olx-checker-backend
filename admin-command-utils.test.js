@@ -65,6 +65,18 @@ test('Telegram status formatting redacts bot token and never emits URL path', ()
   assert.ok(!result.includes('/telegram-webhook'));
 });
 
+test('admin status reports only boolean Premium bypass state', () => {
+  const result = formatStatusMessage({
+    supabaseOk: true,
+    testPremiumBypassConfigured: true,
+    testPremiumBypassEffective: false
+  });
+  assert.ok(result.includes('ENABLE_TEST_PREMIUM_BYPASS:</b> включён'));
+  assert.ok(result.includes('фактический обход: заблокирован'));
+  assert.ok(!result.includes('RENDER_SERVICE_ID'));
+  assert.ok(!result.includes('TELEGRAM_BOT_TOKEN'));
+});
+
 test('long Telegram output is split below the safe message limit, including one oversized section', () => {
   const chunks = splitTelegramMessages(['a'.repeat(2000), 'b'.repeat(2000), 'c'.repeat(2000)]);
   assert.equal(chunks.length, 3);

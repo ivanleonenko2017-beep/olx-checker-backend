@@ -1963,6 +1963,8 @@ app.post('/telegram-webhook', async (req, res) => {
     const commit = /^[a-f0-9]{7,40}$/i.test(commitCandidate) ? commitCandidate : 'не доступен';
     const statusMessage = formatStatusMessage({
       commit, uptime, supabaseOk, webhook,
+      testPremiumBypassConfigured: process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true',
+      testPremiumBypassEffective: isTestPremiumBypassEnabled(process.env),
       worker: { lastSuccessAt: workerLastSuccessAt, processedFilters: workerLastProcessedFilters },
       lastOlxStatus: lastOlxRequestStatus
     });
