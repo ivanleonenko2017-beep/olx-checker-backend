@@ -1736,6 +1736,31 @@ app.post('/api/admin/grant-premium', adminAuthMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/admin/stats', adminAuthMiddleware, async (_req, res) => {
+  const db = supabaseAdmin || supabase;
+  if (!db) return res.status(503).json({ success: false, error: 'Статистика тимчасово недоступна' });
+  try {
+    const [users, filters, seen] = await Promise.all([
+      db.from('users').select('telegram_id', { count: 'exact', head: true }),
+      db.from('filters').select('id', { count: 'exact', head: true }),
+      db.from('seen_ads').select('id', { count: 'exact', head: true })
+    ]);
+    const failed = [users, filters, seen].find(result => result.error);
+    if (failed) throw failed.error;
+    return res.json({
+      success: true,
+      stats: {
+        totalUsers: Number(users.count || 0),
+        totalFilters: Number(filters.count || 0),
+        totalSeen: Number(seen.count || 0)
+      }
+    });
+  } catch (error) {
+    console.error('[Admin stats] Не вдалося завантажити агреговану статистику:', safeText(error.message, 160));
+    return res.status(503).json({ success: false, error: 'Статистика тимчасово недоступна' });
+  }
+});
+
 app.get('/api/admin/diagnostics', adminAuthMiddleware, async (req, res) => {
   res.json({ 
     success: true, 

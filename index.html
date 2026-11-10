@@ -495,6 +495,11 @@
         </div>
       </div>
 
+      <div id="adminStatsError" class="hidden text-xs text-red-400 text-center" role="status" aria-live="polite">
+        <span>Не вдалося завантажити</span>
+        <button type="button" onclick="loadAdminStats()" class="ml-2 underline text-emerald-400">Повторити</button>
+      </div>
+
       <!-- User Search & Management -->
       <div class="p-4 rounded-3xl bg-gray-900 border border-gray-800 space-y-3">
         <div class="text-xs font-bold text-white">Управління користувачем</div>
@@ -1527,7 +1532,7 @@
       const container = document.getElementById('activeSearchesList');
       const filterLimit = isAdminUser ? Infinity : (window.userAccess?.filterLimit ?? (window.hasActivePremium ? 20 : window.hasActiveTrial ? 3 : 1));
       const effectiveLimit = Number.isFinite(Number(filterLimit)) ? Math.max(0, Math.floor(Number(filterLimit))) : userFilters.length;
-      const limitLabel = Number.isFinite(filterLimit) ? String(filterLimit) : '∞';
+      const limitLabel = isAdminUser ? 'Адмін · без ліміту' : (Number.isFinite(filterLimit) ? String(filterLimit) : '∞');
       const activeCount = Math.min(userFilters.length, effectiveLimit);
       const countText = `${activeCount} активних / ${userFilters.length} збережено • ліміт ${limitLabel}`;
       document.getElementById('activeFiltersCounter').innerText = countText;
@@ -1935,17 +1940,26 @@
     }
 
     async function loadAdminStats() {
+      const errorPanel = document.getElementById('adminStatsError');
+      errorPanel.classList.add('hidden');
       try {
         const res = await fetch(`${BACKEND_URL}/api/admin/stats`, {
           headers: { 'x-telegram-init-data': initDataRaw }
         });
+        if (!res.ok) throw new Error('Admin statistics request failed');
         const data = await res.json();
-        if (data.success) {
-          document.getElementById('adminTotalUsers').innerText = data.stats.totalUsers || 0;
-          document.getElementById('adminTotalFilters').innerText = data.stats.totalFilters || 0;
-          document.getElementById('adminTotalSeen').innerText = data.stats.totalSeen || 0;
+        if (!data.success || !data.stats ||
+            !Number.isFinite(Number(data.stats.totalUsers)) ||
+            !Number.isFinite(Number(data.stats.totalFilters)) ||
+            !Number.isFinite(Number(data.stats.totalSeen))) {
+          throw new Error('Admin statistics response is invalid');
         }
-      } catch (e) {}
+        document.getElementById('adminTotalUsers').innerText = Number(data.stats.totalUsers);
+        document.getElementById('adminTotalFilters').innerText = Number(data.stats.totalFilters);
+        document.getElementById('adminTotalSeen').innerText = Number(data.stats.totalSeen);
+      } catch (e) {
+        errorPanel.classList.remove('hidden');
+      }
     }
 
     async function adminFindUser() {
