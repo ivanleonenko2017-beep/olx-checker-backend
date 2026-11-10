@@ -1899,7 +1899,7 @@ app.post('/telegram-webhook', async (req, res) => {
   const chatId = msg.chat.id;
   const text = msg.text || '';
 
-  const adminCommandMatch = text.match(/^\/(diag|status)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+  const adminCommandMatch = text.match(/^\/(diag|status|sub|ref)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
   if (adminCommandMatch) {
     const command = adminCommandMatch[1].toLowerCase();
     const senderId = msg.from?.id;
@@ -1911,7 +1911,7 @@ app.post('/telegram-webhook', async (req, res) => {
 
     if (command === 'sub' || command === 'ref') {
       const targetRaw = String(adminCommandMatch[2] || '').trim();
-      if (!/^\\d{1,20}$/.test(targetRaw) || !Number.isSafeInteger(Number(targetRaw)) || Number(targetRaw) <= 0) {
+      if (!/^\d{1,20}$/.test(targetRaw) || !Number.isSafeInteger(Number(targetRaw)) || Number(targetRaw) <= 0) {
         await sendTelegramMessage(chatId, command === 'sub'
           ? 'Формат: /sub telegram_id'
           : 'Формат: /ref telegram_id');
