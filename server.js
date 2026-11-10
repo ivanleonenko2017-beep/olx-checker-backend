@@ -12,6 +12,7 @@ const { buildOlxPageUrl, mergeUniqueOlxItems } = require('./olx-pagination');
 const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
+const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage } = require('./admin-command-utils');
 
 const app = express();
 app.disable('x-powered-by');
@@ -1553,24 +1554,15 @@ app.get('/api/legal/privacy', (_req, res) => {
 });
 
 const searchDiagnosticRateLimits = new Map();
-app.post('/api/admin/search-diagnostics', adminAuthMiddleware, async (req, res) => {
-  const rawQuery = typeof req.body?.query === 'string' ? req.body.query.trim().slice(0, 300) : '';
-  if (!rawQuery) return res.status(400).json({ success: false, error: 'Укажіть пошуковий запит' });
-  const adminKey = hashUserId(req.adminUser.id, TELEGRAM_WEBHOOK_SECRET) || 'admin';
-  const lastRunAt = searchDiagnosticRateLimits.get(adminKey) || 0;
-  const now = Date.now();
-  if (now - lastRunAt < 60000) {
-    return res.status(429).json({ success: false, error: 'Діагностика доступна не частіше одного разу на хвилину' });
-  }
-  searchDiagnosticRateLimits.set(adminKey, now);
-  if (searchDiagnosticRateLimits.size > 1000) {
-    for (const [key, timestamp] of searchDiagnosticRateLimits) {
-      if (now - timestamp > 10 * 60000) searchDiagnosticRateLimits.delete(key);
-    }
-  }
+const botStatusRateLimits = new Map();
 
+async function runSearchDiagnostic(rawQuery, adminUserId) {
   const requestId = crypto.randomBytes(6).toString('hex');
   const startedAt = Date.now();
+  const at = new Date().toISOString();
+  const kyivTime = new Intl.DateTimeFormat('uk-UA', {
+    timeZone: 'Europe/Kyiv', dateStyle: 'short', timeStyle: 'medium'
+  }).format(new Date(at));
   try {
     const parsed = parseNaturalLanguageQuery(rawQuery);
     const criteria = normalizeCriteria(parsed.criteria);
@@ -1584,7 +1576,7 @@ app.post('/api/admin/search-diagnostics', adminAuthMiddleware, async (req, res) 
       : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
     const { items: parsedItems, pageTraces, stopReason } = await parseOlx(
       searchPath, criteria.minPrice, criteria.maxPrice, parsed.query, city,
-      { source: 'diagnostic', userId: req.adminUser.id, requestId, criteria }
+      { source: 'diagnostic', userId: adminUserId, requestId, criteria }
     );
     const cityItems = parsedItems.filter(item =>
       locationMatches(item.locationDate, city) ||
@@ -1609,6 +1601,7 @@ app.post('/api/admin/search-diagnostics', adminAuthMiddleware, async (req, res) 
       title: safeText(item.title, 120), url: sanitizeSearchUrl(item.link),
       price: item.price, capacityUnverified: !applyCriteriaToListing(item, criteria).matches
     }));
+    const acceptedLinks = new Set(results.map(item => item.url));
     const cityRejected = parsedItems.filter(item => !cityItems.includes(item)).map(item => ({
       listingKey: hashUserId(item.link, TELEGRAM_WEBHOOK_SECRET), url: sanitizeSearchUrl(item.link),
       stage: 'city', reason: 'city_mismatch', value: safeText(item.locationDate || item.cardText, 100)
@@ -1618,17 +1611,42 @@ app.post('/api/admin/search-diagnostics', adminAuthMiddleware, async (req, res) 
       url: sanitizeSearchUrl(entry.item.link), stage: entry.stage,
       reason: entry.reason, value: safeText(entry.stage === 'price' ? entry.item.price : entry.item.title, 100)
     }));
-    const rejected = compactRejectedCards([...cityRejected, ...criteriaRejected], 25);
-    console.log('[SEARCH_TRACE] ' + JSON.stringify({
-      event: 'search_funnel', requestId, source: 'diagnostic', at: new Date().toISOString(),
-      parsed: parsedItems.length, afterDedup: parsedItems.length, afterCardParse: parsedItems.length,
-      afterCity: cityItems.length, criteriaStages: funnel.counts,
-      finalCount: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length,
-      rejectedCards: rejected.cards, rejectedCardsOmitted: rejected.omitted,
-      durationMs: Date.now() - startedAt
-    }));
-    return res.json({
-      success: true, requestId, source: 'diagnostic', parsedQuery: parsed.query,
+    const rejected = compactRejectedCards([...cityRejected, ...criteriaRejected], 40);
+    const cards = parsedItems.slice(0, 40).map((item, index) => {
+      const inCity = cityItems.includes(item);
+      const match = applyCriteriaToListing(item, criteria);
+      const url = sanitizeSearchUrl(item.link);
+      const accepted = acceptedLinks.has(url);
+      const modelText = String(item.title || '');
+      const modelMatch = modelText.match(/(?:iphone|айфон|іфон|ифон)\s*\d{1,2}\s*(pro\s*max|про\s*макс|pro|про|plus|плюс|max|макс|mini|міні|мини|\+)?/iu);
+      const rawVariant = String(modelMatch?.[1] || '').toLocaleLowerCase('uk-UA').replace(/\s+/g, ' ').trim();
+      const modelVersion = !modelMatch ? 'не визначена' :
+        /pro\s*max|про\s*макс/.test(rawVariant) ? 'Pro Max' :
+        /^(pro|про)$/.test(rawVariant) ? 'Pro' :
+        /^(plus|плюс|\+)$/.test(rawVariant) ? 'Plus' :
+        /^(max|макс)$/.test(rawVariant) ? 'Max' :
+        /^(mini|міні|мини)$/.test(rawVariant) ? 'Mini' : 'базова';
+      const searchable = [item.title, item.cardText, item.description].filter(Boolean).join(' ');
+      const memoryMatch = searchable.match(/(?:^|[^\d])(64|128|256|512|1024)\s*(?:gb|гб)(?=$|[^\p{L}])/iu) ||
+        (/(?:iphone|айфон)/iu.test(modelText) ? searchable.match(/(?:^|[^\d])(64|128|256|512|1024)(?!\s*(?:ram|озу|оператив))(?!\p{L})(?=$|[^\d])/iu) : null);
+      const decision = !inCity ? 'відсів: місто не збігається' :
+        accepted ? (results.find(result => result.url === url)?.capacityUnverified
+          ? 'прийнята; пам’ять не підтверджена' : 'прийнята') :
+        'відсів: ' + (match.reason || 'інший критерій');
+      return {
+        position: index + 1, title: safeText(item.title, 120),
+        price: item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : 'не вказана'),
+        city: safeText(item.locationDate || 'не визначено', 80),
+        modelVersion,
+        memory: memoryMatch ? memoryMatch[1] + ' GB' : 'не визначена',
+        decision
+      };
+    });
+    const errors = stopReason === 'http_429' || stopReason === 'timeout' || stopReason === 'upstream_error'
+      ? [{ httpStatus: null, code: stopReason, antiBotDetected: stopReason === 'http_429' }]
+      : [];
+    const response = {
+      success: true, requestId, at, kyivTime, source: 'diagnostic', parsedQuery: parsed.query,
       criteria: { model: criteria.modelTerm, memory: storageTerms, condition: criteria.condition,
         city, minPrice: criteria.minPrice, maxPrice: criteria.maxPrice, exclusions: criteria.excludeTerms },
       pages: pageTraces, stopReason,
@@ -1638,47 +1656,45 @@ app.post('/api/admin/search-diagnostics', adminAuthMiddleware, async (req, res) 
         final: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length,
         cityUnverified: cityItems.filter(item => !item.locationDate && locationMatchesCardText(item.cardText, city)).length },
       rejected: { cards: rejected.cards, omitted: rejected.omitted },
-      results
-    });
-  } catch (error) {
-    console.error('[SEARCH_TRACE] ' + JSON.stringify({
-      event: 'search_diagnostic_error', requestId, source: 'diagnostic', at: new Date().toISOString(),
-      code: safeText(error.code || 'UPSTREAM_ERROR', 48),
-      httpStatus: Number(error.response?.status || 0) || null,
+      results, cards, cardsOmitted: Math.max(0, parsedItems.length - cards.length), errors
+    };
+    console.log('[SEARCH_TRACE] ' + JSON.stringify({
+      event: 'search_funnel', requestId, source: 'diagnostic', at,
+      parsed: parsedItems.length, afterDedup: parsedItems.length, afterCardParse: parsedItems.length,
+      afterCity: cityItems.length, criteriaStages: funnel.counts,
+      finalCount: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length,
+      rejectedCards: rejected.cards, rejectedCardsOmitted: rejected.omitted,
       durationMs: Date.now() - startedAt
     }));
-    return res.status(error.code === 'OLX_BLOCKED' ? 503 : 502).json({
-      success: false, requestId, error: 'Не вдалося виконати діагностичний пошук. Перевірте логи за request-id.'
-    });
+    return { status: 200, body: response };
+  } catch (error) {
+    const errorInfo = {
+      httpStatus: Number(error.response?.status || 0) || null,
+      code: safeText(error.code || 'UPSTREAM_ERROR', 48),
+      antiBotDetected: error.code === 'OLX_BLOCKED' || [403, 429].includes(Number(error.response?.status || 0))
+    };
+    console.error('[SEARCH_TRACE] ' + JSON.stringify({
+      event: 'search_diagnostic_error', requestId, source: 'diagnostic', at: new Date().toISOString(),
+      code: errorInfo.code, httpStatus: errorInfo.httpStatus, durationMs: Date.now() - startedAt
+    }));
+    return {
+      status: error.code === 'OLX_BLOCKED' ? 503 : 502,
+      body: { success: false, requestId, at, kyivTime, stopReason: 'upstream_error',
+        pages: [], funnel: {}, cards: [], errors: [errorInfo],
+        error: 'Не вдалося виконати діагностичний пошук. Перевірте логи за request-id.' }
+    };
   }
-});
+}
 
-app.get('/api/admin/stats', adminAuthMiddleware, async (req, res) => {
-  try {
-    if (!supabase) return res.json({ success: true, stats: { totalUsers: 0, totalFilters: 0, totalSeen: 0 } });
-    const { count: uCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    const { count: fCount } = await supabase.from('filters').select('*', { count: 'exact', head: true });
-    const { count: sCount } = await supabase.from('seen_ads').select('*', { count: 'exact', head: true });
-
-    res.json({
-      success: true,
-      stats: { totalUsers: uCount || 0, totalFilters: fCount || 0, totalSeen: sCount || 0 }
-    });
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
+app.post('/api/admin/search-diagnostics', adminAuthMiddleware, async (req, res) => {
+  const rawQuery = typeof req.body?.query === 'string' ? req.body.query.trim().slice(0, 300) : '';
+  if (!rawQuery) return res.status(400).json({ success: false, error: 'Укажіть пошуковий запит' });
+  const adminKey = hashUserId(req.adminUser.id, TELEGRAM_WEBHOOK_SECRET) || 'admin';
+  if (!consumeRateLimit(searchDiagnosticRateLimits, adminKey)) {
+    return res.status(429).json({ success: false, error: 'Діагностика доступна не частіше одного разу на хвилину' });
   }
-});
-
-app.get('/api/admin/user-info', adminAuthMiddleware, async (req, res) => {
-  try {
-    const targetId = req.query.targetId;
-    if (!targetId || !supabase) return res.status(400).json({ error: 'No targetId' });
-
-    const { data } = await supabase.from('users').select('*').eq('telegram_id', targetId).maybeSingle();
-    res.json({ success: true, user: data });
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
-  }
+  const result = await runSearchDiagnostic(rawQuery, req.adminUser.id);
+  return res.status(result.status).json(result.body);
 });
 
 app.post('/api/admin/grant-premium', adminAuthMiddleware, async (req, res) => {
