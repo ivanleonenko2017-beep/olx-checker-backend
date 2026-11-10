@@ -28,6 +28,7 @@ test('Mini App removes decorative gradients, glass blur and heavy shadows', () =
   assert.match(html, /box-shadow:none!important/);
   assert.match(html, /backdrop-filter:none!important/);
   assert.match(html, /--zd-radius-lg:16px/);
+  assert.match(html, /\\.rounded-full \\{ border-radius:999px!important; \\}/);
   assert.match(html, /--zd-space-1:4px/);
   assert.match(html, /--zd-space-2:8px/);
 });
