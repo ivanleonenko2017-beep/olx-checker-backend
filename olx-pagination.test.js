@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildOlxPageUrl, canonicalAdUrl, mergeUniqueOlxItems } = require('./olx-pagination');
+const { buildOlxPageUrl, canonicalAdUrl, mergeUniqueOlxItems, shouldStopAfterNoLocalPage } = require('./olx-pagination');
 
 test('builds subsequent OLX page URLs without dropping existing filters', () => {
   const first = 'https://www.olx.ua/uk/chernigov/q-iphone-15/?search%5Bfilter_float_price%3Ato%5D=20000';
@@ -28,4 +28,15 @@ test('canonicalizes listing links and merges duplicate cards across pages', () =
     ]
   ]);
   assert.deepEqual(merged.map(item => item.title), ['A', 'B']);
+});
+
+
+test('stops pagination after the first foreign-only page following local results', () => {
+  assert.equal(shouldStopAfterNoLocalPage(true, 0), true);
+  assert.equal(shouldStopAfterNoLocalPage(false, 0), false);
+});
+
+test('continues pagination while the current page still contains local listings', () => {
+  assert.equal(shouldStopAfterNoLocalPage(true, 1), false);
+  assert.equal(shouldStopAfterNoLocalPage(true, 5), false);
 });

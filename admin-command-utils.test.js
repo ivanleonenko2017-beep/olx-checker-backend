@@ -199,3 +199,16 @@ test('admin statistics route is protected and exposes only aggregate read counts
   assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
   assert.match(route, /res\.status\(503\)/);
 });
+
+
+test('diagnostic formatter displays load, parse, detail-enrichment and peak RSS metrics', () => {
+  const output = formatDiagnosticMessages({
+    pages: [{ page: 1, httpStatus: 200, durationMs: 1000, loadDurationMs: 300,
+      parseDurationMs: 700, memoryRssBytes: 64 * 1024 * 1024, responseBytes: 1000 }],
+    performance: { loadMs: 300, parseMs: 700, detailsEnrichmentMs: 250, totalMs: 1400, peakRssBytes: 64 * 1024 * 1024 }
+  }).join('\n');
+  assert.ok(output.includes('Завантаження: 300 мс'));
+  assert.ok(output.includes('розбір: 700 мс'));
+  assert.ok(output.includes('догрузка деталей: 250 мс'));
+  assert.ok(output.includes('Пік RSS: 64 МБ'));
+});
