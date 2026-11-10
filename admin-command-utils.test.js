@@ -185,3 +185,17 @@ test('long Telegram output is split below the safe message limit, including one 
   assert.ok(diagnostic.every(chunk => chunk.length <= 3600));
   assert.ok(chunks.every(chunk => chunk.length <= 3600));
 });
+
+
+test('admin statistics route is protected and exposes only aggregate read counts', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  const start = source.indexOf("app.get('/api/admin/stats', adminAuthMiddleware");
+  const end = source.indexOf("app.get('/api/admin/diagnostics'", start);
+  assert.ok(start >= 0 && end > start);
+  const route = source.slice(start, end);
+  assert.match(route, /from\('users'\)\.select\('telegram_id', \{ count: 'exact', head: true \}\)/);
+  assert.match(route, /from\('filters'\)\.select\('id', \{ count: 'exact', head: true \}\)/);
+  assert.match(route, /from\('seen_ads'\)\.select\('id', \{ count: 'exact', head: true \}\)/);
+  assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
+  assert.match(route, /res\.status\(503\)/);
+});
