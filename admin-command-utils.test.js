@@ -2,9 +2,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { deriveAccess } = require('./access-policy');
 const {
   consumeRateLimit, isAdminCommandAuthorized, splitTelegramMessages,
-  formatDiagnosticMessages, formatStatusMessage
+  formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, maskTelegramId
 } = require('./admin-command-utils');
 
 test('admin command authorization rejects missing and ordinary users', async () => {
@@ -45,7 +48,7 @@ test('diagnostic funnel formatter reports actual price-before-condition order', 
       afterMemoryIncludingUnverified: 6, after_excluded_words: 5,
       after_price: 4, after_condition: 3, final: 3 }
   });
-  const output = messages.join('\\n');
+  const output = messages.join('\n');
   assert.ok(output.includes('Виключення: 5'));
   assert.ok(output.includes('Ціна: 4 → стан: 3'));
   assert.ok(output.includes('рекомендацій OLX не інструментована'));
@@ -77,6 +80,92 @@ test('admin status reports only boolean Premium bypass state', () => {
   assert.ok(!result.includes('TELEGRAM_BOT_TOKEN'));
 });
 
+
+test('subscription report masks Telegram ID, reports limits and expiry behavior', () => {
+  const message = formatSubscriptionMessage({
+    user: { telegram_id: 123456789, trial_started_at: '2026-11-01T00:00:00Z' },
+    access: { plan: 'free', filterLimit: 1, searchLimit: 5, checkIntervalMinutes: 15 },
+    filters: { total: 3, active: 1, paused: 2 },
+    searchesUsed: 2,
+    grantSource: 'реферальні записи є; точне джерело поточного Premium не зберігається',
+    expiryBehavior: 'Free: 1 фільтр, 5 пошуків/день; зайві фільтри зберігаються, але призупинені'
+  }).join('\n');
+  assert.ok(message.includes('••••6789'));
+  assert.ok(message.includes('Premium початок:'));
+  assert.ok(message.includes('не зберігається окремо в users'));
+  assert.ok(!message.includes('123456789'));
+  assert.ok(message.includes('активні 1, призупинені лімітом 2'));
+  assert.ok(message.includes('5'));
+});
+
+test('referral report masks IDs and escapes user-derived values', () => {
+  const message = formatReferralMessage({
+    user: { telegram_id: 123456789, referral_attributed_at: null },
+    inviter: 987654321,
+    invited: [111122223333],
+    invitedCount: 1,
+    rewardedCount: 1,
+    rewardedDays: 3,
+    discrepancies: ['legacy count < canonical count']
+  }).join('\n');
+  assert.ok(message.includes('••••6789'));
+  assert.ok(message.includes('••••4321'));
+  assert.ok(message.includes('&lt;'));
+  assert.ok(!message.includes('123456789'));
+  assert.ok(!message.includes('987654321'));
+});
+
+test('Telegram ID masking never returns a full identifier', () => {
+  assert.equal(maskTelegramId('123456789'), '••••6789');
+  assert.equal(maskTelegramId(''), 'не визначено');
+});
+
+test('trial expires after four days and Free limits apply without deleting filters', () => {
+  const start = Date.parse('2026-01-01T00:00:00.000Z');
+  const trial = deriveAccess({ tariff: 'free', trial_started_at: new Date(start).toISOString() }, false, start + 4 * 86400000 - 1);
+  const free = deriveAccess({ tariff: 'free', trial_started_at: new Date(start).toISOString() }, false, start + 4 * 86400000);
+  assert.equal(trial.plan, 'trial');
+  assert.equal(trial.filterLimit, 3);
+  assert.equal(trial.searchLimit, 30);
+  assert.equal(free.plan, 'free');
+  assert.equal(free.filterLimit, 1);
+  assert.equal(free.searchLimit, 5);
+  assert.equal(free.checkIntervalMinutes, 15);
+});
+
+test('expired Premium falls back to Free using the supplied mock clock', () => {
+  const now = Date.parse('2026-02-01T00:00:00.000Z');
+  const access = deriveAccess({
+    tariff: 'premium',
+    premium_until: new Date(now - 1).toISOString(),
+    trial_started_at: new Date(now - 10 * 86400000).toISOString()
+  }, false, now);
+  assert.equal(access.plan, 'free');
+  assert.equal(access.filterLimit, 1);
+  assert.equal(access.searchLimit, 5);
+});
+
+test('sub and ref are behind the same server-side admin gate and read-only branch', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  const matcher = source.match(/const adminCommandMatch = text\.match\(([^;]+);/);
+  assert.ok(matcher && matcher[1].includes('diag|status|sub|ref'));
+  const gate = source.indexOf('if (!(await isAdminCommandAuthorized(senderId, checkIsAdmin)))');
+  const branch = source.indexOf("if (command === 'sub' || command === 'ref')");
+  const nextCommand = source.indexOf("if (command === 'diag')", branch);
+  assert.ok(gate >= 0 && branch > gate && nextCommand > branch);
+  const accountBranch = source.slice(branch, nextCommand);
+  assert.doesNotMatch(accountBranch, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
+});
+
+test('worker applies Free filter cap by pausing excess rows instead of deleting them', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  const workerStart = source.indexOf('async function runBackgroundWorker()');
+  const workerEnd = source.indexOf('const ENABLE_BACKGROUND_WORKER', workerStart);
+  const worker = source.slice(workerStart, workerEnd);
+  assert.match(worker, /processedCount >= filterLimit/);
+  assert.match(worker, /filterLimit =/);
+  assert.doesNotMatch(worker, /from\('filters'\)\.delete\(/);
+});
 test('long Telegram output is split below the safe message limit, including one oversized section', () => {
   const chunks = splitTelegramMessages(['a'.repeat(2000), 'b'.repeat(2000), 'c'.repeat(2000)]);
   assert.equal(chunks.length, 3);

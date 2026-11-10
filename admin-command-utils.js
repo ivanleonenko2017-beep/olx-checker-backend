@@ -140,10 +140,64 @@ function formatStatusMessage(s = {}) {
   ].join('\n');
 }
 
+
+function maskTelegramId(value) {
+  const digits = String(value ?? '').replace(/\\D/g, '');
+  return digits ? '••••' + digits.slice(-4) : 'не визначено';
+}
+
+function formatSubscriptionMessage(data = {}) {
+  const user = data.user || {};
+  const access = data.access || {};
+  const filters = data.filters || {};
+  const lines = [
+    '<b>ЗНАЙДЕНО · Підписка</b>',
+    '<b>Telegram ID:</b> ' + escapeTelegramHtml(maskTelegramId(user.telegram_id)),
+    '<b>Тариф зараз:</b> ' + escapeTelegramHtml(access.plan || 'невідомо'),
+    '<b>Trial початок:</b> ' + escapeTelegramHtml(user.trial_started_at || 'не починався'),
+    '<b>Trial завершення:</b> ' + escapeTelegramHtml(access.trialEndsAt || 'немає'),
+    '<b>Premium початок:</b> ' + escapeTelegramHtml(data.premiumStartedAt || 'не зберігається окремо в users'),
+    '<b>Premium до:</b> ' + escapeTelegramHtml(user.premium_until || 'немає'),
+    '<b>Джерело:</b> ' + escapeTelegramHtml(data.grantSource || 'не визначено'),
+    '<b>Ліміти:</b> фільтри ' + (Number.isFinite(access.filterLimit) ? access.filterLimit : 'без ліміту') +
+      ', пошуки/день ' + (Number.isFinite(access.searchLimit) ? access.searchLimit : 'без ліміту') +
+      ', інтервал ' + Number(access.checkIntervalMinutes || 0) + ' хв',
+    '<b>Використано сьогодні:</b> ' + Number(data.searchesUsed || 0) +
+      ' / ' + (Number.isFinite(access.searchLimit) ? access.searchLimit : 'без ліміту'),
+    '<b>Фільтри:</b> всього ' + Number(filters.total || 0) +
+      ', активні ' + Number(filters.active || 0) + ', призупинені лімітом ' + Number(filters.paused || 0),
+    '<b>Після завершення:</b> ' + escapeTelegramHtml(data.expiryBehavior ||
+      'Trial/Premium переходить на Free; зайві фільтри залишаються в базі, але не обробляються воркером.')
+  ];
+  if (data.paymentEvidence) lines.push('<b>Платіжні записи:</b> ' + escapeTelegramHtml(data.paymentEvidence));
+  return splitTelegramMessages([lines.join('\n')]);
+}
+
+function formatReferralMessage(data = {}) {
+  const user = data.user || {};
+  const lines = [
+    '<b>ЗНАЙДЕНО · Реферали</b>',
+    '<b>Telegram ID:</b> ' + escapeTelegramHtml(maskTelegramId(user.telegram_id)),
+    '<b>Реферальний код:</b> ref_••••' + escapeTelegramHtml(String(user.telegram_id || '').slice(-4)),
+    '<b>Хто запросив:</b> ' + escapeTelegramHtml(data.inviter ? maskTelegramId(data.inviter) : 'немає запису'),
+    '<b>Запрошено:</b> ' + Number(data.invitedCount || 0),
+    ...(data.invited || []).slice(0, 20).map((id, index) =>
+      (index + 1) + '. ' + escapeTelegramHtml(maskTelegramId(id))),
+    '<b>Начислення:</b> ' + Number(data.rewardedCount || 0) + ' × 3 дні = ' +
+      Number(data.rewardedDays || 0) + ' днів за рефералів',
+    '<b>Pending referrer:</b> ' + escapeTelegramHtml(data.pendingReferrer ? maskTelegramId(data.pendingReferrer) : 'немає'),
+    '<b>Атрибуція:</b> ' + escapeTelegramHtml(user.referral_attributed_at || 'не зафіксована'),
+    '<b>Розбіжності:</b> ' + escapeTelegramHtml((data.discrepancies || []).join('; ') || 'не виявлено')
+  ];
+  return splitTelegramMessages([lines.join('\n')]);
+}
 module.exports = {
   consumeRateLimit,
   isAdminCommandAuthorized,
   splitTelegramMessages,
   formatDiagnosticMessages,
-  formatStatusMessage
+  formatStatusMessage,
+  maskTelegramId,
+  formatSubscriptionMessage,
+  formatReferralMessage
 };
