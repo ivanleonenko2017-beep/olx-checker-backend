@@ -1708,7 +1708,7 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
         'відсів: ' + (match.reason || 'інший критерій');
       return {
         position: index + 1, title: safeText(item.title, 120),
-        price: item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : 'не вказана'),
+        price: item.isNegotiable ? (item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : '')) + ' · договірна' : (item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : 'не вказана')),
         city: safeText(item.locationDate ? String(item.locationDate).split(/\s*[-–—]\s*/)[0].split(',')[0] : (locationMatchesCardText(item.cardText, city) ? city : 'не визначено'), 80),
         modelVersion,
         memory: memoryMatch ? memoryMatch[1] + ' GB' : 'не визначена',
@@ -2742,6 +2742,9 @@ async function runBackgroundWorker() {
             : '';
           const safeLocation = escapeTelegramHtml(item.locationDate);
           const safeItemLink = escapeTelegramHtml(item.link);
+          const notificationPrice = item.isNegotiable
+            ? (item.priceText || 'Договірна') + (item.priceText ? ' · договірна' : '')
+            : (item.priceText || 'Ціну не вказано');
           const capacityWarning = item.capacityUnverified
             ? '\n⚠️ <b>' + escapeTelegramHtml(item.capacityVerificationNote || 'Обсяг пам’яті не підтверджено — перевірте характеристики в оголошенні.') + '</b>\n'
             : '';
@@ -2751,7 +2754,7 @@ async function runBackgroundWorker() {
               : `🔎 <b>Знайдено нове оголошення для фільтра “${safeFilterQuery}”</b>\n\n`) +
             `📌 <b>${safeTitle}</b>\n` +
             modelVersionLine +
-            `💰 <b>Ціна:</b> ${item.priceText} ${isCheap ? `🔥 (Нижче медіани на ${discount}%)` : ''}\n` +
+            `💰 <b>Ціна:</b> ${escapeTelegramHtml(notificationPrice)} ${isCheap ? `🔥 (Нижче медіани на ${discount}%)` : ''}\n` +
             (isCheap && bargain.reliable
               ? `📊 <b>Медіана аналогів:</b> ${Number(bargain.referencePrice).toLocaleString('uk-UA')} грн • ${bargain.comparableCount} оголошень\n`
               : '') +
