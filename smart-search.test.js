@@ -394,6 +394,11 @@ test('iPhone 15 without a modification remains base-only and Plus shorthand is e
   assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 256GB', price: 20000 }, negativePro.criteria).matches, true);
   assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 Pro 256GB', price: 20000 }, negativePro.criteria).reason, 'model_mismatch');
 
+  const pro = parseNaturalLanguageQuery('iPhone 15 Pro 256');
+  assert.equal(pro.criteria.modelTerm, 'iPhone 15 Pro');
+  assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 Pro 256GB', price: 20000 }, pro.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 Pro Max 256GB', price: 20000 }, pro.criteria).reason, 'model_mismatch');
+
   const russianProMax = parseNaturalLanguageQuery('iPhone 15 про макс 256');
   assert.equal(russianProMax.criteria.modelTerm, 'iPhone 15 Pro Max');
   assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 Pro Max 256GB', price: 20000 }, russianProMax.criteria).matches, true);
