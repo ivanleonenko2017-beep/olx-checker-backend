@@ -45,7 +45,7 @@ test('diagnostic funnel formatter reports actual price-before-condition order', 
       afterMemoryIncludingUnverified: 6, after_excluded_words: 5,
       after_price: 4, after_condition: 3, final: 3 }
   });
-  const output = messages.join('\\n');
+  const output = messages.join('\n');
   assert.ok(output.includes('Виключення: 5'));
   assert.ok(output.includes('Ціна: 4 → стан: 3'));
   assert.ok(output.includes('рекомендацій OLX не інструментована'));
@@ -86,7 +86,7 @@ test('subscription report masks Telegram ID, reports limits and expiry behavior'
     searchesUsed: 2,
     grantSource: 'реферальні записи є; точне джерело поточного Premium не зберігається',
     expiryBehavior: 'Free: 1 фільтр, 5 пошуків/день; зайві фільтри зберігаються, але призупинені'
-  }).join('\\n');
+  }).join('\n');
   assert.ok(message.includes('••••6789'));
   assert.ok(!message.includes('123456789'));
   assert.ok(message.includes('активні 1, призупинені лімітом 2'));
@@ -102,7 +102,7 @@ test('referral report masks IDs and escapes user-derived values', () => {
     rewardedCount: 1,
     rewardedDays: 3,
     discrepancies: ['legacy count < canonical count']
-  }).join('\\n');
+  }).join('\n');
   assert.ok(message.includes('••••6789'));
   assert.ok(message.includes('••••4321'));
   assert.ok(message.includes('&lt;'));
@@ -114,7 +114,7 @@ test('Telegram ID masking never returns a full identifier', () => {
   assert.equal(maskTelegramId('123456789'), '••••6789');
   assert.equal(maskTelegramId(''), 'не визначено');
 });
-\ntest('long Telegram output is split below the safe message limit, including one oversized section', () => {
+test('long Telegram output is split below the safe message limit, including one oversized section', () => {
   const chunks = splitTelegramMessages(['a'.repeat(2000), 'b'.repeat(2000), 'c'.repeat(2000)]);
   assert.equal(chunks.length, 3);
   const diagnostic = formatDiagnosticMessages({
