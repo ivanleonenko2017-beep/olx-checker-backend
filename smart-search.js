@@ -97,12 +97,22 @@ function getPhoneModelLabel(value = '') {
   return 'Базова';
 }
 
+function isRepairPartsListing(value = '') {
+  return /(?:на\s+запчастини|на\s+запчасти|під\s+ремонт|под\s+ремонт|несправн\p{L}*|не\s+працює|не\s+работает)/iu.test(String(value || ''));
+}
+
+function isAccessoryIntent(value = '') {
+  const title = String(value || '').trim().toLocaleLowerCase('uk-UA');
+  return /^(?:(?:хочу\s+)?(?:купити|купить|шукаю|ищу|знайди|найди)\s+)?(?:чохол|чехол|case|скло|стекло|плівка|пленка|зарядк\p{L}*|зарядн\p{L}*|кабель|адаптер|навушник\p{L}*|бампер|підставк\p{L}*|тримач|корпус|дисплей|екран|модуль|плат\p{L}*|запчаст\p{L}*|аксесуар\p{L}*|аксессуар\p{L}*|ремонт)(?=$|[^\p{L}])/iu.test(title);
+}
+
 function isNonPhoneOfferTitle(value = '') {
   const title = String(value || '').trim().toLocaleLowerCase('uk-UA');
   if (!title) return true;
-  if (/^(?:куплю|купить|купити|скупка|викуп|покупаю|ищу|шукаю)(?=$|[^\p{L}])/iu.test(title)) return true;
-  if (/^(?:чохол|чехол|case|стекло|скло|захисне\s+скло|защитное\s+стекло|плівка|пленка|кабель|зарядк\p{L}*|блок\s+(?:живлення|питания)|коробка|упаковка|аксесуар|аксессуар|запчаст\p{L}*|детал\p{L}*|ремонт|послуги|услуги)(?=$|[^\p{L}])/iu.test(title)) return true;
-  if (/(?:на\s+запчастини|на\s+запчасти|під\s+ремонт|под\s+ремонт)/iu.test(title)) return true;
+  if (/^(?:(?:я\s+)?(?:куплю|купить|купити|скуплю|скупка|викуплю|викуп|покупаю|ищу|шукаю)(?=$|[^\p{L}])|(?:куплю|купить|купити|скуплю|викуплю)\s+)/iu.test(title)) return true;
+  // Evaluate the head noun; an accessory mentioned after the phone is only an included extra.
+  const head = title.replace(/^(?:(?:продам|продаю|продати|віддам|отдам|продаётся|продается)\s+)?(?:\d+\s+)?/iu, '');
+  if (/^(?:чох\p{L}*|чех\p{L}*|case|стекл\p{L}*|скл\p{L}*|захисн\p{L}*\s+скл\p{L}*|защитн\p{L}*\s+стекл\p{L}*|плівк\p{L}*|пленк\p{L}*|кабел\p{L}*|зарядк\p{L}*|зарядн\p{L}*|адаптер\p{L}*|блок\s+(?:живлення|питания)|навушник\p{L}*|наушник\p{L}*|підставк\p{L}*|подставк\p{L}*|тримач\p{L}*|держател\p{L}*|бампер\p{L}*|корпус\p{L}*|диспле\p{L}*|екран\p{L}*|модул\p{L}*|плат\p{L}*|запчаст\p{L}*|детал\p{L}*|аксесуар\p{L}*|аксессуар\p{L}*|ремонт\p{L}*|послуг\p{L}*|услуг\p{L}*)(?=$|[^\p{L}])/iu.test(head)) return true;
   return false;
 }
 
@@ -560,5 +570,8 @@ module.exports = {
   getPhoneModelLabel,
   parseNaturalLanguageQuery,
   median,
-  estimateBargainPrice
+  estimateBargainPrice,
+  isNonPhoneOfferTitle,
+  isAccessoryIntent,
+  isRepairPartsListing
 };
