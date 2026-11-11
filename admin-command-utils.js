@@ -62,7 +62,7 @@ function formatDiagnosticMessages(data = {}) {
     '<b>requestId:</b> ' + escapeTelegramHtml(safe(data.requestId, 24)),
     '<b>Час UTC:</b> ' + escapeTelegramHtml(at),
     '<b>Час Київ:</b> ' + escapeTelegramHtml(data.kyivTime || 'не визначено'),
-    '<b>Пагінація:</b> ' + escapeTelegramHtml(safe(data.stopReason || 'unknown', 50))
+    '<b>Пагінація:</b> ' + escapeTelegramHtml(safe(data.stopReason || 'невідомо', 50))
   ].join('\n');
 
   const pages = ['<b>Сторінки</b>'];
@@ -182,7 +182,7 @@ function formatSubscriptionMessage(data = {}) {
     '<b>Тариф зараз:</b> ' + escapeTelegramHtml(({ admin: 'Адміністратор', premium: 'Premium', trial: 'Пробний період', free: 'Безкоштовний' })[access.plan] || 'невідомо'),
     '<b>Початок пробного періоду:</b> ' + escapeTelegramHtml(user.trial_started_at || 'не починався'),
     '<b>Завершення пробного періоду:</b> ' + escapeTelegramHtml(access.trialEndsAt || 'немає'),
-    '<b>Premium початок:</b> ' + escapeTelegramHtml(data.premiumStartedAt || 'не зберігається окремо в users'),
+    '<b>Premium початок:</b> ' + escapeTelegramHtml(data.premiumStartedAt || 'не зберігається окремо в таблиці користувачів'),
     '<b>Premium до:</b> ' + escapeTelegramHtml(user.premium_until || 'немає'),
     '<b>Джерело:</b> ' + escapeTelegramHtml(data.grantSource || 'не визначено'),
     '<b>Ліміти:</b> фільтри ' + (Number.isFinite(access.filterLimit) ? access.filterLimit : 'без ліміту') +
@@ -193,7 +193,7 @@ function formatSubscriptionMessage(data = {}) {
     '<b>Фільтри:</b> всього ' + Number(filters.total || 0) +
       ', активні ' + Number(filters.active || 0) + ', призупинені лімітом ' + Number(filters.paused || 0),
     '<b>Після завершення:</b> ' + escapeTelegramHtml(data.expiryBehavior ||
-      'Trial/Premium переходить на Free; зайві фільтри залишаються в базі, але не обробляються воркером.')
+      'Пробний період або Premium переходить на безкоштовний тариф; зайві фільтри залишаються в базі, але не обробляються фоновим процесом.')
   ];
   if (data.paymentEvidence) lines.push('<b>Платіжні записи:</b> ' + escapeTelegramHtml(data.paymentEvidence));
   return splitTelegramMessages([lines.join('\n')]);
