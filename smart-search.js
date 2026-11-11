@@ -489,6 +489,7 @@ function findSimilarPhoneListings(listings, criteriaInput = {}, exactItems = [],
       item.capacityVerificationNote = 'Пам’ять не підтверджена — її не вказано в картці OLX';
     }
     item.modelVersion = getPhoneModelLabel(item.title);
+    item.similarModelMatch = true;
     output.push(item);
     seen.add(link);
   }
