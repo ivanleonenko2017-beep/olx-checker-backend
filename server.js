@@ -1157,13 +1157,15 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
         ? 'Точних ' + (criteria.modelTerm || 'моделей') + (city ? ' у ' + city : '') +
           ' немає. Є схожі: ' + similarVariants.join(' / ')
         : items.length === 0
-          ? 'Знайшли ' + parsedItems.length + ' оголошень, ' +
-            (city ? 'у ' + city + ' — ' : 'після перевірки умов — ') + locationItems.length +
-            '; жодне не збігається з ' +
-            (rejectionReasons.model_mismatch ? 'моделлю' :
-              rejectionReasons.missing_required_term ? 'пам’яттю або обов’язковими словами' :
-              rejectionReasons.condition_mismatch ? 'станом' :
-              (rejectionReasons.below_min_price || rejectionReasons.above_max_price) ? 'ціною' : 'іншими умовами') + '.'
+          ? cityScoped && locationItems.length === 0
+            ? 'Знайшли ' + parsedItems.length + ' оголошень, але у ' + city + ' — 0.'
+            : 'Знайшли ' + parsedItems.length + ' оголошень, ' +
+              (cityScoped ? 'у ' + city + ' — ' : 'після перевірки умов — ') + locationItems.length +
+              '; жодне не збігається з ' +
+              (rejectionReasons.model_mismatch ? 'моделлю' :
+                rejectionReasons.missing_required_term ? 'пам’яттю або обов’язковими словами' :
+                rejectionReasons.condition_mismatch ? 'станом' :
+                (rejectionReasons.below_min_price || rejectionReasons.above_max_price) ? 'ціною' : 'іншими умовами') + '.'
           : ''
     };
     const comparablePriceValues = items

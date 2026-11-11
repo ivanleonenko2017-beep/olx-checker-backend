@@ -206,3 +206,13 @@ test('manual filter UI defaults similar-model notifications to off and stores th
   assert.match(html, /if \(!preserveSimilarOption\) document\.getElementById\('modalNotifySimilarModels'\)\.checked = false/);
   assert.match(html, /f\.criteria\?\.notifySimilarModels === true/);
 });
+
+
+test('manual search explains zero local results before describing later filters', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /cityScoped && locationItems\.length === 0/);
+  assert.match(source, /але у ' \+ city \+ ' — 0\.'/);
+  assert.match(source, /жодне не збігається з/);
+});
