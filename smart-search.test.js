@@ -289,10 +289,11 @@ test('iPhone 11 regression: standalone Chernihiv after a comma and maximum price
 
 
 
-test('parses base iPhone model and excludes Plus/Pro/Pro Max and demand/accessory listings', () => {
+test('parses iPhone generation-wide scope and excludes demand/accessory listings', () => {
   const parsed = parseNaturalLanguageQuery('куплю айфон 14 на 256 в Чернигове');
   assert.equal(parsed.query, 'айфон 14');
   assert.equal(parsed.criteria.modelTerm, 'iPhone 14');
+  assert.equal(parsed.criteria.modelScope, 'all');
   assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
   assert.equal(parsed.criteria.city, 'Чернігів');
 
@@ -305,10 +306,11 @@ test('parses base iPhone model and excludes Plus/Pro/Pro Max and demand/accessor
   for (const title of [
     'Apple iPhone 14 Plus 256GB',
     'Apple iPhone 14 Pro 256GB',
-    'Apple iPhone 14 Pro Max 256GB',
-    'Apple iPhone 14 Max 256GB',
-    'Apple iPhone 14 Mini 256GB'
+    'Apple iPhone 14 Pro Max 256GB'
   ]) {
+    assert.equal(applyCriteriaToListing({ title, price: 18000 }, parsed.criteria).matches, true, title);
+  }
+  for (const title of ['Apple iPhone 14 Max 256GB', 'Apple iPhone 14 Mini 256GB']) {
     assert.equal(applyCriteriaToListing({ title, price: 18000 }, parsed.criteria).reason, 'model_mismatch', title);
   }
 
@@ -349,7 +351,7 @@ test('does not invent an iPhone model constraint for unrelated product queries',
   assert.ok(parsed.criteria.includeTerms.includes('256 ГБ'));
 });
 
-test('recognizes Apple model shorthand without broadening the model family', () => {
+test('recognizes Apple model shorthand and applies generation-wide scope', () => {
   const parsed = parseNaturalLanguageQuery('Apple 14 256');
   assert.equal(parsed.criteria.modelTerm, 'iPhone 14');
   assert.equal(applyCriteriaToListing({
@@ -359,10 +361,10 @@ test('recognizes Apple model shorthand without broadening the model family', () 
   assert.equal(applyCriteriaToListing({
     title: 'Apple iPhone 14 Pro 256GB',
     price: 18000
-  }, parsed.criteria).reason, 'model_mismatch');
+  }, parsed.criteria).matches, true);
 });
 
-test('iPhone 15 without a modification remains base-only and Plus shorthand is explicit', () => {
+test('iPhone 15 without a modifier searches available family variants and Plus remains exact', () => {
   const base = parseNaturalLanguageQuery('iPhone 15 256');
   assert.equal(base.criteria.modelTerm, 'iPhone 15');
   assert.equal(getPhoneModelLabel('Apple iPhone 15 256GB'), 'Базова');
@@ -376,10 +378,13 @@ test('iPhone 15 without a modification remains base-only and Plus shorthand is e
     'Apple iPhone 15 Max 256GB',
     'Apple iPhone 15 Mini 256GB'
   ];
-  const baseMatches = titles.filter(title =>
+  const familyMatches = titles.filter(title =>
     applyCriteriaToListing({ title, price: 20000 }, base.criteria).matches
   );
-  assert.deepEqual(baseMatches, ['Apple iPhone 15 256GB']);
+  assert.deepEqual(familyMatches, [
+    'Apple iPhone 15 256GB', 'Apple iPhone 15 Plus 256GB', 'Apple iPhone 15+ 256GB',
+    'Apple iPhone 15 Pro 256GB', 'Apple iPhone 15 Pro Max 256GB'
+  ]);
 
   const plusWord = parseNaturalLanguageQuery('iPhone 15 Plus 256');
   const plusSymbol = parseNaturalLanguageQuery('iPhone 15+ 256');
@@ -391,6 +396,7 @@ test('iPhone 15 without a modification remains base-only and Plus shorthand is e
 
   const negativePro = parseNaturalLanguageQuery('iPhone 15 без Pro');
   assert.equal(negativePro.criteria.modelTerm, 'iPhone 15');
+  assert.equal(negativePro.criteria.modelScope, 'base');
   assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 256GB', price: 20000 }, negativePro.criteria).matches, true);
   assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 15 Pro 256GB', price: 20000 }, negativePro.criteria).reason, 'model_mismatch');
 
@@ -421,4 +427,32 @@ test('November 4 Chernihiv trace projects zero base-only model matches and five 
   assert.equal(baseCount, 0);
   assert.equal(familyCount, 4);
   assert.deepEqual(oldTraceTitles.map(getPhoneModelLabel), ['', 'Pro Max', 'Plus', 'Pro Max', 'Pro Max']);
+});
+
+test('parses hyphenated, joined and misspelled Pro Max variants as exact Pro Max', () => {
+  for (const query of ['iPhone 14 pro-max', 'iPhone 14 promax', 'айфон 14 про-макс', 'айфон 14 промакс', 'айфон 14про макс']) {
+    const parsed = parseNaturalLanguageQuery(query);
+    assert.equal(parsed.criteria.modelTerm, 'iPhone 14 Pro Max', query);
+    assert.equal(parsed.criteria.modelScope, 'pro max', query);
+  }
+  const hyphenTitle = { title: 'Продам iPhone 14 pro-max 256GB', price: 20000 };
+  assert.equal(applyCriteriaToListing(hyphenTitle, parseNaturalLanguageQuery('iPhone 14 Pro Max').criteria).matches, true);
+});
+
+test('explicit base wording excludes every modified iPhone version', () => {
+  for (const query of ['iPhone 14 без Pro', 'айфон 14 не про', 'iPhone 14 без Plus', 'айфон 14 звичайний', 'iPhone 14 базова модель']) {
+    const parsed = parseNaturalLanguageQuery(query);
+    assert.equal(parsed.criteria.modelScope, 'base', query);
+    assert.equal(applyCriteriaToListing({ title: 'Apple iPhone 14 128GB', price: 10000 }, parsed.criteria).matches, true);
+    for (const title of ['Apple iPhone 14 Plus', 'Apple iPhone 14 Pro', 'Apple iPhone 14 Pro Max']) {
+      assert.equal(applyCriteriaToListing({ title, price: 10000 }, parsed.criteria).reason, 'model_mismatch', query + ' / ' + title);
+    }
+  }
+});
+
+test('generation-wide scope uses the requested generation in multi-model titles', () => {
+  const criteria = parseNaturalLanguageQuery('iPhone 14 Чернігів').criteria;
+  const listing = { title: 'Айфон 16 про макс 256, айфон 14 про 256 чорний', price: 24000 };
+  assert.equal(applyCriteriaToListing(listing, criteria).matches, true);
+  assert.equal(getPhoneModelLabel(listing.title, 14), 'Pro');
 });
