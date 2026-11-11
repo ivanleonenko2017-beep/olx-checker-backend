@@ -591,10 +591,13 @@ function buildPhoneMarketAnalytics(items = [], criteriaInput = {}) {
   const availableVersions = [12, 13].includes(requested.generation)
     ? ['Базова', 'Pro', 'Pro Max', 'Mini']
     : ['Базова', 'Plus', 'Pro', 'Pro Max'];
-  const selectedVersions = criteria.modelScope && criteria.modelScope !== 'all'
-    ? [criteria.modelScope === 'base' ? 'Базова' : criteria.modelScope === 'pro max' ? 'Pro Max' :
-        criteria.modelScope === 'pro' ? 'Pro' : criteria.modelScope === 'plus' ? 'Plus' : 'Mini']
-    : availableVersions;
+  const selectedVersion = criteria.modelScope === 'base' ? 'Базова'
+    : criteria.modelScope === 'pro max' || requested.variant === 'pro max' ? 'Pro Max'
+    : criteria.modelScope === 'pro' || requested.variant === 'pro' ? 'Pro'
+    : criteria.modelScope === 'plus' || requested.variant === 'plus' ? 'Plus'
+    : criteria.modelScope === 'mini' || requested.variant === 'mini' ? 'Mini'
+    : 'Базова';
+  const selectedVersions = criteria.modelScope === 'all' ? availableVersions : [selectedVersion];
   const comparableItems = (Array.isArray(items) ? items : []).filter(item =>
     item && !isNonPhoneOfferTitle(item.title || '') &&
     !isRepairPartsListing(item.title || '') &&
