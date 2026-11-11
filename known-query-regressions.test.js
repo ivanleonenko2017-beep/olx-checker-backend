@@ -123,7 +123,7 @@ test('D8: server diagnostics expose the smartphone category and version counts',
   assert.match(source, /accessoriesExcluded/);
   assert.match(source, /mobilnye-telefony-smartfony/);
   assert.match(source, /category: traceContext\.category/);
-  assert.match(source, /modelScope: criteria\.modelScope/);
+  assert.match(source, /modelScope: criteria\.modelTerm \?/);
   const adminUtils = fs.readFileSync(path.join(__dirname, 'admin-command-utils.js'), 'utf8');
   assert.match(adminUtils, /Категорія:/);
   assert.match(adminUtils, /аксесуари відсіяні/);
