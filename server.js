@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel, findSimilarPhoneListings } = require('./smart-search');
+const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel, findSimilarPhoneListings, isAccessoryIntent, isRepairPartsListing } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { isTestPremiumBypassEnabled } = require('./premium-bypass');
 const { buildOlxPageUrl, mergeUniqueOlxItems, shouldStopAfterNoLocalPage } = require('./olx-pagination');
@@ -1026,9 +1026,14 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
           .map(term => String(term).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1])
           .filter(Boolean);
         const upstreamQuery = [...new Set([cleanQ, ...storageQueryTerms])].join(' ').trim();
-        const searchPath = citySlug
-          ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(upstreamQuery)}/`
-          : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
+        const phoneIntent = Boolean(parsedCriteria.modelTerm) && !isAccessoryIntent(rawQuery || cleanQ);
+        // Verified OLX category path for "Смартфони / мобільні телефони".
+        const categoryPrefix = 'https://www.olx.ua/uk/elektronika/telefony-i-aksesuary/mobilnye-telefony-smartfony/';
+        const searchPath = phoneIntent
+          ? \`\${categoryPrefix}\${citySlug ? citySlug + '/' : ''}q-\${encodeURIComponent(upstreamQuery)}/\`
+          : citySlug
+            ? \`https://www.olx.ua/uk/\${citySlug}/q-\${encodeURIComponent(upstreamQuery)}/\`
+            : \`https://www.olx.ua/uk/list/q-\${encodeURIComponent(upstreamQuery)}/\`;
         const searchMin = minPrice ? `search%5Bfilter_float_price%3Afrom%5D=${minPrice}` : '';
         const searchMax = maxPrice ? `search%5Bfilter_float_price%3Ato%5D=${maxPrice}` : '';
         const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
@@ -1145,6 +1150,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     });
     for (const item of items) {
       const modelVersion = getPhoneModelLabel(item.title);
+      if (isRepairPartsListing(item.title)) item.partsOnly = true;
       if (modelVersion) item.modelVersion = modelVersion;
     }
     const explicitModelModifier = /(?:iphone|айфон|іфон|ифон)?\s*\d{1,2}\s*(?:pro\s*max|pro|max|plus|mini|\+|без\s+pro|без\s+прошк)/iu.test(String(rawQuery || ''));
@@ -1169,7 +1175,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
           : ''
     };
     const comparablePriceValues = items
-      .filter(item => item.capacityUnverified !== true)
+      .filter(item => item.capacityUnverified !== true && item.partsOnly !== true)
       .map(item => Number(item.price))
       .filter(price => Number.isFinite(price) && price > 0);
     const matchingAveragePrice = comparablePriceValues.length >= 5 ? median(comparablePriceValues) : 0;
