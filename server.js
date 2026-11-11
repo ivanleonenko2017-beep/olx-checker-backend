@@ -1047,7 +1047,9 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     if (!targetUrl) return res.status(400).json({ error: 'Укажіть пошуковий запит' });
 
     const requestedLocation = String(city || '').trim();
-    const searchTrace = { source: 'manual', userId: req.telegramUser.id, criteria: {
+    const accessoryIntent = isAccessoryIntent(rawQuery || '');
+    const searchCategory = /\/mobilnye-telefony-smartfony\//i.test(targetUrl) ? 'mobile_phones' : accessoryIntent ? 'accessories' : 'all_categories';
+    const searchTrace = { source: 'manual', userId: req.telegramUser.id, category: searchCategory, accessoryIntent, criteria: {
       modelTerm: criteria.modelTerm || '', modelScope: criteria.modelScope || 'exact', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
       excludeTerms: criteria.excludeTerms, condition: criteria.condition, city: criteria.city,
       minPrice: criteria.minPrice, maxPrice: criteria.maxPrice
@@ -1173,7 +1175,8 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
             : 'Знайшли ' + parsedItems.length + ' оголошень, ' +
               (cityScoped ? 'у ' + city + ' — ' : 'після перевірки умов — ') + locationItems.length +
               '; жодне не збігається з ' +
-              (rejectionReasons.model_mismatch ? 'моделлю' :
+              (rejectionReasons.model_mismatch ? 'моделлю або версією' :
+                rejectionReasons.wrong_product_type ? 'типом оголошення (аксесуари замість телефону)' :
                 rejectionReasons.missing_required_term ? 'пам’яттю або обов’язковими словами' :
                 rejectionReasons.condition_mismatch ? 'станом' :
                 (rejectionReasons.below_min_price || rejectionReasons.above_max_price) ? 'ціною' : 'іншими умовами') + '.'
@@ -1186,8 +1189,15 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const matchingAveragePrice = comparablePriceValues.length >= 5 ? median(comparablePriceValues) : 0;
     const marketAnalytics = buildPhoneMarketAnalytics(items, criteria);
     const hiddenAccessoriesCount = Number(rejectionReasons.wrong_product_type || 0);
+    const versionCounts = items.reduce((counts, item) => {
+      const version = item.modelVersion || 'Невизначена';
+      counts[version] = (counts[version] || 0) + 1;
+      return counts;
+    }, {});
     console.log('[SEARCH_TRACE] ' + JSON.stringify({
       event: 'search_funnel', requestId, source: 'manual', at: new Date().toISOString(),
+      category: searchCategory, accessoryIntent, modelScope: criteria.modelScope || 'exact', versionCounts,
+      accessoriesExcluded: hiddenAccessoriesCount,
       parsed: parsedItems.length, afterDedup: parsedItems.length,
       afterCardParse: parsedItems.length, afterCity: locationItems.length,
       afterCriteria: items.length, criteriaStages: stagedFunnel.counts, detailsEnriched,
@@ -1205,6 +1215,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       exactCount: items.length,
       similarCount: similarItems.length,
       searchSummary,
+      searchCategory,
       searchRequestId: requestId,
       averagePrice: matchingAveragePrice,
       marketAnalytics,
