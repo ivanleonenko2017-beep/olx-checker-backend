@@ -135,7 +135,7 @@ test('matches iPhone storage written as a bare number in the title only', () => 
 });
 
 
-test('iPhone 15 base search keeps five local Pro-family listings in a separate similar block', () => {
+test('iPhone 15 generation-wide search returns five local family listings in one list', () => {
   const { findSimilarPhoneListings, parseNaturalLanguageQuery, applyCriteriaToListing } = require('./smart-search');
   const parsed = parseNaturalLanguageQuery('куплю айфон 15 на 256 в чернигове');
   const criteria = { ...parsed.criteria, city: 'Чернігів' };
@@ -148,11 +148,11 @@ test('iPhone 15 base search keeps five local Pro-family listings in a separate s
   ];
   const exact = fixture.filter(item => applyCriteriaToListing(item, criteria).matches);
   const similar = findSimilarPhoneListings(fixture, criteria, exact);
-  assert.equal(exact.length, 0);
-  assert.equal(similar.length, 5);
-  assert.equal(similar.filter(item => !item.capacityUnverified).length, 4);
-  assert.equal(similar.filter(item => item.capacityUnverified).length, 1);
-  assert.equal(new Set([...exact, ...similar].map(item => item.link)).size, 5);
+  assert.equal(exact.length, 5);
+  assert.equal(similar.length, 0);
+  assert.equal(exact.filter(item => !item.capacityUnverified).length, 4);
+  assert.equal(exact.filter(item => item.capacityUnverified).length, 1);
+  assert.equal(new Set(exact.map(item => item.link)).size, 5);
 });
 
 test('similar iPhone variants remain strict on explicit model, condition, city-filtered input, and price', () => {
@@ -164,9 +164,10 @@ test('similar iPhone variants remain strict on explicit model, condition, city-f
     { title: 'iPhone 15 Plus 128GB', price: 18000, link: 'wrong-memory', cardText: 'Стан: Вживане' },
     { title: 'iPhone 15 Pro 256GB', price: 20000, link: 'wrong-condition', cardText: 'Стан: Нове' }
   ];
-  const similar = findSimilarPhoneListings(candidates, { ...criteria, maxPrice: 30000, condition: 'used' });
+  const legacyBaseCriteria = { ...criteria, modelScope: 'exact', maxPrice: 30000, condition: 'used' };
+  const similar = findSimilarPhoneListings(candidates, legacyBaseCriteria);
   assert.deepEqual(similar.map(item => item.link), ['ok']);
-  assert.equal(findSimilarPhoneListings(candidates, { ...criteria, modelTerm: 'iPhone 15 Pro' }).length, 0);
+  assert.equal(findSimilarPhoneListings(candidates, { ...legacyBaseCriteria, modelTerm: 'iPhone 15 Pro' }).length, 0);
   assert.equal(findSimilarPhoneListings(candidates, criteria, [], { explicitModelModifier: true }).length, 0);
 });
 
@@ -190,21 +191,21 @@ test('similar model classification is explicitly opt-in for background notificat
   const fs = require('node:fs');
   const path = require('node:path');
   const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
-  assert.match(source, /filter\.criteria\?\.notifySimilarModels === true/);
-  assert.match(source, /const similarItems = filter\.criteria\?\.notifySimilarModels === true[\s\S]*?findSimilarPhoneListings/);
+  assert.match(source, /legacySimilarOption = !Object\.prototype\.hasOwnProperty\.call\(filter\.criteria \|\| \{\}, 'modelScope'\)/);
+  assert.match(source, /const similarItems = legacySimilarOption[\s\S]*?findSimilarPhoneListings/);
   assert.match(source, /similarModelMatched: similarItems\.length/);
   assert.match(source, /Схожий варіант за моделлю \(за вашим дозволом\)/);
   assert.match(source, /criteria\.notifySimilarModels = submittedCriteria\.notifySimilarModels === true/);
 });
 
-test('manual filter UI defaults similar-model notifications to off and stores the explicit checkbox value', () => {
+test('manual filter UI stores the selected iPhone version scope', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  assert.match(html, /id="modalNotifySimilarModels"/);
-  assert.match(html, /notifySimilarModels: document\.getElementById\('modalNotifySimilarModels'\)\.checked === true/);
-  assert.match(html, /if \(!preserveSimilarOption\) document\.getElementById\('modalNotifySimilarModels'\)\.checked = false/);
-  assert.match(html, /f\.criteria\?\.notifySimilarModels === true/);
+  assert.match(html, /id="modalModelScope"/);
+  assert.match(html, /modelScope: document\.getElementById\('modalModelScope'\)\.value/);
+  assert.match(html, /renderModelVersionFilters/);
+  assert.match(html, /f\.criteria\?\.modelScope/);
 });
 
 
