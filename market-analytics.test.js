@@ -51,9 +51,12 @@ test('iPhone 14 analytics counts only phones and groups medians by version', () 
 });
 
 test('repair-parts and unverified-capacity listings do not enter market medians', () => {
-  const comparable = phones.filter(item => item.title.toLowerCase().includes('pro ') && !item.title.toLowerCase().includes('pro max'));
   const items = [
-    ...comparable,
+    { title: 'iPhone 14 Pro 256GB', price: 18000 },
+    { title: 'iPhone 14 Pro 256GB', price: 19000 },
+    { title: 'iPhone 14 Pro 256GB', price: 20000 },
+    { title: 'iPhone 14 Pro 256GB', price: 21000 },
+    { title: 'iPhone 14 Pro 256GB', price: 22000 },
     { title: 'iPhone 14 Pro 256GB на запчастини', price: 1000, partsOnly: true },
     { title: 'iPhone 14 Pro 256GB', price: 15000, capacityUnverified: true }
   ];
@@ -65,5 +68,5 @@ test('repair-parts and unverified-capacity listings do not enter market medians'
   assert.equal(result.memory, '256 ГБ');
   assert.equal(result.groups[0].version, 'Pro');
   assert.equal(result.groups[0].count, 5);
-  assert.equal(result.groups[0].medianPrice, 24000);
+  assert.equal(result.groups[0].medianPrice, 20000);
 });
