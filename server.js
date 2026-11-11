@@ -1716,8 +1716,8 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
       return {
         title: safeText(item.title, 120), url: sanitizeSearchUrl(item.link),
         price: item.price, capacityUnverified,
-        modelVersion: getPhoneModelLabel(item.title, requestedGeneration),
-        multipleModels: hasMultiplePhoneModels(item.title),
+        modelVersion: phoneIntent ? getPhoneModelLabel(item.title, requestedGeneration) : '',
+        multipleModels: phoneIntent && hasMultiplePhoneModels(item.title),
         partsOnly: isRepairPartsListing(item.title)
       };
     });
