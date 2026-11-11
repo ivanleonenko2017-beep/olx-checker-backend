@@ -2825,7 +2825,7 @@ async function runBackgroundWorker() {
             ? `📱 <b>Версія:</b> ${escapeTelegramHtml(item.modelVersion)}\n`
             : '';
           const similarModelLine = item.similarModelMatch
-            ? '🔎 <b>Схожий варіант за моделлю (за вашим дозволом)</b>\\n'
+            ? '🔎 <b>Схожий варіант за моделлю (за вашим дозволом)</b>\n'
             : '';
           const safeLocation = escapeTelegramHtml(item.locationDate);
           const safeItemLink = escapeTelegramHtml(item.link);
