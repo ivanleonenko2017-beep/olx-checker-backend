@@ -184,3 +184,25 @@ test('foreign city listings are excluded before similar model classification', (
   assert.match(serverSource, /findSimilarPhoneListings\(locationItems, criteria/);
   assert.equal(foreignCards.length, 17);
 });
+
+
+test('similar model classification is explicitly opt-in for background notifications', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /filter\.criteria\?\.notifySimilarModels === true/);
+  assert.match(source, /const similarItems = filter\.criteria\?\.notifySimilarModels === true[\s\S]*?findSimilarPhoneListings/);
+  assert.match(source, /similarModelMatched: similarItems\.length/);
+  assert.match(source, /Схожий варіант за моделлю \(за вашим дозволом\)/);
+  assert.match(source, /criteria\.notifySimilarModels = submittedCriteria\.notifySimilarModels === true/);
+});
+
+test('manual filter UI defaults similar-model notifications to off and stores the explicit checkbox value', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /id="modalNotifySimilarModels"/);
+  assert.match(html, /notifySimilarModels: document\.getElementById\('modalNotifySimilarModels'\)\.checked === true/);
+  assert.match(html, /if \(!preserveSimilarOption\) document\.getElementById\('modalNotifySimilarModels'\)\.checked = false/);
+  assert.match(html, /f\.criteria\?\.notifySimilarModels === true/);
+});
