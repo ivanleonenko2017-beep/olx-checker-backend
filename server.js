@@ -1048,7 +1048,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
 
     const requestedLocation = String(city || '').trim();
     const searchTrace = { source: 'manual', userId: req.telegramUser.id, criteria: {
-      modelTerm: criteria.modelTerm || '', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
+      modelTerm: criteria.modelTerm || '', modelScope: criteria.modelScope || 'exact', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
       excludeTerms: criteria.excludeTerms, condition: criteria.condition, city: criteria.city,
       minPrice: criteria.minPrice, maxPrice: criteria.maxPrice
     }};
@@ -1140,12 +1140,12 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       rejectedCards.push({
         listingKey: hashUserId(item.link, TELEGRAM_WEBHOOK_SECRET),
         url: sanitizeSearchUrl(item.link), stage: ({
-          model_mismatch: 'model', wrong_product_type: 'model',
+          model_mismatch: 'model', wrong_product_type: 'accessory',
           missing_required_term: storageRequirements.length ? 'memory_or_required_terms' : 'required_terms',
           missing_any_alternative: 'required_terms', condition_mismatch: 'condition',
           below_min_price: 'price', above_max_price: 'price', excluded_term: 'excluded_words'
         })[result.reason] || 'other',
-        reason: result.reason,
+        reason: result.reason === 'wrong_product_type' ? 'accessory' : result.reason,
         value: safeText(result.reason === 'below_min_price' || result.reason === 'above_max_price'
           ? String(item.price || '') : item.title, 100)
       });
