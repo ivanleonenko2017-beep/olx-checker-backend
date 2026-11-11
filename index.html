@@ -1824,12 +1824,16 @@
         container.innerHTML = '';
         return;
       }
+      const generation = Number(String(criteria.modelTerm || '').match(/\d{1,2}/)?.[0] || 0);
       const versions = [
-        { key: 'all', label: 'Усі' }, { key: 'base', label: 'Базова' },
-        { key: 'plus', label: 'Plus' }, { key: 'pro', label: 'Pro' },
-        { key: 'pro max', label: 'Pro Max' }, { key: 'mini', label: 'Mini' }
+        { key: 'all', label: 'Усі' }, { key: 'base', label: 'Базова' }
       ];
-      window.currentPhoneVersionItems = Array.isArray(items) ? items.slice() : [];
+      if (![12, 13].includes(generation)) versions.push({ key: 'plus', label: 'Plus' });
+      versions.push({ key: 'pro', label: 'Pro' }, { key: 'pro max', label: 'Pro Max' });
+      if ([12, 13].includes(generation)) versions.push({ key: 'mini', label: 'Mini' });
+      window.currentPhoneVersionItems = Array.isArray(items) ? items.slice().sort((a, b) =>
+        parseOlxListingTimestamp(b.locationDate) - parseOlxListingTimestamp(a.locationDate)
+      ) : [];
       const counts = {
         base: items.filter(item => item.modelVersion === 'Базова').length,
         plus: items.filter(item => item.modelVersion === 'Plus').length,
@@ -1846,8 +1850,27 @@
         return '<button type="button" onclick="filterPhoneVersion(' + JSON.stringify(version.key) + ')" class="px-3 py-1.5 rounded-full border text-[10px] font-semibold ' +
           (active ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-gray-900 text-gray-300 border-gray-700') +
           '">' + version.label + ' · ' + count + '</button>';
-      }).join('');
+      }).join('') +
+        '<select id="phoneResultsSort" onchange="sortPhoneResults(this.value)" class="px-2.5 py-1.5 rounded-full bg-gray-900 border border-gray-700 text-[10px] text-gray-300">' +
+        '<option value="date">Новіші спочатку</option><option value="price-asc">Дешевші спочатку</option><option value="price-desc">Дорожчі спочатку</option></select>';
       container.classList.remove('hidden');
+    }
+
+    function parseOlxListingTimestamp(value) {
+      const text = String(value || '').toLocaleLowerCase('uk-UA');
+      if (/сьогодні|сегодня|today/iu.test(text)) return Date.now();
+      const months = { січня: 0, января: 0, лютого: 1, февраля: 1, березня: 2, марта: 2, квітня: 3, апреля: 3, травня: 4, мая: 4, червня: 5, июня: 5, липня: 6, июля: 6, серпня: 7, августа: 7, вересня: 8, сентября: 8, жовтня: 9, октября: 9, листопада: 10, ноября: 10, грудня: 11, декабря: 11 };
+      const match = text.match(/(\d{1,2})\s+(січня|января|лютого|февраля|березня|марта|квітня|апреля|травня|мая|червня|июня|липня|июля|серпня|августа|вересня|сентября|жовтня|октября|листопада|ноября|грудня|декабря)\s+(\d{4})/iu);
+      return match ? new Date(Number(match[3]), months[match[2]], Number(match[1])).getTime() : 0;
+    }
+
+    function sortPhoneResults(mode) {
+      const items = (window.currentPhoneVersionItems || []).slice();
+      if (mode === 'price-asc') items.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+      else if (mode === 'price-desc') items.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+      else items.sort((a, b) => parseOlxListingTimestamp(b.locationDate) - parseOlxListingTimestamp(a.locationDate));
+      window.currentPhoneVersionItems = items;
+      filterPhoneVersion(window.activePhoneVersionFilter || 'all');
     }
 
     function filterPhoneVersion(version) {
