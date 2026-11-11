@@ -691,3 +691,40 @@ PR #51 добавил tokens отступов 4/8/12/16 px, радиусы, но
 ### Вердикт після PR #65
 
 **ТІЛЬКИ М’ЯКИЙ ЗАПУСК.** A–G реалізовані в коді та пройшли CI; поточний commit задеплоєний у Live. Але головні production acceptance-перевірки — повторний пошук із 5 картками, адмін-статистика, другий профіль, referral, новий /status і відкриття юридичних документів — ще не виконані власником. Не позначати це як повністю готовий комерційний реліз.
+
+
+## Уточнення аудиту від 11.11.2026 — звірка Render та Supabase
+
+Цей блок доповнює попередній аудит і має пріоритет у разі розбіжності з раніше наведеною таблицею деплоїв або номером міграції. Попередню історію не видалено.
+
+### Виправлена відповідність PR → production deploy
+
+Повторно звірено історію Render deploys. У попередньому додатку рядки починаючи з PR #56 були зміщені на один PR. Правильна відповідність:
+
+| PR | Render deploy | Commit |
+|---:|---|---|
+| #55 | `dep-dbpq69m0tbcc73ffs1mg` | `41973e74453d` |
+| #56 | `dep-dbpqkp8ae00c73fdpi8g` | `58ecd3fde99f` |
+| #57 | `dep-dbpqnpss728c738n98vg` | `43c2efdbc2d5` |
+| #58 | `dep-dbpqple7bikc7387d7r0` | `c39581dffc1a` |
+| #59 | `dep-dbpqto8473hc73c57phg` | `acbc13e7da71` |
+| #61 | `dep-dbpqvatg1s2s73952l6g` | `f03789fdbab8` |
+| #62 | `dep-dbpr1e5g1s2s739558b0` | `e2a3a8c1bfba` |
+| #63 | `dep-dbpr3lbncjis73cbscog` | `d2ab4ee98b35` |
+| #64 | `dep-dbpr49m7bikc7387qng0` | `f5037724e4fb` |
+| #65 | `dep-dbpr51m0tbcc73fh2r80` | `4a449f103467` |
+| #66 | `dep-dbpr67nf3r2c73attg70` | `2ae0398d4ea6` |
+
+Поточний production deploy #66 має статус `live`, завершився 2026-11-11 00:13:56 UTC. Production branch: `pre-release/1.0.0-hardening`; Render plan: Free; auto deploy on commit. Ручний /status, у якому власник бачив короткий SHA `41973e74`, був отриманий до деплоїв PR #56–#66 і не описує поточний код.
+
+### Виправлення номера webhook-міграції
+
+У попередньому тексті помилково вказано версію `20261110235000`. Фактичний запис у Supabase migration history: `20261110235850_telegram_webhook_updates`. Перевірено через список міграцій активного проєкту `ovblyievvseuugpbmxjy`.
+
+Read-only SQL перевірка підтвердила для `public.telegram_webhook_updates`: RLS увімкнено; `anon` і `authenticated` не мають SELECT; `service_role` має SELECT. Таблиця не містить рядків на час цієї перевірки. Це означає, що зараз у durable queue не видно pending-записів; це не встановлює, який саме update спричинив історичний 429 09.11.
+
+### Межі перевірки CI та Render logs
+
+На deployed commit `2ae0398d4ea6b8ad0574d6c13d0f72d58a097b22` GitHub combined status повернув Vercel check зі станом failure і посиланням на повідомлення `build-rate-limit`. GitHub workflow-runs endpoint не повернув workflow runs для цього SHA. Тому раніше зафіксовані 136/136 тестів залишаються результатом, записаним у попередньому CI/аудиті; у цій звірці вони не запускалися повторно й не повинні називатися щойно перевіреними. Vercel preview failure не доводить помилку Render production build, але є невирішеним CI/preview сигналом.
+
+Render application/request logs за 09.11.2026 18:45–19:15 UTC у цьому проході не отримані, оскільки Render API вимагає workspace selection. Не робити висновків про джерело HTTP 429 без цих логів. Не встановлювати workspace автоматично без підтвердження власника.
