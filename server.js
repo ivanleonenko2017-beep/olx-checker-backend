@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel, findSimilarPhoneListings, isAccessoryIntent, isRepairPartsListing } = require('./smart-search');
+const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel, findSimilarPhoneListings, isAccessoryIntent, isRepairPartsListing, hasMultiplePhoneModels, parsePhoneModelDescriptor } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { isTestPremiumBypassEnabled } = require('./premium-bypass');
 const { buildOlxPageUrl, mergeUniqueOlxItems, shouldStopAfterNoLocalPage } = require('./olx-pagination');
@@ -1151,12 +1151,14 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       });
       return false;
     });
+    const requestedGeneration = parsePhoneModelDescriptor(criteria.modelTerm)?.generation;
     for (const item of items) {
-      const modelVersion = getPhoneModelLabel(item.title);
+      const modelVersion = getPhoneModelLabel(item.title, requestedGeneration);
       if (isRepairPartsListing(item.title)) item.partsOnly = true;
+      if (hasMultiplePhoneModels(item.title)) item.multipleModels = true;
       if (modelVersion) item.modelVersion = modelVersion;
     }
-    const explicitModelModifier = /(?:iphone|айфон|іфон|ифон)?\s*\d{1,2}\s*(?:pro\s*max|pro|max|plus|mini|\+|без\s+pro|без\s+прошк)/iu.test(String(rawQuery || ''));
+    const explicitModelModifier = criteria.modelScope !== 'all';
     const similarItems = findSimilarPhoneListings(locationItems, criteria, items, { explicitModelModifier });
     const similarVariants = [...new Set(similarItems.map(item => item.modelVersion).filter(Boolean))];
     const searchSummary = {
@@ -2728,11 +2730,14 @@ async function runBackgroundWorker() {
         });
         const exactItems = criteriaEvaluations.filter(result => result.matches).map(result => result.item);
         const explicitModelModifier = /(?:iphone|айфон|іфон|ифон)?\s*\d{1,2}\s*(?:pro\s*max|pro|max|plus|mini|\+|без\s+pro|без\s+прошк)/iu.test(String(filter.query || ''));
-        const similarItems = filter.criteria?.notifySimilarModels === true
+        const legacySimilarOption = !Object.prototype.hasOwnProperty.call(filter.criteria || {}, 'modelScope') && filter.criteria?.notifySimilarModels === true;
+        const similarItems = legacySimilarOption
           ? findSimilarPhoneListings(locationEligibleItems, criteria, exactItems, { explicitModelModifier })
           : [];
+        // Listings sold for parts remain visible in manual search, but never trigger alerts.
+        const alertExactItems = exactItems.filter(item => !isRepairPartsListing(item.title));
         const similarLinks = new Set(similarItems.map(item => String(item.link || '').trim()));
-        const items = [...exactItems, ...similarItems];
+        const items = [...alertExactItems, ...similarItems];
         const rejectionCounts = criteriaEvaluations.reduce((counts, result) => {
           if (!result.matches && !similarLinks.has(String(result.item.link || '').trim())) {
             counts[result.reason] = (counts[result.reason] || 0) + 1;
