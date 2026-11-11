@@ -75,19 +75,38 @@ function normalizePhoneVariant(value = '') {
   return '';
 }
 
-function parsePhoneModelDescriptor(value = '') {
-  const match = String(value || '').match(
-    /(?:iphone|apple(?:\s*iphone)?|айфон|іфон|ифон)\s*(\d{1,2})(?:\s*(pro\s*max|pro|max|plus|mini|про\s*макс|про|макс|плюс|міні|мини|[+]))?(?=$|[^\p{L}\p{N}])/iu
-  );
-  if (!match) return null;
-  return {
+function parsePhoneModelDescriptors(value = '') {
+  const text = String(value || '');
+  const pattern = /(?:iphone|apple(?:\s*iphone)?|айфон|іфон|ифон)\s*(\d{1,2})(?:\s*(pro[\s._-]*max|pro|max|plus|mini|про[\s._-]*макс|про|макс|плюс|міні|мини|[+]))?(?=$|[^\p{L}\p{N}])/giu;
+  return [...text.matchAll(pattern)].map(match => ({
     generation: Number(match[1]),
     variant: normalizePhoneVariant(match[2] || '')
-  };
+  }));
 }
 
-function getPhoneModelLabel(value = '') {
-  const descriptor = parsePhoneModelDescriptor(value);
+function parsePhoneModelDescriptor(value = '', targetGeneration = null) {
+  const descriptors = parsePhoneModelDescriptors(value);
+  if (!descriptors.length) return null;
+  if (Number.isInteger(Number(targetGeneration))) {
+    const requested = descriptors.find(item => item.generation === Number(targetGeneration));
+    if (requested) return requested;
+  }
+  return descriptors[0];
+}
+
+function hasMultiplePhoneModels(value = '') {
+  return new Set(parsePhoneModelDescriptors(value).map(item => item.generation)).size > 1;
+}
+
+function isPhoneVariantAvailable(generation, variant) {
+  if (variant === 'max') return false;
+  if (variant === 'mini') return [12, 13].includes(Number(generation));
+  if (variant === 'plus') return ![12, 13].includes(Number(generation));
+  return true;
+}
+
+function getPhoneModelLabel(value = '', targetGeneration = null) {
+  const descriptor = parsePhoneModelDescriptor(value, targetGeneration);
   if (!descriptor) return '';
   if (descriptor.variant === 'pro max') return 'Pro Max';
   if (descriptor.variant === 'pro') return 'Pro';
@@ -138,7 +157,10 @@ function normalizeCriteria(input = {}) {
     minComparableListings: Math.min(30, Math.max(3, toPositiveInteger(source.minComparableListings, 5))),
     maxAgeMinutes: Math.min(10080, Math.max(0, toPositiveInteger(source.maxAgeMinutes ?? source.max_age_minutes, 0))),
     includeTermsMode: source.includeTermsMode === 'any' || source.include_terms_mode === 'any' ? 'any' : 'all',
-    modelTerm: typeof source.modelTerm === 'string' ? source.modelTerm.trim().replace(/\s+/g, ' ').slice(0, 60) : ''
+    modelTerm: typeof source.modelTerm === 'string' ? source.modelTerm.trim().replace(/\s+/g, ' ').slice(0, 60) : '',
+    modelScope: ['all', 'base', 'plus', 'pro', 'pro max', 'mini'].includes(String(source.modelScope || '').toLowerCase())
+      ? String(source.modelScope).toLowerCase()
+      : 'exact'
   };
 }
 
@@ -201,17 +223,25 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
 
   if (criteria.modelTerm) {
     const requestedModel = parsePhoneModelDescriptor(criteria.modelTerm);
-    const listingModel = parsePhoneModelDescriptor(listing?.title || '');
-    if (!requestedModel || !listingModel ||
-        requestedModel.generation !== listingModel.generation ||
-        requestedModel.variant !== listingModel.variant) {
+    const listingModel = parsePhoneModelDescriptor(listing?.title || '', requestedModel?.generation);
+    const modelScope = criteria.modelScope || 'exact';
+    const sameGeneration = requestedModel && listingModel &&
+      requestedModel.generation === listingModel.generation;
+    const allowedVariant = listingModel && isPhoneVariantAvailable(listingModel.generation, listingModel.variant);
+    const versionMatches = modelScope === 'all'
+      ? Boolean(allowedVariant)
+      : modelScope === 'base'
+        ? listingModel?.variant === ''
+        : (modelScope === 'plus' || modelScope === 'pro' || modelScope === 'pro max' || modelScope === 'mini')
+          ? listingModel?.variant === modelScope
+          : listingModel?.variant === requestedModel?.variant;
+    if (!sameGeneration || !versionMatches) {
       return { matches: false, reason: 'model_mismatch', criteria };
     }
     if (isNonPhoneOfferTitle(listing?.title || '')) {
       return { matches: false, reason: 'wrong_product_type', criteria };
     }
   }
-
   if (criteria.includeTerms.length && criteria.includeTermsMode === 'all' && !criteria.includeTerms.every(term => termMatches(lowerText, term, listing?.title))) {
     return { matches: false, reason: 'missing_required_term', criteria };
   }
@@ -406,15 +436,25 @@ function parseNaturalLanguageQuery(input) {
     }
   }
 
-  // Preserve the exact iPhone generation and modification. A plain iPhone 14
-  // must not silently include 14 Plus, Pro, Pro Max, Max, or Mini listings.
-  // Alternative phone models were already extracted into anyTerms above.
+  // A generation without a modifier searches all released phone versions.
+  // An explicit modifier remains exact; explicit negative/base wording means base only.
+  const accessoryIntent = isAccessoryIntent(original);
   const phoneModel = parsePhoneModelDescriptor(remaining);
-  if (phoneModel) {
+  if (phoneModel && !accessoryIntent) {
     criteria.modelTerm = 'iPhone ' + phoneModel.generation +
       (phoneModel.variant ? ' ' + phoneModel.variant.replace(/\b\w/g, char => char.toUpperCase()) : '');
+    criteria.modelScope = phoneModel.variant || 'all';
+    const baseOnlyMatch = original.match(/(?:без\s+(?:pro|про|plus|\+|mini|макс)?|не\s+(?:pro|про|plus|\+)|(?:базова|базовый|звичайна|звичайний|обычная|обычный)(?:\s+(?:модель|версія|версия))?)/iu);
+    if (baseOnlyMatch) {
+      criteria.modelScope = 'base';
+      remaining = remaining.replace(baseOnlyMatch[0], ' ').trim();
+    }
+    const allVersionsMatch = remaining.match(/(?:будь-як\p{L}*|любой|любая|любое|будь\s+який)\s*(?:версі\p{L}*|версии|модел\p{L}*)?/iu);
+    if (allVersionsMatch) {
+      criteria.modelScope = 'all';
+      remaining = remaining.replace(allVersionsMatch[0], ' ').trim();
+    }
   }
-
   // Keep hardware requirements as explicit criteria instead of leaving them
   // buried in the broad OLX query.
   const specPatterns = [
@@ -474,7 +514,7 @@ function parseNaturalLanguageQuery(input) {
 function findSimilarPhoneListings(listings, criteriaInput = {}, exactItems = [], options = {}) {
   const criteria = normalizeCriteria(criteriaInput);
   const requested = parsePhoneModelDescriptor(criteria.modelTerm);
-  if (!requested || requested.variant || options.explicitModelModifier === true) return [];
+  if (!requested || requested.variant || criteria.modelScope === 'all' || options.explicitModelModifier === true) return [];
 
   const relaxedCriteria = { ...criteria, modelTerm: '' };
   const exactLinks = new Set((Array.isArray(exactItems) ? exactItems : [])
@@ -567,6 +607,9 @@ module.exports = {
   canUseUnverifiedStorageFallback,
   findSimilarPhoneListings,
   parsePhoneModelDescriptor,
+  parsePhoneModelDescriptors,
+  hasMultiplePhoneModels,
+  isPhoneVariantAvailable,
   getPhoneModelLabel,
   parseNaturalLanguageQuery,
   median,
