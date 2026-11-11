@@ -1033,10 +1033,10 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
         // Verified OLX category path for "Смартфони / мобільні телефони".
         const categoryPrefix = 'https://www.olx.ua/uk/elektronika/telefony-i-aksesuary/mobilnye-telefony-smartfony/';
         const searchPath = phoneIntent
-          ? \`\${categoryPrefix}\${citySlug ? citySlug + '/' : ''}q-\${encodeURIComponent(upstreamQuery)}/\`
+          ? `${categoryPrefix}${citySlug ? citySlug + '/' : ''}q-${encodeURIComponent(upstreamQuery)}/`
           : citySlug
-            ? \`https://www.olx.ua/uk/\${citySlug}/q-\${encodeURIComponent(upstreamQuery)}/\`
-            : \`https://www.olx.ua/uk/list/q-\${encodeURIComponent(upstreamQuery)}/\`;
+            ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(upstreamQuery)}/`
+            : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
         const searchMin = minPrice ? `search%5Bfilter_float_price%3Afrom%5D=${minPrice}` : '';
         const searchMax = maxPrice ? `search%5Bfilter_float_price%3Ato%5D=${maxPrice}` : '';
         const queryParams = [searchMin, searchMax].filter(Boolean).join('&');
