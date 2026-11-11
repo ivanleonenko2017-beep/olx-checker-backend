@@ -444,7 +444,7 @@ function parseNaturalLanguageQuery(input) {
     criteria.modelTerm = 'iPhone ' + phoneModel.generation +
       (phoneModel.variant ? ' ' + phoneModel.variant.replace(/\b\w/g, char => char.toUpperCase()) : '');
     criteria.modelScope = phoneModel.variant || 'all';
-    const baseOnlyMatch = original.match(/(?:без\s+(?:pro|про|plus|\+|mini|макс)?|не\s+(?:pro|про|plus|\+)|(?:базова|базовый|звичайна|звичайний|обычная|обычный)\s+(?:модель|версія|версия)?)/iu);
+    const baseOnlyMatch = original.match(/(?:без\s+(?:pro|про|plus|\+|mini|макс)?|не\s+(?:pro|про|plus|\+)|(?:базова|базовый|звичайна|звичайний|обычная|обычный)(?:\s+(?:модель|версія|версия))?)/iu);
     if (baseOnlyMatch) {
       criteria.modelScope = 'base';
       remaining = remaining.replace(baseOnlyMatch[0], ' ').trim();
