@@ -7,7 +7,7 @@ const path = require('node:path');
 const { deriveAccess } = require('./access-policy');
 const {
   consumeRateLimit, isAdminCommandAuthorized, splitTelegramMessages,
-  formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, maskTelegramId
+  formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, maskTelegramId, translateTelegramWebhookError
 } = require('./admin-command-utils');
 
 test('admin command authorization rejects missing and ordinary users', async () => {
@@ -232,4 +232,26 @@ test('Telegram update processor is decoupled from the Express response lifecycle
   assert.ok(start >= 0 && end > start);
   assert.doesNotMatch(processor, /\bres\./);
   assert.match(processor, /throw err/);
+});
+
+
+test('Telegram webhook errors are presented in Ukrainian without raw English provider text', () => {
+  assert.equal(translateTelegramWebhookError('Wrong response from the webhook: 429 Too Many Requests'),
+    'Webhook відповів HTTP 429: забагато запитів.');
+  assert.equal(translateTelegramWebhookError('Wrong response from the webhook: 401 Unauthorized'),
+    'Webhook відхилив запит (HTTP 401): перевірку секрету не пройдено.');
+  assert.equal(translateTelegramWebhookError('502 Bad Gateway'),
+    'Webhook повернув HTTP 502: помилка шлюзу.');
+  assert.equal(translateTelegramWebhookError('some provider failure'),
+    'Telegram повідомив про помилку webhook.');
+});
+
+test('Mini App and admin status contain no known Russian UI phrases', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const admin = fs.readFileSync(path.join(__dirname, 'admin-command-utils.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  const russianUi = /ошибка|ошибк[аиуы]?|включён|выключен|не определён|не удалось|пользователь|объявлени[еяй]?|введите|попробуйте|укажите|выберите|платеж[аеи]?|сейчас|позже/iu;
+  assert.doesNotMatch(html, russianUi);
+  assert.doesNotMatch(admin, russianUi);
+  assert.doesNotMatch(server, /Ошибка проверки initData|HTTP статус не определён|не удалось получить getWebhookInfo|не определён/iu);
 });
