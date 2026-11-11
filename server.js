@@ -14,7 +14,7 @@ const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
 const { encryptTelegramUpdate, decryptTelegramUpdate, isValidTelegramWebhookSecret, isDuplicateWebhookUpdate } = require('./telegram-webhook-queue');
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
-const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage } = require('./admin-command-utils');
+const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, translateTelegramWebhookError } = require('./admin-command-utils');
 
 const app = express();
 app.disable('x-powered-by');
@@ -142,7 +142,7 @@ function verifyTelegramWebAppData(initDataRaw) {
     const user = JSON.parse(userStr);
     return user && Number.isSafeInteger(Number(user.id)) && Number(user.id) > 0 ? user : null;
   } catch (e) {
-    console.error('[Auth Error] Ошибка проверки initData:', e.message);
+    console.error('[Auth Error] Помилка перевірки initData:', e.message);
   }
   return null;
 }
@@ -776,7 +776,7 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
         uniqueTotal: merged.length, parserStats: result.parserStats || {}
       };
       pageTraces.push(pageTrace);
-      lastOlxRequestStatus = pageTrace.httpStatus ? 'HTTP ' + pageTrace.httpStatus : 'HTTP статус не определён';
+      lastOlxRequestStatus = pageTrace.httpStatus ? 'HTTP ' + pageTrace.httpStatus : 'HTTP-статус не визначено';
       console.log('[SEARCH_TRACE] ' + JSON.stringify({
         event: 'search_page', requestId, source, ...pageTrace
       }));
@@ -2057,7 +2057,7 @@ async function processTelegramUpdate(update) {
             const evidence = [];
             if (stars.length) evidence.push('Telegram Stars: ' + stars.length + ' запис(ів), останній статус ' + stars[0].activation_status + ', останній запис ' + (stars[0].created_at || 'дата невідома'));
             if (mono.length) evidence.push('Monobank: ' + mono.length + ' запис(ів), останній статус ' + mono[0].status + ', останній запис ' + (mono[0].paid_at || mono[0].created_at || 'дата невідома'));
-            if (legacy.length) evidence.push('legacy payments: ' + legacy.length + ' запис(ів), останній провайдер ' + safeText(legacy[0].provider, 30) + ', останній запис ' + (legacy[0].created_at || 'дата невідома'));
+            if (legacy.length) evidence.push('попередні платежі: ' + legacy.length + ' запис(ів), останній провайдер ' + safeText(legacy[0].provider, 30) + ', останній запис ' + (legacy[0].created_at || 'дата невідома'));
             if (referralCount) evidence.push('реферальні бонуси як запрошувачу: ' + referralCount + ' × 3 дні');
             const grantSource = targetUser.is_admin || isTargetAdmin
               ? 'адміністратор'
@@ -2074,7 +2074,7 @@ async function processTelegramUpdate(update) {
               paymentEvidence: evidence.join('; '),
               expiryBehavior: blocked
                 ? 'Бот заблокований користувачем; воркер пропускає всі його фільтри. Записи фільтрів не видаляються.'
-                : 'Після 4 днів Trial або завершення Premium застосовується Free: 1 фільтр, 5 пошуків/день, перевірка кожні 15 хв. Фільтри понад ліміт зберігаються, але воркер їх не обробляє.'
+                : 'Після 4 днів пробного періоду або завершення Premium застосовується безкоштовний тариф: 1 фільтр, 5 пошуків на день, перевірка кожні 15 хв. Фільтри понад ліміт зберігаються, але воркер їх не обробляє.'
             });
             for (const message of messages) await sendTelegramMessage(chatId, message);
             return;
@@ -2173,23 +2173,25 @@ async function processTelegramUpdate(update) {
           webhook = {
             host,
             pendingUpdates: Number(info.pending_update_count || 0),
-            lastError: [lastErrorDate, safeText(info.last_error_message || 'нет', 180)].filter(Boolean).join(' · ')
+            lastError: [lastErrorDate, translateTelegramWebhookError(info.last_error_message)].filter(Boolean).join(' · ')
           };
         }
       } catch (error) {
-        webhook.lastError = safeText(error.response?.status ? 'getWebhookInfo HTTP ' + error.response.status : 'getWebhookInfo недоступний', 180);
+        webhook.lastError = error.response?.status
+          ? translateTelegramWebhookError('HTTP ' + error.response.status)
+          : 'Не вдалося отримати дані webhook від Telegram.';
       }
       const uptimeSeconds = Math.floor(process.uptime());
       const uptime = [Math.floor(uptimeSeconds / 86400) + 'д',
         Math.floor((uptimeSeconds % 86400) / 3600) + 'ч',
         Math.floor((uptimeSeconds % 3600) / 60) + 'м'].join(' ');
       const commitCandidate = String(process.env.RENDER_GIT_COMMIT || '').trim();
-      const commit = /^[a-f0-9]{7,40}$/i.test(commitCandidate) ? commitCandidate : 'не доступен';
+      const commit = /^[a-f0-9]{7,40}$/i.test(commitCandidate) ? commitCandidate : 'недоступний';
       const statusMessage = formatStatusMessage({
         commit, uptime, supabaseOk, webhook,
         testPremiumBypassConfigured: process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true',
         testPremiumBypassEffective: isTestPremiumBypassEnabled(process.env),
-        worker: { lastSuccessAt: workerLastSuccessAt, processedFilters: workerLastProcessedFilters },
+        worker: { lastSuccessAt: workerLastSuccessAt ? new Intl.DateTimeFormat('uk-UA', { timeZone: 'Europe/Kyiv', dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(new Date(workerLastSuccessAt)) : null, processedFilters: workerLastProcessedFilters },
         lastOlxStatus: lastOlxRequestStatus
       });
       await sendTelegramMessage(chatId, statusMessage);

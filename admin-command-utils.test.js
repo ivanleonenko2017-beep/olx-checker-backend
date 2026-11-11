@@ -7,7 +7,7 @@ const path = require('node:path');
 const { deriveAccess } = require('./access-policy');
 const {
   consumeRateLimit, isAdminCommandAuthorized, splitTelegramMessages,
-  formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, maskTelegramId
+  formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, maskTelegramId, translateTelegramWebhookError
 } = require('./admin-command-utils');
 
 test('admin command authorization rejects missing and ordinary users', async () => {
@@ -92,7 +92,7 @@ test('subscription report masks Telegram ID, reports limits and expiry behavior'
   }).join('\n');
   assert.ok(message.includes('••••6789'));
   assert.ok(message.includes('Premium початок:'));
-  assert.ok(message.includes('не зберігається окремо в users'));
+  assert.ok(message.includes('не зберігається окремо в таблиці користувачів'));
   assert.ok(!message.includes('123456789'));
   assert.ok(message.includes('активні 1, призупинені лімітом 2'));
   assert.ok(message.includes('5'));
@@ -113,7 +113,7 @@ test('referral report masks IDs and escapes user-derived values', () => {
   assert.ok(message.includes('••••6789'));
   assert.ok(message.includes('••••4321'));
   assert.ok(message.includes('&lt;'));
-  assert.ok(message.includes('Legacy referral_logs:</b> 1'));
+  assert.ok(message.includes('Попередні записи рефералів:</b> 1'));
   assert.ok(message.includes('legacy 1. ••••4444'));
   assert.ok(!message.includes('123456789'));
   assert.ok(!message.includes('987654321'));
@@ -232,4 +232,26 @@ test('Telegram update processor is decoupled from the Express response lifecycle
   assert.ok(start >= 0 && end > start);
   assert.doesNotMatch(processor, /\bres\./);
   assert.match(processor, /throw err/);
+});
+
+
+test('Telegram webhook errors are presented in Ukrainian without raw English provider text', () => {
+  assert.equal(translateTelegramWebhookError('Wrong response from the webhook: 429 Too Many Requests'),
+    'Webhook відповів HTTP 429: забагато запитів.');
+  assert.equal(translateTelegramWebhookError('Wrong response from the webhook: 401 Unauthorized'),
+    'Webhook відхилив запит (HTTP 401): перевірку секрету не пройдено.');
+  assert.equal(translateTelegramWebhookError('502 Bad Gateway'),
+    'Webhook повернув HTTP 502: помилка шлюзу.');
+  assert.equal(translateTelegramWebhookError('some provider failure'),
+    'Telegram повідомив про помилку webhook.');
+});
+
+test('Mini App and admin status contain no known Russian UI phrases', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const admin = fs.readFileSync(path.join(__dirname, 'admin-command-utils.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  const russianUi = /(?<!\p{L})(?:ошибка|ошибки|включён|выключен|не определён|не удалось|пользователь|объявление|введите|попробуйте|укажите|выберите|сейчас|позже)(?!\p{L})/iu;
+  assert.doesNotMatch(html, russianUi);
+  assert.doesNotMatch(admin, russianUi);
+  assert.doesNotMatch(server, /Ошибка проверки initData|HTTP статус не определён|не удалось получить getWebhookInfo|не определён/iu);
 });

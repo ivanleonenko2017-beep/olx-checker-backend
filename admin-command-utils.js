@@ -62,7 +62,7 @@ function formatDiagnosticMessages(data = {}) {
     '<b>requestId:</b> ' + escapeTelegramHtml(safe(data.requestId, 24)),
     '<b>Час UTC:</b> ' + escapeTelegramHtml(at),
     '<b>Час Київ:</b> ' + escapeTelegramHtml(data.kyivTime || 'не визначено'),
-    '<b>Пагінація:</b> ' + escapeTelegramHtml(safe(data.stopReason || 'unknown', 50))
+    '<b>Пагінація:</b> ' + escapeTelegramHtml(safe(data.stopReason || 'невідомо', 50))
   ].join('\n');
 
   const pages = ['<b>Сторінки</b>'];
@@ -93,7 +93,7 @@ function formatDiagnosticMessages(data = {}) {
 
   const funnel = [
     '<b>Воронка</b>',
-    'Розпарсено: ' + Number(f.parsed || 0) + ' → після dedup: ' + Number(f.afterDedup || 0),
+    'Розпарсено: ' + Number(f.parsed || 0) + ' → після усунення дублікатів: ' + Number(f.afterDedup || 0),
     'Місто: ' + Number(f.afterCity || 0) + ' → модель: ' + Number(f.after_model ?? f.afterModel ?? 0),
     'Пам’ять: ' + Number(f.afterMemoryIncludingUnverified ?? f.after_memory ?? 0) +
       ' (не підтверджена: ' + Number(f.capacityUnverified || 0) + ')',
@@ -131,12 +131,26 @@ function formatDiagnosticMessages(data = {}) {
   return splitTelegramMessages([header, pages.join('\n'), funnel, cards.join('\n'), errors.join('\n')]);
 }
 
+function translateTelegramWebhookError(value) {
+  const message = String(value || '');
+  if (/429|too many requests/i.test(message)) return 'Webhook відповів HTTP 429: забагато запитів.';
+  if (/401|unauthorized/i.test(message)) return 'Webhook відхилив запит (HTTP 401): перевірку секрету не пройдено.';
+  if (/403|forbidden/i.test(message)) return 'Webhook відхилив запит (HTTP 403).';
+  if (/502|bad gateway/i.test(message)) return 'Webhook повернув HTTP 502: помилка шлюзу.';
+  if (/503|service unavailable/i.test(message)) return 'Webhook тимчасово недоступний (HTTP 503).';
+  if (/500|internal server error/i.test(message)) return 'Webhook повернув HTTP 500: внутрішня помилка сервера.';
+  const status = message.match(/\b([45]\d{2})\b/);
+  return status
+    ? 'Telegram повідомив про помилку webhook (HTTP ' + status[1] + ').'
+    : 'Telegram повідомив про помилку webhook.';
+}
+
 function formatStatusMessage(s = {}) {
   const webhook = s.webhook || {};
   const worker = s.worker || {};
   return [
     '<b>ЗНАЙДЕНО · Статус сервісу</b>',
-    '<b>Коміт:</b> ' + escapeTelegramHtml(safe(s.commit || 'не доступний', 48)),
+    '<b>Коміт:</b> ' + escapeTelegramHtml(safe(s.commit || 'недоступний', 48)),
     '<b>Час роботи:</b> ' + escapeTelegramHtml(safe(s.uptime || 'невідомо', 40)),
     '<b>Фоновий воркер:</b> останній успішний цикл ' +
       escapeTelegramHtml(safe(worker.lastSuccessAt || 'ще не зафіксовано', 48)) +
@@ -165,10 +179,10 @@ function formatSubscriptionMessage(data = {}) {
   const lines = [
     '<b>ЗНАЙДЕНО · Підписка</b>',
     '<b>Telegram ID:</b> ' + escapeTelegramHtml(maskTelegramId(user.telegram_id)),
-    '<b>Тариф зараз:</b> ' + escapeTelegramHtml(access.plan || 'невідомо'),
-    '<b>Trial початок:</b> ' + escapeTelegramHtml(user.trial_started_at || 'не починався'),
-    '<b>Trial завершення:</b> ' + escapeTelegramHtml(access.trialEndsAt || 'немає'),
-    '<b>Premium початок:</b> ' + escapeTelegramHtml(data.premiumStartedAt || 'не зберігається окремо в users'),
+    '<b>Тариф зараз:</b> ' + escapeTelegramHtml(({ admin: 'Адміністратор', premium: 'Premium', trial: 'Пробний період', free: 'Безкоштовний' })[access.plan] || 'невідомо'),
+    '<b>Початок пробного періоду:</b> ' + escapeTelegramHtml(user.trial_started_at || 'не починався'),
+    '<b>Завершення пробного періоду:</b> ' + escapeTelegramHtml(access.trialEndsAt || 'немає'),
+    '<b>Premium початок:</b> ' + escapeTelegramHtml(data.premiumStartedAt || 'не зберігається окремо в таблиці користувачів'),
     '<b>Premium до:</b> ' + escapeTelegramHtml(user.premium_until || 'немає'),
     '<b>Джерело:</b> ' + escapeTelegramHtml(data.grantSource || 'не визначено'),
     '<b>Ліміти:</b> фільтри ' + (Number.isFinite(access.filterLimit) ? access.filterLimit : 'без ліміту') +
@@ -179,7 +193,7 @@ function formatSubscriptionMessage(data = {}) {
     '<b>Фільтри:</b> всього ' + Number(filters.total || 0) +
       ', активні ' + Number(filters.active || 0) + ', призупинені лімітом ' + Number(filters.paused || 0),
     '<b>Після завершення:</b> ' + escapeTelegramHtml(data.expiryBehavior ||
-      'Trial/Premium переходить на Free; зайві фільтри залишаються в базі, але не обробляються воркером.')
+      'Пробний період або Premium переходить на безкоштовний тариф; зайві фільтри залишаються в базі, але не обробляються фоновим процесом.')
   ];
   if (data.paymentEvidence) lines.push('<b>Платіжні записи:</b> ' + escapeTelegramHtml(data.paymentEvidence));
   return splitTelegramMessages([lines.join('\n')]);
@@ -195,7 +209,7 @@ function formatReferralMessage(data = {}) {
     '<b>Запрошено:</b> ' + Number(data.invitedCount || 0),
     ...(data.invited || []).slice(0, 20).map((id, index) =>
       (index + 1) + '. ' + escapeTelegramHtml(maskTelegramId(id))),
-    '<b>Legacy referral_logs:</b> ' + Number(data.legacyInvitedCount || 0),
+    '<b>Попередні записи рефералів:</b> ' + Number(data.legacyInvitedCount || 0),
     ...(data.legacyInvited || []).slice(0, 20).map((id, index) =>
       'legacy ' + (index + 1) + '. ' + escapeTelegramHtml(maskTelegramId(id))),
     '<b>Начислення:</b> ' + Number(data.rewardedCount || 0) + ' × 3 дні = ' +
@@ -212,6 +226,7 @@ module.exports = {
   splitTelegramMessages,
   formatDiagnosticMessages,
   formatStatusMessage,
+  translateTelegramWebhookError,
   maskTelegramId,
   formatSubscriptionMessage,
   formatReferralMessage
