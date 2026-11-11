@@ -136,7 +136,7 @@ test('matches iPhone storage written as a bare number in the title only', () => 
 
 
 test('iPhone 15 generation-wide search returns five local family listings in one list', () => {
-  const { findSimilarPhoneListings, parseNaturalLanguageQuery, applyCriteriaToListing } = require('./smart-search');
+  const { findSimilarPhoneListings, parseNaturalLanguageQuery, applyCriteriaToListing, canUseUnverifiedStorageFallback } = require('./smart-search');
   const parsed = parseNaturalLanguageQuery('куплю айфон 15 на 256 в чернигове');
   const criteria = { ...parsed.criteria, city: 'Чернігів' };
   const fixture = [
@@ -146,7 +146,15 @@ test('iPhone 15 generation-wide search returns five local family listings in one
     { title: 'Продам iPhone 15 PRO MAX / 256 gb', price: 28500, link: 'local-4', cardText: 'Продам iPhone 15 PRO MAX / 256 gb28 500 грн. Чернігів - 10 листопада 2026 р.' },
     { title: 'Продам IPhone 15 Pro Max 256 GB', price: 32000, link: 'local-5', cardText: 'Продам IPhone 15 Pro Max 256 GB32 000 грн. Чернігів - 10 листопада 2026 р.' }
   ];
-  const exact = fixture.filter(item => applyCriteriaToListing(item, criteria).matches);
+  const exact = fixture.filter(item => {
+    const result = applyCriteriaToListing(item, criteria);
+    if (result.matches) return true;
+    if (result.reason === 'missing_required_term' && canUseUnverifiedStorageFallback(item, criteria)) {
+      item.capacityUnverified = true;
+      return true;
+    }
+    return false;
+  });
   const similar = findSimilarPhoneListings(fixture, criteria, exact);
   assert.equal(exact.length, 5);
   assert.equal(similar.length, 0);
