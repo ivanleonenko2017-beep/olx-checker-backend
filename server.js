@@ -1776,7 +1776,7 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
       success: true, requestId, at, kyivTime, source: 'diagnostic', parsedQuery: parsed.query,
       performance,
       category, accessoryIntent,
-      criteria: { model: criteria.modelTerm, modelScope: criteria.modelScope, memory: storageTerms, condition: criteria.condition,
+      criteria: { model: criteria.modelTerm, modelScope: criteria.modelTerm ? (criteria.modelScope || 'exact') : 'none', memory: storageTerms, condition: criteria.condition,
         city, minPrice: criteria.minPrice, maxPrice: criteria.maxPrice, exclusions: criteria.excludeTerms },
       pages: pageTraces, stopReason,
       funnel: { parsed: parsedItems.length, afterDedup: parsedItems.length,
@@ -1795,7 +1795,7 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
     };
     console.log('[SEARCH_TRACE] ' + JSON.stringify({
       event: 'search_funnel', requestId, source: 'diagnostic', at,
-      category, accessoryIntent, modelScope: criteria.modelScope || 'exact',
+      category, accessoryIntent, modelScope: criteria.modelTerm ? (criteria.modelScope || 'exact') : 'none',
       parsed: parsedItems.length, afterDedup: parsedItems.length, afterCardParse: parsedItems.length,
       afterCity: cityItems.length, criteriaStages: funnel.counts,
       finalCount: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length,
