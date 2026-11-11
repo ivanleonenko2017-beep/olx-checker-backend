@@ -70,7 +70,7 @@ function compactRejectedCards(cards, limit = 25) {
 
 function evaluateCriteriaFunnel(items, criteria = {}) {
   const stages = [
-    ['model', { modelTerm: criteria.modelTerm }],
+    ['model', { modelTerm: criteria.modelTerm, modelScope: criteria.modelScope }],
     ['memory', {
       includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
       includeTermsMode: criteria.includeTermsMode
