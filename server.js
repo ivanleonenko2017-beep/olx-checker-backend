@@ -1738,27 +1738,23 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
       const url = sanitizeSearchUrl(item.link);
       const accepted = acceptedLinks.has(url);
       const modelText = String(item.title || '');
-      const modelMatch = modelText.match(/(?:iphone|айфон|іфон|ифон)\s*\d{1,2}\s*(pro\s*max|про\s*макс|pro|про|plus|плюс|max|макс|mini|міні|мини|\+)?/iu);
-      const rawVariant = String(modelMatch?.[1] || '').toLocaleLowerCase('uk-UA').replace(/\s+/g, ' ').trim();
-      const modelVersion = !modelMatch ? 'не визначена' :
-        /pro\s*max|про\s*макс/.test(rawVariant) ? 'Pro Max' :
-        /^(pro|про)$/.test(rawVariant) ? 'Pro' :
-        /^(plus|плюс|\+)$/.test(rawVariant) ? 'Plus' :
-        /^(max|макс)$/.test(rawVariant) ? 'Max' :
-        /^(mini|міні|мини)$/.test(rawVariant) ? 'Mini' : 'базова';
+      const parsedVersion = getPhoneModelLabel(modelText, requestedGeneration);
+      const modelVersion = parsedVersion || 'не визначена';
+      const modelLabel = hasMultiplePhoneModels(modelText) ? 'Кілька моделей · ' + modelVersion : modelVersion;
       const searchable = [item.title, item.cardText, item.description].filter(Boolean).join(' ');
       const memoryMatch = searchable.match(/(?:^|[^\d])(64|128|256|512|1024)\s*(?:gb|гб)(?=$|[^\p{L}])/iu) ||
         (/(?:iphone|айфон)/iu.test(modelText) ? searchable.match(/(?:^|[^\d])(64|128|256|512|1024)(?!\s*(?:ram|озу|оператив))(?!\p{L})(?=$|[^\d])/iu) : null);
       const decision = !inCity ? 'відсів: місто не збігається' :
         accepted ? (results.find(result => result.url === url)?.capacityUnverified
-          ? 'прийнята; пам’ять не підтверджена' : 'прийнята') :
-        'відсів: ' + (match.reason || 'інший критерій');
+          ? 'прийнята; пам’ять не підтверджена'
+          : isRepairPartsListing(item.title) ? 'прийнята в список; на запчастини, без аналітики й сповіщень' : 'прийнята') :
+        'відсів: ' + (match.reason === 'wrong_product_type' ? 'accessory' : (match.reason || 'інший критерій'));
       return {
         position: index + 1, title: safeText(item.title, 120),
         price: item.isNegotiable ? (item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : '')) + ' · договірна' : (item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : 'не вказана')),
         city: safeText(item.locationDate ? String(item.locationDate).split(/\s*[-–—]\s*/)[0].split(',')[0] : (locationMatchesCardText(item.cardText, city) ? city : 'не визначено'), 80),
-        modelVersion,
-        memory: memoryMatch ? memoryMatch[1] + ' GB' : 'не визначена',
+        modelVersion: modelLabel,
+        memory: results.find(result => result.url === url)?.capacityUnverified ? 'не підтверджена' : (memoryMatch ? memoryMatch[1] + ' GB' : 'не визначена'),
         decision
       };
     });
