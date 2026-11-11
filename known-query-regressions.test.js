@@ -48,6 +48,8 @@ test('D2b: joined Pro spellings and generation-specific Mini availability', () =
   assert.equal(generation12.criteria.modelScope, 'all');
   assert.equal(applyCriteriaToListing({ title: 'iPhone 12 Mini 64GB', price: 10000 }, generation12.criteria).matches, true);
   assert.equal(applyCriteriaToListing({ title: 'iPhone 12 Plus 64GB', price: 10000 }, generation12.criteria).reason, 'model_mismatch');
+  const impossiblePlus = parseNaturalLanguageQuery('iPhone 12 Plus');
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 12 Plus 64GB', price: 10000 }, impossiblePlus.criteria).reason, 'model_mismatch');
 });
 
 test('D3: explicit negative Pro wording selects only the base iPhone', () => {
