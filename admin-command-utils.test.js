@@ -250,7 +250,7 @@ test('Mini App and admin status contain no known Russian UI phrases', () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
   const admin = fs.readFileSync(path.join(__dirname, 'admin-command-utils.js'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
-  const russianUi = /(?<!\\p{L})(?:ошибка|ошибки|включён|выключен|не определён|не удалось|пользователь|объявление|введите|попробуйте|укажите|выберите|платеж(?:а|ей|ом|у|е)?|сейчас|позже)(?!\\p{L})/iu;
+  const russianUi = /(?<!\p{L})(?:ошибка|ошибки|включён|выключен|не определён|не удалось|пользователь|объявление|введите|попробуйте|укажите|выберите|платеж(?:а|ей|ом|у|е)?|сейчас|позже)(?!\p{L})/iu;
   assert.doesNotMatch(html, russianUi);
   assert.doesNotMatch(admin, russianUi);
   assert.doesNotMatch(server, /Ошибка проверки initData|HTTP статус не определён|не удалось получить getWebhookInfo|не определён/iu);
