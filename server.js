@@ -2736,8 +2736,9 @@ async function runBackgroundWorker() {
           : [];
         // Listings sold for parts remain visible in manual search, but never trigger alerts.
         const alertExactItems = exactItems.filter(item => !isRepairPartsListing(item.title));
+        const alertSimilarItems = similarItems.filter(item => !isRepairPartsListing(item.title));
         const similarLinks = new Set(similarItems.map(item => String(item.link || '').trim()));
-        const items = [...alertExactItems, ...similarItems];
+        const items = [...alertExactItems, ...alertSimilarItems];
         const rejectionCounts = criteriaEvaluations.reduce((counts, result) => {
           if (!result.matches && !similarLinks.has(String(result.item.link || '').trim())) {
             counts[result.reason] = (counts[result.reason] || 0) + 1;
