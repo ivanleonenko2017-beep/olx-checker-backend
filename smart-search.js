@@ -580,6 +580,49 @@ function median(values) {
   return sorted.length % 2 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 
+function buildPhoneMarketAnalytics(items = [], criteriaInput = {}) {
+  const criteria = normalizeCriteria(criteriaInput);
+  const requested = parsePhoneModelDescriptor(criteria.modelTerm);
+  if (!requested) return { generation: null, memory: '', groups: [] };
+  const storage = [...criteria.includeTerms, ...criteria.anyTerms]
+    .map(term => String(term).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1])
+    .filter(Boolean);
+  const memory = storage.length ? storage[0] + ' ГБ' : '';
+  const availableVersions = [12, 13].includes(requested.generation)
+    ? ['Базова', 'Pro', 'Pro Max', 'Mini']
+    : ['Базова', 'Plus', 'Pro', 'Pro Max'];
+  const selectedVersion = criteria.modelScope === 'base' ? 'Базова'
+    : criteria.modelScope === 'pro max' || requested.variant === 'pro max' ? 'Pro Max'
+    : criteria.modelScope === 'pro' || requested.variant === 'pro' ? 'Pro'
+    : criteria.modelScope === 'plus' || requested.variant === 'plus' ? 'Plus'
+    : criteria.modelScope === 'mini' || requested.variant === 'mini' ? 'Mini'
+    : 'Базова';
+  const selectedVersions = criteria.modelScope === 'all' ? availableVersions : [selectedVersion];
+  const comparableItems = (Array.isArray(items) ? items : []).filter(item =>
+    item && !isNonPhoneOfferTitle(item.title || '') &&
+    !isRepairPartsListing(item.title || '') &&
+    item.partsOnly !== true && item.capacityUnverified !== true &&
+    Number.isFinite(Number(item.price)) && Number(item.price) > 0
+  );
+  const groups = selectedVersions.map(version => {
+    const groupItems = comparableItems.filter(item =>
+      getPhoneModelLabel(item.title || '', requested.generation) === version
+    );
+    const prices = groupItems.map(item => Number(item.price));
+    const count = prices.length;
+    const enoughData = count >= 5;
+    return {
+      version,
+      memory,
+      count,
+      medianPrice: enoughData ? median(prices) : null,
+      status: enoughData ? 'ok' : 'insufficient',
+      statusLabel: enoughData ? '' : 'Недостатньо даних'
+    };
+  });
+  return { generation: requested.generation, memory, groups };
+}
+
 function estimateBargainPrice(listingPrice, comparablePrices, options = {}) {
   const required = Math.min(30, Math.max(3, toPositiveInteger(options.minComparableListings, 5)));
   const discountThreshold = Math.min(90, Math.max(5, toPositiveInteger(options.discountPercent, 15)));
@@ -616,5 +659,6 @@ module.exports = {
   estimateBargainPrice,
   isNonPhoneOfferTitle,
   isAccessoryIntent,
-  isRepairPartsListing
+  isRepairPartsListing,
+  buildPhoneMarketAnalytics
 };
