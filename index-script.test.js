@@ -76,3 +76,14 @@ test('OLX parser stores title, numeric price, and negotiable flag as separate fi
   assert.match(source, /isNegotiable,/);
   assert.match(source, /notificationPrice/);
 });
+
+
+test('negotiable flag also survives when the marker is appended to the title but not the structured price text', () => {
+  const { hasNegotiablePrice, cleanOlxCardTitle } = require('./olx-card-utils');
+  const rawTitle = 'Iphone 15 Pro 256 Gb Natural Titanium29 500 грн.Договірна';
+  const structuredPrice = '29 500 грн';
+  assert.equal(hasNegotiablePrice(structuredPrice) || hasNegotiablePrice(rawTitle), true);
+  assert.equal(cleanOlxCardTitle(rawTitle, structuredPrice), 'Iphone 15 Pro 256 Gb Natural Titanium');
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /hasNegotiablePrice\(sourcePriceText\) \|\| hasNegotiablePrice\(rawTitle\)/);
+});

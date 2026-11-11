@@ -593,7 +593,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     const priceElement = $(element).find('[data-testid="ad-price"], [data-testid="ad-price-container"], [data-cy="ad-price"], [class*="price"]').first();
     priceElement.find('style, script').remove();
     const sourcePriceText = priceElement.text().replace(/\s+/g, ' ').trim();
-    const isNegotiable = hasNegotiablePrice(sourcePriceText);
+    const isNegotiable = hasNegotiablePrice(sourcePriceText) || hasNegotiablePrice(rawTitle);
     const title = cleanOlxCardTitle(rawTitle, sourcePriceText);
     if (!title) { parserStats.skippedNoTitle++; return; }
 
