@@ -201,6 +201,8 @@ test('similar model classification is explicitly opt-in for background notificat
   const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
   assert.match(source, /legacySimilarOption = !Object\.prototype\.hasOwnProperty\.call\(filter\.criteria \|\| \{\}, 'modelScope'\)/);
   assert.match(source, /const similarItems = legacySimilarOption[\s\S]*?findSimilarPhoneListings/);
+  assert.match(source, /const alertExactItems = exactItems\.filter\(item => !isRepairPartsListing/);
+  assert.match(source, /const alertSimilarItems = similarItems\.filter\(item => !isRepairPartsListing/);
   assert.match(source, /similarModelMatched: similarItems\.length/);
   assert.match(source, /Схожий варіант за моделлю \(за вашим дозволом\)/);
   assert.match(source, /criteria\.notifySimilarModels = submittedCriteria\.notifySimilarModels === true/);
