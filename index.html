@@ -1535,7 +1535,7 @@
       document.getElementById('modalAnyTerms').value = '';
       document.getElementById('modalExcludeTerms').value = '';
       document.getElementById('modalPhotosOnly').checked = false;
-      document.getElementById('modalNotifySimilarModels').checked = false;
+      document.getElementById('modalModelScope').value = 'all';
       document.getElementById('modalMaxAgeMinutes').value = '0';
       document.getElementById('modalBargainHunter').checked = false;
       document.getElementById('modalDiscountPercent').value = '15';
@@ -1580,7 +1580,7 @@
                   ${(f.max_price || f.maxPrice) ? 'до ' + parseInt(f.max_price || f.maxPrice).toLocaleString('uk-UA') + ' грн' : 'Без ліміту'} • ${escapeHtml(f.city || 'Всі міста')}
                 </div>
                 ${statusLabel}
-                ${f.criteria?.notifySimilarModels === true ? '<div class="text-[9px] text-sky-300 mt-1">Сповіщення про схожі моделі: увімкнено</div>' : ''}
+                ${f.criteria?.modelScope ? '<div class="text-[9px] text-sky-300 mt-1">Версії: ' + escapeHtml(({ all: 'усі', base: 'базова', plus: 'Plus', pro: 'Pro', 'pro max': 'Pro Max', mini: 'Mini' })[f.criteria.modelScope] || f.criteria.modelScope) + '</div>' : (f.criteria?.notifySimilarModels === true ? '<div class="text-[9px] text-sky-300 mt-1">Сповіщення про схожі моделі: увімкнено</div>' : '')}
               </div>
             </div>
             <button data-filter-id="${escapeHtml(f.id)}" onclick="deleteActiveFilter(this.dataset.filterId)" class="text-xs text-red-400 hover:text-red-300 p-1">✕</button>
