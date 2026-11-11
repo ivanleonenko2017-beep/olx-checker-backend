@@ -1007,6 +1007,8 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       city: rawCity || parsedCriteria.city,
       condition: rawCondition || parsedCriteria.condition
     });
+    // An explicit accessory search must not inherit the iPhone model constraint.
+    if (isAccessoryIntent(rawQuery || '')) criteria.modelTerm = '';
     const minPrice = rawMinPrice !== undefined && rawMinPrice !== '' ? rawMinPrice : criteria.minPrice || '';
     const maxPrice = rawMaxPrice !== undefined && rawMaxPrice !== '' ? rawMaxPrice : criteria.maxPrice || '';
     const city = rawCity || criteria.city || '';
@@ -1025,7 +1027,8 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
         const storageQueryTerms = [...(parsedCriteria.includeTerms || []), ...(parsedCriteria.anyTerms || [])]
           .map(term => String(term).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1])
           .filter(Boolean);
-        const upstreamQuery = [...new Set([cleanQ, ...storageQueryTerms])].join(' ').trim();
+        const upstreamBaseQuery = isAccessoryIntent(rawQuery || '') ? String(rawQuery).trim() : cleanQ;
+        const upstreamQuery = [...new Set([upstreamBaseQuery, ...storageQueryTerms])].join(' ').trim();
         const phoneIntent = Boolean(parsedCriteria.modelTerm) && !isAccessoryIntent(rawQuery || cleanQ);
         // Verified OLX category path for "Смартфони / мобільні телефони".
         const categoryPrefix = 'https://www.olx.ua/uk/elektronika/telefony-i-aksesuary/mobilnye-telefony-smartfony/';
