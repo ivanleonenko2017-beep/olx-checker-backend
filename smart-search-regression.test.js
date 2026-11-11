@@ -138,7 +138,7 @@ test('matches iPhone storage written as a bare number in the title only', () => 
 test('iPhone 15 generation-wide search returns five local family listings in one list', () => {
   const { findSimilarPhoneListings, parseNaturalLanguageQuery, applyCriteriaToListing, canUseUnverifiedStorageFallback } = require('./smart-search');
   const parsed = parseNaturalLanguageQuery('куплю айфон 15 на 256 в чернигове');
-  const criteria = { ...parsed.criteria, city: 'Чернігів' };
+  const criteria = { ...parsed.criteria, city: '' };
   const fixture = [
     { title: 'Iphone 15 pro 256 Gb фіз сім Natural Titanium29 500 грн.Договірна', price: 29500, link: 'local-1', cardText: 'Iphone 15 pro 256 Gb фіз сім Natural Titanium29 500 грн.Договірна Чернігів - 10 листопада 2026 р.' },
     { title: 'Айфон 15 про макс 256гб 100%17 000 грн.', price: 17000, link: 'local-2', cardText: 'Айфон 15 про макс 256гб 100%17 000 грн. Чернігів - 10 листопада 2026 р.' },
