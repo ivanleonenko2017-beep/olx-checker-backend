@@ -233,8 +233,8 @@ function applyCriteriaToListing(listing, criteriaInput = {}) {
       : modelScope === 'base'
         ? listingModel?.variant === ''
         : (modelScope === 'plus' || modelScope === 'pro' || modelScope === 'pro max' || modelScope === 'mini')
-          ? listingModel?.variant === modelScope
-          : listingModel?.variant === requestedModel?.variant;
+          ? listingModel?.variant === modelScope && Boolean(allowedVariant)
+          : listingModel?.variant === requestedModel?.variant && Boolean(allowedVariant);
     if (!sameGeneration || !versionMatches) {
       return { matches: false, reason: 'model_mismatch', criteria };
     }
