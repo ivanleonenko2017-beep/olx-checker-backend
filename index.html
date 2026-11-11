@@ -303,6 +303,8 @@
             </div>
             <span id="itemsCount" class="text-xs bg-blue-900/50 text-blue-300 px-2.5 py-1 rounded-full border border-blue-800">0 товарів</span>
           </div>
+          <div id="marketAnalyticsByVersion" class="hidden space-y-2 pt-2 border-t border-gray-800"></div>
+          <div id="hiddenAccessoriesCount" class="hidden text-[10px] text-gray-500"></div>
         </div>
 
         <div class="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-gray-900 border border-emerald-800/80 flex items-center justify-between">
@@ -1987,7 +1989,36 @@
         }
         window.lastAvgPrice = data.averagePrice;
         currentSearchResults = combinedItems;
-        document.getElementById('avgPrice').innerText = data.averagePrice > 0 ? data.averagePrice.toLocaleString('uk-UA') + ' грн' : 'Недостатньо даних';
+        const marketGroups = Array.isArray(data.marketAnalytics?.groups) ? data.marketAnalytics.groups : [];
+        const avgPriceElement = document.getElementById('avgPrice');
+        if (marketGroups.length > 1) avgPriceElement.innerText = 'За версіями нижче';
+        else if (marketGroups.length === 1) {
+          const group = marketGroups[0];
+          avgPriceElement.innerText = group.status === 'ok'
+            ? Number(group.medianPrice).toLocaleString('uk-UA') + ' грн'
+            : 'Недостатньо даних';
+        } else {
+          avgPriceElement.innerText = data.averagePrice > 0 ? data.averagePrice.toLocaleString('uk-UA') + ' грн' : 'Недостатньо даних';
+        }
+        const marketContainer = document.getElementById('marketAnalyticsByVersion');
+        if (marketContainer) {
+          marketContainer.innerHTML = marketGroups.map(group =>
+            '<div class="flex items-center justify-between gap-2 text-[10px]">' +
+              '<span class="text-gray-300">' + escapeHtml(group.version) +
+                (group.memory ? ' · ' + escapeHtml(group.memory) : '') +
+                ' <span class="text-gray-500">(' + Number(group.count || 0) + ')</span></span>' +
+              '<span class="' + (group.status === 'ok' ? 'text-emerald-300 font-semibold' : 'text-gray-500') + '">' +
+                (group.status === 'ok' ? Number(group.medianPrice).toLocaleString('uk-UA') + ' грн' : 'Недостатньо даних') +
+              '</span></div>'
+          ).join('');
+          marketContainer.classList.toggle('hidden', marketGroups.length === 0);
+        }
+        const hiddenAccessories = document.getElementById('hiddenAccessoriesCount');
+        if (hiddenAccessories) {
+          const hiddenCount = Number(data.hiddenAccessoriesCount || 0);
+          hiddenAccessories.innerText = hiddenCount > 0 ? 'Приховано аксесуарів: ' + hiddenCount : '';
+          hiddenAccessories.classList.toggle('hidden', hiddenCount <= 0);
+        }
         document.getElementById('itemsCount').innerText = 'Знайдено ' + combinedItems.length + ' оголошень';
         analyticsDiv.classList.remove('hidden');
         const scopeCriteria = data.criteria || criteria;
