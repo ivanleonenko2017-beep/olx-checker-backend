@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel, findSimilarPhoneListings, isAccessoryIntent, isRepairPartsListing, hasMultiplePhoneModels, parsePhoneModelDescriptor } = require('./smart-search');
+const { normalizeCriteria, applyCriteriaToListing, canUseUnverifiedStorageFallback, parseNaturalLanguageQuery, estimateBargainPrice, median, getPhoneModelLabel, findSimilarPhoneListings, isAccessoryIntent, isRepairPartsListing, hasMultiplePhoneModels, parsePhoneModelDescriptor, buildPhoneMarketAnalytics } = require('./smart-search');
 const { deriveAccess, canCreateFilter, TRIAL_DAYS, PREMIUM_PRICE_UAH } = require('./access-policy');
 const { isTestPremiumBypassEnabled } = require('./premium-bypass');
 const { buildOlxPageUrl, mergeUniqueOlxItems, shouldStopAfterNoLocalPage } = require('./olx-pagination');
@@ -1184,6 +1184,8 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       .map(item => Number(item.price))
       .filter(price => Number.isFinite(price) && price > 0);
     const matchingAveragePrice = comparablePriceValues.length >= 5 ? median(comparablePriceValues) : 0;
+    const marketAnalytics = buildPhoneMarketAnalytics(items, criteria);
+    const hiddenAccessoriesCount = Number(rejectionReasons.wrong_product_type || 0);
     console.log('[SEARCH_TRACE] ' + JSON.stringify({
       event: 'search_funnel', requestId, source: 'manual', at: new Date().toISOString(),
       parsed: parsedItems.length, afterDedup: parsedItems.length,
@@ -1205,6 +1207,8 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       searchSummary,
       searchRequestId: requestId,
       averagePrice: matchingAveragePrice,
+      marketAnalytics,
+      hiddenAccessoriesCount,
       items,
       similarItems,
       plan: access.plan,
