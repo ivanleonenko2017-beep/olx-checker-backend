@@ -62,6 +62,10 @@ function formatDiagnosticMessages(data = {}) {
     '<b>requestId:</b> ' + escapeTelegramHtml(safe(data.requestId, 24)),
     '<b>Час UTC:</b> ' + escapeTelegramHtml(at),
     '<b>Час Київ:</b> ' + escapeTelegramHtml(data.kyivTime || 'не визначено'),
+    '<b>Категорія:</b> ' + escapeTelegramHtml(data.category === 'mobile_phones' ? 'Мобільні телефони' : data.category === 'accessories' ? 'Аксесуари' : 'Усі категорії') +
+      ' · намір аксесуар: ' + (data.accessoryIntent ? 'так' : 'ні'),
+    '<b>Модель:</b> ' + escapeTelegramHtml(safe(data.criteria?.model || 'не визначена', 40)) +
+      ' · scope: ' + escapeTelegramHtml(safe(data.criteria?.modelScope || 'exact', 16)),
     '<b>Пагінація:</b> ' + escapeTelegramHtml(safe(data.stopReason || 'невідомо', 50))
   ].join('\n');
 
@@ -94,13 +98,15 @@ function formatDiagnosticMessages(data = {}) {
   const funnel = [
     '<b>Воронка</b>',
     'Розпарсено: ' + Number(f.parsed || 0) + ' → після усунення дублікатів: ' + Number(f.afterDedup || 0),
-    'Місто: ' + Number(f.afterCity || 0) + ' → модель: ' + Number(f.after_model ?? f.afterModel ?? 0),
+    'Місто: ' + Number(f.afterCity || 0) + ' → модель/версія: ' + Number(f.after_model ?? f.afterModel ?? 0) +
+      ' · аксесуари відсіяні: ' + Number(f.accessoriesExcluded || 0),
     'Пам’ять: ' + Number(f.afterMemoryIncludingUnverified ?? f.after_memory ?? 0) +
       ' (не підтверджена: ' + Number(f.capacityUnverified || 0) + ')',
     'Виключення: ' + Number(f.after_excluded_words ?? 0),
     'Ціна: ' + Number(f.after_price ?? 0) + ' → стан: ' + Number(f.after_condition ?? 0),
     'Порядок конвеєра: ціна перед станом; класифікація рекомендацій OLX не інструментована.',
-    'Підсумок: ' + Number(f.final || 0) +
+    'Версії у видачі: ' + (Object.entries(f.versionCounts || {}).map(([version, count]) => version + ' ' + count).join(' · ') || '—') +
+      '\n' + 'Підсумок: ' + Number(f.final || 0) +
       ' · місто не підтверджено: ' + Number(f.cityUnverified || 0)
   ].join('\n');
 

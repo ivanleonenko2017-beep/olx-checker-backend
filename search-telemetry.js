@@ -41,7 +41,7 @@ function summarizeCriteria(criteria = {}) {
     .filter(Boolean);
   return {
     model: safeText(criteria.modelTerm || '', 60),
-    modelScope: safeText(criteria.modelScope || 'exact', 16),
+    modelScope: safeText(criteria.modelTerm ? (criteria.modelScope || 'exact') : 'none', 16),
     memoryGb: [...new Set(capacity)].slice(0, 5),
     condition: safeText(criteria.condition || 'all', 12),
     city: safeText(criteria.city || '', 60),
@@ -70,7 +70,7 @@ function compactRejectedCards(cards, limit = 25) {
 
 function evaluateCriteriaFunnel(items, criteria = {}) {
   const stages = [
-    ['model', { modelTerm: criteria.modelTerm }],
+    ['model', { modelTerm: criteria.modelTerm, modelScope: criteria.modelScope }],
     ['memory', {
       includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
       includeTermsMode: criteria.includeTermsMode

@@ -742,6 +742,8 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
   const startedAt = new Date().toISOString();
   console.log('[SEARCH_TRACE] ' + JSON.stringify({
     event: 'search_start', requestId, at: startedAt, source, userHash,
+    category: traceContext.category || 'all_categories', accessoryIntent: traceContext.accessoryIntent === true,
+    modelScope: criteriaSummary.modelScope,
     queryHash: hashUserId(query, TELEGRAM_WEBHOOK_SECRET), criteria: criteriaSummary,
     requestedLocation: safeText(requestedLocation, 80),
     targetUrl: sanitizeSearchUrl(targetUrl), pageLimit
@@ -1047,8 +1049,10 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     if (!targetUrl) return res.status(400).json({ error: 'Укажіть пошуковий запит' });
 
     const requestedLocation = String(city || '').trim();
-    const searchTrace = { source: 'manual', userId: req.telegramUser.id, criteria: {
-      modelTerm: criteria.modelTerm || '', modelScope: criteria.modelScope || 'exact', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
+    const accessoryIntent = isAccessoryIntent(rawQuery || '');
+    const searchCategory = /\/mobilnye-telefony-smartfony\//i.test(targetUrl) ? 'mobile_phones' : accessoryIntent ? 'accessories' : 'all_categories';
+    const searchTrace = { source: 'manual', userId: req.telegramUser.id, category: searchCategory, accessoryIntent, criteria: {
+      modelTerm: criteria.modelTerm || '', modelScope: criteria.modelTerm ? (criteria.modelScope || 'exact') : 'none', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
       excludeTerms: criteria.excludeTerms, condition: criteria.condition, city: criteria.city,
       minPrice: criteria.minPrice, maxPrice: criteria.maxPrice
     }};
@@ -1173,7 +1177,8 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
             : 'Знайшли ' + parsedItems.length + ' оголошень, ' +
               (cityScoped ? 'у ' + city + ' — ' : 'після перевірки умов — ') + locationItems.length +
               '; жодне не збігається з ' +
-              (rejectionReasons.model_mismatch ? 'моделлю' :
+              (rejectionReasons.model_mismatch ? 'моделлю або версією' :
+                rejectionReasons.wrong_product_type ? 'типом оголошення (аксесуари замість телефону)' :
                 rejectionReasons.missing_required_term ? 'пам’яттю або обов’язковими словами' :
                 rejectionReasons.condition_mismatch ? 'станом' :
                 (rejectionReasons.below_min_price || rejectionReasons.above_max_price) ? 'ціною' : 'іншими умовами') + '.'
@@ -1186,8 +1191,15 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const matchingAveragePrice = comparablePriceValues.length >= 5 ? median(comparablePriceValues) : 0;
     const marketAnalytics = buildPhoneMarketAnalytics(items, criteria);
     const hiddenAccessoriesCount = Number(rejectionReasons.wrong_product_type || 0);
+    const versionCounts = items.reduce((counts, item) => {
+      const version = item.modelVersion || 'Невизначена';
+      counts[version] = (counts[version] || 0) + 1;
+      return counts;
+    }, {});
     console.log('[SEARCH_TRACE] ' + JSON.stringify({
       event: 'search_funnel', requestId, source: 'manual', at: new Date().toISOString(),
+      category: searchCategory, accessoryIntent, modelScope: criteria.modelTerm ? (criteria.modelScope || 'exact') : 'none', versionCounts,
+      accessoriesExcluded: hiddenAccessoriesCount,
       parsed: parsedItems.length, afterDedup: parsedItems.length,
       afterCardParse: parsedItems.length, afterCity: locationItems.length,
       afterCriteria: items.length, criteriaStages: stagedFunnel.counts, detailsEnriched,
@@ -1205,6 +1217,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
       exactCount: items.length,
       similarCount: similarItems.length,
       searchSummary,
+      searchCategory,
       searchRequestId: requestId,
       averagePrice: matchingAveragePrice,
       marketAnalytics,
@@ -1655,17 +1668,24 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
   try {
     const parsed = parseNaturalLanguageQuery(rawQuery);
     const criteria = normalizeCriteria(parsed.criteria);
+    const accessoryIntent = isAccessoryIntent(rawQuery);
+    const phoneIntent = Boolean(criteria.modelTerm) && !accessoryIntent;
+    const category = phoneIntent ? 'mobile_phones' : accessoryIntent ? 'accessories' : 'all_categories';
     const city = criteria.city || '';
     const storageTerms = [...criteria.includeTerms, ...criteria.anyTerms]
       .map(term => String(term).match(/^(\d{2,4})\s*(?:гб|gb)$/iu)?.[1]).filter(Boolean);
-    const upstreamQuery = [...new Set([parsed.query, ...storageTerms])].join(' ').trim();
+    const upstreamBaseQuery = accessoryIntent ? rawQuery : parsed.query;
+    const upstreamQuery = [...new Set([upstreamBaseQuery, ...storageTerms])].join(' ').trim();
     const citySlug = city ? getOlxCitySlug(city) : '';
-    const searchPath = citySlug
-      ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(upstreamQuery)}/`
-      : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
+    const categoryPrefix = 'https://www.olx.ua/uk/elektronika/telefony-i-aksesuary/mobilnye-telefony-smartfony/';
+    const searchPath = phoneIntent
+      ? `${categoryPrefix}${citySlug ? citySlug + '/' : ''}q-${encodeURIComponent(upstreamQuery)}/`
+      : citySlug
+        ? `https://www.olx.ua/uk/${citySlug}/q-${encodeURIComponent(upstreamQuery)}/`
+        : `https://www.olx.ua/uk/list/q-${encodeURIComponent(upstreamQuery)}/`;
     const { items: parsedItems, pageTraces, stopReason } = await parseOlx(
       searchPath, criteria.minPrice, criteria.maxPrice, parsed.query, city,
-      { source: 'diagnostic', userId: adminUserId, requestId, criteria }
+      { source: 'diagnostic', userId: adminUserId, requestId, category, accessoryIntent, criteria }
     );
     const cityItems = parsedItems.filter(item =>
       locationMatches(item.locationDate, city) ||
@@ -1685,14 +1705,22 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
     }
     const detailsEnrichmentMs = Date.now() - detailsEnrichmentStartedAt;
     const funnel = evaluateCriteriaFunnel(cityItems, criteria);
+    const requestedGeneration = parsePhoneModelDescriptor(criteria.modelTerm)?.generation;
     const results = cityItems.filter(item => {
       const match = applyCriteriaToListing(item, criteria);
       return match.matches || (match.reason === 'missing_required_term' &&
         storageTerms.length > 0 && canUseUnverifiedStorageFallback(item, criteria));
-    }).map(item => ({
-      title: safeText(item.title, 120), url: sanitizeSearchUrl(item.link),
-      price: item.price, capacityUnverified: !applyCriteriaToListing(item, criteria).matches
-    }));
+    }).map(item => {
+      const match = applyCriteriaToListing(item, criteria);
+      const capacityUnverified = !match.matches;
+      return {
+        title: safeText(item.title, 120), url: sanitizeSearchUrl(item.link),
+        price: item.price, capacityUnverified,
+        modelVersion: phoneIntent ? getPhoneModelLabel(item.title, requestedGeneration) : '',
+        multipleModels: phoneIntent && hasMultiplePhoneModels(item.title),
+        partsOnly: isRepairPartsListing(item.title)
+      };
+    });
     const acceptedLinks = new Set(results.map(item => item.url));
     const cityRejected = parsedItems.filter(item => !cityItems.includes(item)).map(item => ({
       listingKey: hashUserId(item.link, TELEGRAM_WEBHOOK_SECRET), url: sanitizeSearchUrl(item.link),
@@ -1710,27 +1738,23 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
       const url = sanitizeSearchUrl(item.link);
       const accepted = acceptedLinks.has(url);
       const modelText = String(item.title || '');
-      const modelMatch = modelText.match(/(?:iphone|айфон|іфон|ифон)\s*\d{1,2}\s*(pro\s*max|про\s*макс|pro|про|plus|плюс|max|макс|mini|міні|мини|\+)?/iu);
-      const rawVariant = String(modelMatch?.[1] || '').toLocaleLowerCase('uk-UA').replace(/\s+/g, ' ').trim();
-      const modelVersion = !modelMatch ? 'не визначена' :
-        /pro\s*max|про\s*макс/.test(rawVariant) ? 'Pro Max' :
-        /^(pro|про)$/.test(rawVariant) ? 'Pro' :
-        /^(plus|плюс|\+)$/.test(rawVariant) ? 'Plus' :
-        /^(max|макс)$/.test(rawVariant) ? 'Max' :
-        /^(mini|міні|мини)$/.test(rawVariant) ? 'Mini' : 'базова';
+      const parsedVersion = getPhoneModelLabel(modelText, requestedGeneration);
+      const modelVersion = parsedVersion || 'не визначена';
+      const modelLabel = hasMultiplePhoneModels(modelText) ? 'Кілька моделей · ' + modelVersion : modelVersion;
       const searchable = [item.title, item.cardText, item.description].filter(Boolean).join(' ');
       const memoryMatch = searchable.match(/(?:^|[^\d])(64|128|256|512|1024)\s*(?:gb|гб)(?=$|[^\p{L}])/iu) ||
         (/(?:iphone|айфон)/iu.test(modelText) ? searchable.match(/(?:^|[^\d])(64|128|256|512|1024)(?!\s*(?:ram|озу|оператив))(?!\p{L})(?=$|[^\d])/iu) : null);
       const decision = !inCity ? 'відсів: місто не збігається' :
         accepted ? (results.find(result => result.url === url)?.capacityUnverified
-          ? 'прийнята; пам’ять не підтверджена' : 'прийнята') :
-        'відсів: ' + (match.reason || 'інший критерій');
+          ? 'прийнята; пам’ять не підтверджена'
+          : isRepairPartsListing(item.title) ? 'прийнята в список; на запчастини, без аналітики й сповіщень' : 'прийнята') :
+        'відсів: ' + (match.reason === 'wrong_product_type' ? 'accessory' : (match.reason || 'інший критерій'));
       return {
         position: index + 1, title: safeText(item.title, 120),
         price: item.isNegotiable ? (item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : '')) + ' · договірна' : (item.priceText || (item.price ? Number(item.price).toLocaleString('uk-UA') + ' грн' : 'не вказана')),
         city: safeText(item.locationDate ? String(item.locationDate).split(/\s*[-–—]\s*/)[0].split(',')[0] : (locationMatchesCardText(item.cardText, city) ? city : 'не визначено'), 80),
-        modelVersion,
-        memory: memoryMatch ? memoryMatch[1] + ' GB' : 'не визначена',
+        modelVersion: modelLabel,
+        memory: results.find(result => result.url === url)?.capacityUnverified ? 'не підтверджена' : (memoryMatch ? memoryMatch[1] + ' GB' : 'не визначена'),
         decision
       };
     });
@@ -1751,22 +1775,32 @@ async function runSearchDiagnostic(rawQuery, adminUserId) {
     const response = {
       success: true, requestId, at, kyivTime, source: 'diagnostic', parsedQuery: parsed.query,
       performance,
-      criteria: { model: criteria.modelTerm, memory: storageTerms, condition: criteria.condition,
+      category, accessoryIntent,
+      criteria: { model: criteria.modelTerm, modelScope: criteria.modelTerm ? (criteria.modelScope || 'exact') : 'none', memory: storageTerms, condition: criteria.condition,
         city, minPrice: criteria.minPrice, maxPrice: criteria.maxPrice, exclusions: criteria.excludeTerms },
       pages: pageTraces, stopReason,
       funnel: { parsed: parsedItems.length, afterDedup: parsedItems.length,
         afterCardParse: parsedItems.length, recommendationClassification: 'not_instrumented',
         afterCity: cityItems.length, ...funnel.counts,
         final: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length,
+        accessoriesExcluded: funnel.rejected.filter(entry => entry.stage === 'accessory').length,
+        versionCounts: results.reduce((counts, item) => {
+          const version = item.modelVersion || 'Невизначена';
+          counts[version] = (counts[version] || 0) + 1;
+          return counts;
+        }, {}),
         cityUnverified: cityItems.filter(item => !item.locationDate && locationMatchesCardText(item.cardText, city)).length },
       rejected: { cards: rejected.cards, omitted: rejected.omitted },
       results, cards, cardsOmitted: Math.max(0, parsedItems.length - cards.length), errors
     };
     console.log('[SEARCH_TRACE] ' + JSON.stringify({
       event: 'search_funnel', requestId, source: 'diagnostic', at,
+      category, accessoryIntent, modelScope: criteria.modelTerm ? (criteria.modelScope || 'exact') : 'none',
       parsed: parsedItems.length, afterDedup: parsedItems.length, afterCardParse: parsedItems.length,
       afterCity: cityItems.length, criteriaStages: funnel.counts,
       finalCount: results.length, capacityUnverified: results.filter(item => item.capacityUnverified).length,
+      accessoriesExcluded: funnel.rejected.filter(entry => entry.stage === 'accessory').length,
+      versionCounts: results.reduce((counts, item) => { const version = item.modelVersion || 'Невизначена'; counts[version] = (counts[version] || 0) + 1; return counts; }, {}),
       rejectedCards: rejected.cards, rejectedCardsOmitted: rejected.omitted,
       durationMs: Date.now() - startedAt
     }));
