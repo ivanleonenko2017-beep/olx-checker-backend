@@ -41,6 +41,7 @@ function summarizeCriteria(criteria = {}) {
     .filter(Boolean);
   return {
     model: safeText(criteria.modelTerm || '', 60),
+    modelScope: safeText(criteria.modelScope || 'exact', 16),
     memoryGb: [...new Set(capacity)].slice(0, 5),
     condition: safeText(criteria.condition || 'all', 12),
     city: safeText(criteria.city || '', 60),
@@ -111,7 +112,7 @@ function evaluateCriteriaFunnel(items, criteria = {}) {
     for (const item of current) {
       const result = applyCriteriaToListing(item, stageCriteria);
       if (result.matches) passed.push(item);
-      else rejected.push({ item, stage, reason: result.reason || stage + '_mismatch' });
+      else rejected.push({ item, stage: stage === 'model' && result.reason === 'wrong_product_type' ? 'accessory' : stage, reason: stage === 'model' && result.reason === 'wrong_product_type' ? 'accessory' : (result.reason || stage + '_mismatch') });
     }
     current = passed;
     counts['after_' + stage] = current.length;
