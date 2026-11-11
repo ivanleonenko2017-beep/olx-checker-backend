@@ -105,7 +105,7 @@ function formatDiagnosticMessages(data = {}) {
     'Виключення: ' + Number(f.after_excluded_words ?? 0),
     'Ціна: ' + Number(f.after_price ?? 0) + ' → стан: ' + Number(f.after_condition ?? 0),
     'Порядок конвеєра: ціна перед станом; класифікація рекомендацій OLX не інструментована.',
-    'Версії у видачі: ' + Object.entries(f.versionCounts || {}).map(([version, count]) => version + ' ' + count).join(' · ' || '—') +
+    'Версії у видачі: ' + Object.entries(f.versionCounts || {}).map(([version, count]) => version + ' ' + count).join(' · ') || '—' +
       '\n' + 'Підсумок: ' + Number(f.final || 0) +
       ' · місто не підтверджено: ' + Number(f.cityUnverified || 0)
   ].join('\n');
