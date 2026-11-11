@@ -2824,6 +2824,9 @@ async function runBackgroundWorker() {
           const modelVersionLine = item.modelVersion
             ? `📱 <b>Версія:</b> ${escapeTelegramHtml(item.modelVersion)}\n`
             : '';
+          const similarModelLine = item.similarModelMatch
+            ? '🔎 <b>Схожий варіант за моделлю (за вашим дозволом)</b>\\n'
+            : '';
           const safeLocation = escapeTelegramHtml(item.locationDate);
           const safeItemLink = escapeTelegramHtml(item.link);
           const notificationPrice = item.isNegotiable
@@ -2838,6 +2841,7 @@ async function runBackgroundWorker() {
               : `🔎 <b>Знайдено нове оголошення для фільтра “${safeFilterQuery}”</b>\n\n`) +
             `📌 <b>${safeTitle}</b>\n` +
             modelVersionLine +
+            similarModelLine +
             `💰 <b>Ціна:</b> ${escapeTelegramHtml(notificationPrice)} ${isCheap ? `🔥 (Нижче медіани на ${discount}%)` : ''}\n` +
             (isCheap && bargain.reliable
               ? `📊 <b>Медіана аналогів:</b> ${Number(bargain.referencePrice).toLocaleString('uk-UA')} грн • ${bargain.comparableCount} оголошень\n`
