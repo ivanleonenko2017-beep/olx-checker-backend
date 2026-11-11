@@ -316,6 +316,7 @@
         </div>
       </div>
 
+      <div id="modelVersionFilters" class="hidden flex flex-wrap gap-2"></div>
       <div id="results" class="space-y-3"></div>
     </div>
 
@@ -632,12 +633,18 @@
             <input type="checkbox" id="modalPhotosOnly" class="accent-emerald-400">
             Лише оголошення з фото
           </label>
-          <label class="flex items-start gap-2 text-[11px] text-gray-300">
-            <input type="checkbox" id="modalNotifySimilarModels" class="accent-emerald-400 mt-0.5">
-            <span>Сповіщати й про схожі моделі (Pro, Pro Max, Plus)
-              <span class="block text-[9px] text-gray-500 mt-0.5">За замовчуванням вимкнено. Місто, пам’ять, стан і ціна залишаються обов’язковими умовами.</span>
-            </span>
-          </label>
+          <div>
+            <label class="block text-[10px] text-gray-400 mb-1 font-medium">Версії iPhone для пошуку та сповіщень</label>
+            <select id="modalModelScope" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
+              <option value="all">Усі доступні версії покоління</option>
+              <option value="base">Лише базова модель</option>
+              <option value="plus">Лише Plus</option>
+              <option value="pro">Лише Pro</option>
+              <option value="pro max">Лише Pro Max</option>
+              <option value="mini">Лише Mini</option>
+            </select>
+            <p class="text-[9px] text-gray-500 mt-1">Місто, пам’ять, стан і ціна залишаються обов’язковими умовами.</p>
+          </div>
           <div>
             <label class="block text-[10px] text-gray-400 mb-1 font-medium">Вік оголошення</label>
             <select id="modalMaxAgeMinutes" class="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-xl text-xs text-white">
@@ -1266,7 +1273,7 @@
       document.getElementById('modalExcludeTerms').value = Array.isArray(ai.excludeTerms) ? ai.excludeTerms.join(', ') : (ai.excludeTerms || '');
       document.getElementById('modalPhotosOnly').checked = ai.photosOnly === true;
       document.getElementById('modalMaxAgeMinutes').value = String(ai.maxAgeMinutes || 0);
-      document.getElementById('modalNotifySimilarModels').checked = ai.notifySimilarModels === true;
+      document.getElementById('modalModelScope').value = ai.modelScope || 'all';
 
       openAddFilterModal(true);
     }
@@ -1284,7 +1291,7 @@
         document.getElementById('limitModal').classList.add('flex');
         return;
       }
-      if (!preserveSimilarOption) document.getElementById('modalNotifySimilarModels').checked = false;
+      if (!preserveSimilarOption) document.getElementById('modalModelScope').value = window.currentAiCriteria?.modelScope || 'all';
       document.getElementById('addFilterModal').classList.remove('hidden');
       document.getElementById('addFilterModal').classList.add('flex');
     }
@@ -1433,7 +1440,7 @@
         anyTerms: document.getElementById('modalAnyTerms').value,
         excludeTerms: document.getElementById('modalExcludeTerms').value,
         photosOnly: document.getElementById('modalPhotosOnly').checked,
-        notifySimilarModels: document.getElementById('modalNotifySimilarModels').checked === true,
+        modelScope: document.getElementById('modalModelScope').value || 'all',
         maxAgeMinutes: Number(document.getElementById('modalMaxAgeMinutes').value) || 0,
         bargainHunter: document.getElementById('modalBargainHunter').checked,
         maxDiscountPercent: Number(document.getElementById('modalDiscountPercent').value) || 15,
@@ -1727,8 +1734,13 @@
         const itemModelVersion = item.modelVersion
           ? `<div class="text-[10px] text-emerald-300 mt-1">Версія: ${escapeHtml(item.modelVersion)}</div>`
           : '';
-        const similarModelBadge = item.similarModelMatch
-          ? '<div class="text-[9px] text-sky-300 mt-1">Схожий варіант</div>'
+        const similarModelBadge = item.multipleModels
+          ? '<div class="text-[9px] text-sky-300 mt-1">Кілька моделей · версія за запитом</div>'
+          : item.similarModelMatch
+            ? '<div class="text-[9px] text-sky-300 mt-1">Схожий варіант</div>'
+            : '';
+        const partsOnlyBadge = item.partsOnly
+          ? '<div class="text-[10px] text-amber-300 mt-1">На запчастини · не входить до аналітики й сповіщень</div>'
           : '';
         const itemPrice = escapeHtml(displayListingPrice(item));
         const itemLocation = escapeHtml(item.locationDate || '');
@@ -1744,6 +1756,7 @@
                 <div class="text-xs font-semibold text-white truncate">${itemTitle}</div>
                 ${itemModelVersion}
                 ${similarModelBadge}
+                ${partsOnlyBadge}
                 <div class="text-base font-bold ${isCheap ? 'text-emerald-400' : 'text-white'} mt-1">${itemPrice}</div>
                 <div class="text-[10px] text-gray-400 mt-1 truncate">${itemLocation}</div>
                 ${capacityWarning}
@@ -1771,9 +1784,18 @@
       if (!box || !chips) return;
       const labels = [];
       const modelTerm = String(criteria.modelTerm || '');
-      const baseModel = modelTerm.match(/(?:iphone|айфон|іфон|ифон)\s*(\d{1,2})$/iu);
-      if (baseModel) labels.push('Товар: iPhone ' + baseModel[1] + ' (базова модель)');
-      else if (parsedQuery) labels.push('Товар: ' + parsedQuery);
+      const generation = modelTerm.match(/(?:iphone|айфон|іфон|ифон)\s*(\d{1,2})/iu)?.[1];
+      const scope = String(criteria.modelScope || 'exact').toLowerCase();
+      if (generation) {
+        const versionLabel = scope === 'all' ? 'усі версії'
+          : scope === 'base' ? 'базова модель'
+          : scope === 'pro max' ? 'Pro Max'
+          : scope === 'pro' ? 'Pro'
+          : scope === 'plus' ? 'Plus'
+          : scope === 'mini' ? 'Mini'
+          : getPhoneVersionLabelFromQuery(modelTerm);
+        labels.push('iPhone ' + generation + ' · ' + versionLabel);
+      } else if (parsedQuery) labels.push('Товар: ' + parsedQuery);
       if (criteria.city) labels.push('Місто: ' + criteria.city);
       if (criteria.minPrice) labels.push('Від ' + Number(criteria.minPrice).toLocaleString('uk-UA') + ' ₴');
       if (criteria.maxPrice) labels.push('До ' + Number(criteria.maxPrice).toLocaleString('uk-UA') + ' ₴');
@@ -1786,6 +1808,67 @@
       box.classList.remove('hidden');
     }
 
+    function getPhoneVersionLabelFromQuery(modelTerm) {
+      if (/\bpro[\s._-]*max\b|\bпромакс\b|\bпро[\s._-]*макс\b/iu.test(modelTerm)) return 'Pro Max';
+      if (/\bpro\b|\bпро\b/iu.test(modelTerm)) return 'Pro';
+      if (/\bplus\b|\bплюс\b|\+/iu.test(modelTerm)) return 'Plus';
+      if (/\bmini\b|\bміні\b|\bмини\b/iu.test(modelTerm)) return 'Mini';
+      return 'базова модель';
+    }
+
+    function renderModelVersionFilters(items, criteria) {
+      const container = document.getElementById('modelVersionFilters');
+      if (!container) return;
+      if (!criteria?.modelTerm) {
+        container.classList.add('hidden');
+        container.innerHTML = '';
+        return;
+      }
+      const versions = [
+        { key: 'all', label: 'Усі' }, { key: 'base', label: 'Базова' },
+        { key: 'plus', label: 'Plus' }, { key: 'pro', label: 'Pro' },
+        { key: 'pro max', label: 'Pro Max' }, { key: 'mini', label: 'Mini' }
+      ];
+      window.currentPhoneVersionItems = Array.isArray(items) ? items.slice() : [];
+      const counts = {
+        base: items.filter(item => item.modelVersion === 'Базова').length,
+        plus: items.filter(item => item.modelVersion === 'Plus').length,
+        pro: items.filter(item => item.modelVersion === 'Pro').length,
+        'pro max': items.filter(item => item.modelVersion === 'Pro Max').length,
+        mini: items.filter(item => item.modelVersion === 'Mini').length
+      };
+      const scope = String(criteria.modelScope || 'exact').toLowerCase();
+      const selected = scope === 'all' ? 'all' : scope;
+      window.activePhoneVersionFilter = selected;
+      container.innerHTML = versions.map(version => {
+        const count = version.key === 'all' ? items.length : counts[version.key] || 0;
+        const active = selected === version.key;
+        return '<button type="button" onclick="filterPhoneVersion(' + JSON.stringify(version.key) + ')" class="px-3 py-1.5 rounded-full border text-[10px] font-semibold ' +
+          (active ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-gray-900 text-gray-300 border-gray-700') +
+          '">' + version.label + ' · ' + count + '</button>';
+      }).join('');
+      container.classList.remove('hidden');
+    }
+
+    function filterPhoneVersion(version) {
+      window.activePhoneVersionFilter = version;
+      const items = window.currentPhoneVersionItems || [];
+      const map = { base: 'Базова', plus: 'Plus', pro: 'Pro', 'pro max': 'Pro Max', mini: 'Mini' };
+      const filtered = version === 'all' ? items : items.filter(item => item.modelVersion === map[version]);
+      const container = document.getElementById('modelVersionFilters');
+      if (container) container.querySelectorAll('button').forEach(button => {
+        const label = ({ all: 'Усі', base: 'Базова', plus: 'Plus', pro: 'Pro', 'pro max': 'Pro Max', mini: 'Mini' })[version] + ' ·';
+        const active = button.textContent.trim().startsWith(label);
+        button.classList.toggle('bg-emerald-400', active);
+        button.classList.toggle('text-black', active);
+        button.classList.toggle('border-emerald-300', active);
+        button.classList.toggle('bg-gray-900', !active);
+        button.classList.toggle('text-gray-300', !active);
+        button.classList.toggle('border-gray-700', !active);
+      });
+      currentSearchResults = filtered;
+      renderSearchResults(filtered);
+    }
     async function runSearch() {
       const inputVal = document.getElementById('searchInput').value.trim();
       if (!inputVal) return;
@@ -1871,20 +1954,30 @@
         }
         const exactItems = Array.isArray(data.items) ? data.items : [];
         const similarItems = Array.isArray(data.similarItems) ? data.similarItems : [];
-        if (exactItems.length === 0 && similarItems.length === 0) {
+        const combinedItems = [...exactItems, ...similarItems];
+        if (combinedItems.length === 0) {
+          document.getElementById('modelVersionFilters')?.classList.add('hidden');
           resultsDiv.innerHTML = '<div class="text-center text-gray-300 py-6 bg-gray-900 rounded-2xl border border-gray-800">' +
             escapeHtml(data.searchSummary?.message || 'За цими умовами оголошень не знайдено. Перевірте модель, пам’ять та інші умови.') + '</div>';
           analyticsDiv.classList.add('hidden');
           return;
         }
         window.lastAvgPrice = data.averagePrice;
-        currentSearchResults = [...exactItems, ...similarItems];
+        currentSearchResults = combinedItems;
         document.getElementById('avgPrice').innerText = data.averagePrice > 0 ? data.averagePrice.toLocaleString('uk-UA') + ' грн' : 'Недостатньо даних';
-        document.getElementById('itemsCount').innerText = 'Знайдено ' + (exactItems.length + similarItems.length) + ' оголошень';
+        document.getElementById('itemsCount').innerText = 'Знайдено ' + combinedItems.length + ' оголошень';
         analyticsDiv.classList.remove('hidden');
-        if (exactItems.length) renderSearchResults(exactItems, false, similarItems.length ? 'Точні збіги' : '');
-        else resultsDiv.innerHTML = '<div class="text-center text-amber-300 py-3">' + escapeHtml(data.searchSummary?.message || 'Точних збігів немає.') + '</div>';
-        if (similarItems.length) renderSearchResults(similarItems, exactItems.length > 0, 'Схожі варіанти');
+        const scopeCriteria = data.criteria || criteria;
+        if (scopeCriteria.modelTerm && scopeCriteria.modelScope === 'all') {
+          renderModelVersionFilters(exactItems, scopeCriteria);
+          currentSearchResults = exactItems;
+          renderSearchResults(exactItems);
+        } else {
+          renderModelVersionFilters(exactItems, scopeCriteria);
+          if (exactItems.length) renderSearchResults(exactItems, false, similarItems.length ? 'Точні збіги' : '');
+          else resultsDiv.innerHTML = '<div class="text-center text-amber-300 py-3">' + escapeHtml(data.searchSummary?.message || 'Точних збігів немає.') + '</div>';
+          if (similarItems.length) renderSearchResults(similarItems, exactItems.length > 0, 'Схожі варіанти');
+        }
       } catch (err) {
         console.error('[AI Search]', err);
         resultsDiv.innerHTML = '<div class="text-center text-red-400 py-4 bg-gray-900 rounded-2xl border border-gray-800">' +
