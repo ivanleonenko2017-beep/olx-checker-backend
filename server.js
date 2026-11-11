@@ -1439,6 +1439,7 @@ app.post('/api/filters', userAuthMiddleware, async (req, res) => {
     criteriaInput.minPrice = explicitMinPrice;
     criteriaInput.maxPrice = explicitMaxPrice;
     const criteria = normalizeCriteria(criteriaInput);
+    criteria.notifySimilarModels = submittedCriteria.notifySimilarModels === true;
 
     if (supabase) {
       try {
@@ -2712,15 +2713,23 @@ async function runBackgroundWorker() {
           }
           return { item, matches: false, reason: result.reason || 'criteria_mismatch' };
         });
-        const items = criteriaEvaluations.filter(result => result.matches).map(result => result.item);
+        const exactItems = criteriaEvaluations.filter(result => result.matches).map(result => result.item);
+        const explicitModelModifier = /(?:iphone|айфон|іфон|ифон)?\s*\d{1,2}\s*(?:pro\s*max|pro|max|plus|mini|\+|без\s+pro|без\s+прошк)/iu.test(String(filter.query || ''));
+        const similarItems = filter.criteria?.notifySimilarModels === true
+          ? findSimilarPhoneListings(locationEligibleItems, criteria, exactItems, { explicitModelModifier })
+          : [];
+        const similarLinks = new Set(similarItems.map(item => String(item.link || '').trim()));
+        const items = [...exactItems, ...similarItems];
         const rejectionCounts = criteriaEvaluations.reduce((counts, result) => {
-          if (!result.matches) counts[result.reason] = (counts[result.reason] || 0) + 1;
+          if (!result.matches && !similarLinks.has(String(result.item.link || '').trim())) {
+            counts[result.reason] = (counts[result.reason] || 0) + 1;
+          }
           return counts;
         }, {});
         const traceRejected = [
           ...dateRejected.map(item => ({ item, stage: 'date', reason: 'not_published_today_or_seen' })),
           ...cityRejected.map(item => ({ item, stage: 'city', reason: 'city_mismatch' })),
-          ...criteriaEvaluations.filter(result => !result.matches).map(result => ({
+          ...criteriaEvaluations.filter(result => !result.matches && !similarLinks.has(String(result.item.link || '').trim())).map(result => ({
             item: result.item, stage: result.reason === 'condition_mismatch' ? 'condition' :
               (result.reason === 'below_min_price' || result.reason === 'above_max_price' ? 'price' :
                 (result.reason === 'missing_required_term' ? 'memory_or_required_terms' :
@@ -2737,6 +2746,7 @@ async function runBackgroundWorker() {
           parsed: parsedItems.length, afterDedup: parsedItems.length, afterCardParse: parsedItems.length,
           afterDate: dateEligibleItems.length, afterCity: locationEligibleItems.length,
           afterCriteria: items.length,
+          similarModelMatched: similarItems.length,
           capacityUnverified: items.filter(item => item.capacityUnverified === true).length,
           cityUnverified: locationEligibleItems.filter(item => !item.locationDate).length,
           rejectedByReason: rejectionCounts,
@@ -2744,7 +2754,7 @@ async function runBackgroundWorker() {
           rejectedCardsOmitted: compactRejectedCards(traceRejected, 25).omitted,
           knownListings: knownLinks.size
         }));
-        console.log(`[Worker Diagnostics] filter=${filter.id} requestId=${searchRequestId} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} rejected=${JSON.stringify(rejectionCounts)} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
+        console.log(`[Worker Diagnostics] filter=${filter.id} requestId=${searchRequestId} parsed=${parsedItems.length} dateEligible=${dateEligibleItems.length} locationEligible=${locationEligibleItems.length} criteriaEligible=${items.length} similarModelMatched=${similarItems.length} rejected=${JSON.stringify(rejectionCounts)} known=${knownLinks.size} city="${requestedLocation}" sampleLocations=${JSON.stringify(parsedItems.slice(0, 5).map(item => String(item.locationDate || '').slice(0, 100)))}`);
         const { error: checkedAtError } = await supabase.from('filters')
           .update({ last_checked_at: new Date().toISOString() }).eq('id', filter.id);
         if (checkedAtError) {
