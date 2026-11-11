@@ -742,6 +742,8 @@ async function parseOlx(targetUrl, minPrice, maxPrice, query = '', requestedLoca
   const startedAt = new Date().toISOString();
   console.log('[SEARCH_TRACE] ' + JSON.stringify({
     event: 'search_start', requestId, at: startedAt, source, userHash,
+    category: traceContext.category || 'all_categories', accessoryIntent: traceContext.accessoryIntent === true,
+    modelScope: criteriaSummary.modelScope,
     queryHash: hashUserId(query, TELEGRAM_WEBHOOK_SECRET), criteria: criteriaSummary,
     requestedLocation: safeText(requestedLocation, 80),
     targetUrl: sanitizeSearchUrl(targetUrl), pageLimit
