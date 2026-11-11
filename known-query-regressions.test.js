@@ -36,6 +36,20 @@ test('D2: explicit Pro Max stays exact, including joined spelling', () => {
   }
 });
 
+test('D2b: joined Pro spellings and generation-specific Mini availability', () => {
+  for (const query of ['iPhone14pro', 'айфон 14про']) {
+    const parsed = parseNaturalLanguageQuery(query);
+    assert.equal(parsed.criteria.modelScope, 'pro', query);
+    assert.equal(applyCriteriaToListing({ title: 'iPhone 14 Pro 128GB', price: 18000 }, parsed.criteria).matches, true);
+  }
+  const any = parseNaturalLanguageQuery('любой iPhone 14');
+  assert.equal(any.criteria.modelScope, 'all');
+  const generation12 = parseNaturalLanguageQuery('iPhone 12');
+  assert.equal(generation12.criteria.modelScope, 'all');
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 12 Mini 64GB', price: 10000 }, generation12.criteria).matches, true);
+  assert.equal(applyCriteriaToListing({ title: 'iPhone 12 Plus 64GB', price: 10000 }, generation12.criteria).reason, 'model_mismatch');
+});
+
 test('D3: explicit negative Pro wording selects only the base iPhone', () => {
   const parsed = parseNaturalLanguageQuery('айфон 14 без про');
   assert.equal(parsed.criteria.modelScope, 'base');
