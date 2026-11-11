@@ -10,6 +10,7 @@ const {
   isNonPhoneOfferTitle
 } = require('./smart-search');
 const { evaluateCriteriaFunnel, summarizeCriteria } = require('./search-telemetry');
+const { formatDiagnosticMessages } = require('./admin-command-utils');
 
 test('D1: iPhone 14 Chernihiv defaults to all available versions', () => {
   const parsed = parseNaturalLanguageQuery('iPhone 14 Чернігів');
@@ -111,4 +112,16 @@ test('D8: server diagnostics expose the smartphone category and version counts',
   assert.match(adminUtils, /Категорія:/);
   assert.match(adminUtils, /аксесуари відсіяні/);
   assert.match(adminUtils, /Версії у видачі/);
+  const formatted = formatDiagnosticMessages({
+    category: 'mobile_phones',
+    criteria: { model: 'iPhone 14', modelScope: 'all' },
+    funnel: { parsed: 27, afterCity: 27, after_model: 10, accessoriesExcluded: 17,
+      versionCounts: { 'Базова': 2, Pro: 6, 'Pro Max': 2 }, final: 10 },
+    pages: [], cards: [], errors: []
+  }).join('\n');
+  assert.match(formatted, /Мобільні телефони/);
+  assert.match(formatted, /scope: all/);
+  assert.match(formatted, /аксесуари відсіяні: 17/);
+  assert.match(formatted, /Pro 6/);
+  assert.match(formatted, /Підсумок: 10/);
 });
