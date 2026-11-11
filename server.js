@@ -1052,7 +1052,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     const accessoryIntent = isAccessoryIntent(rawQuery || '');
     const searchCategory = /\/mobilnye-telefony-smartfony\//i.test(targetUrl) ? 'mobile_phones' : accessoryIntent ? 'accessories' : 'all_categories';
     const searchTrace = { source: 'manual', userId: req.telegramUser.id, category: searchCategory, accessoryIntent, criteria: {
-      modelTerm: criteria.modelTerm || '', modelScope: criteria.modelScope || 'exact', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
+      modelTerm: criteria.modelTerm || '', modelScope: criteria.modelTerm ? (criteria.modelScope || 'exact') : 'none', includeTerms: criteria.includeTerms, anyTerms: criteria.anyTerms,
       excludeTerms: criteria.excludeTerms, condition: criteria.condition, city: criteria.city,
       minPrice: criteria.minPrice, maxPrice: criteria.maxPrice
     }};
@@ -1198,7 +1198,7 @@ app.get('/api/search', userAuthMiddleware, async (req, res) => {
     }, {});
     console.log('[SEARCH_TRACE] ' + JSON.stringify({
       event: 'search_funnel', requestId, source: 'manual', at: new Date().toISOString(),
-      category: searchCategory, accessoryIntent, modelScope: criteria.modelScope || 'exact', versionCounts,
+      category: searchCategory, accessoryIntent, modelScope: criteria.modelTerm ? (criteria.modelScope || 'exact') : 'none', versionCounts,
       accessoriesExcluded: hiddenAccessoriesCount,
       parsed: parsedItems.length, afterDedup: parsedItems.length,
       afterCardParse: parsedItems.length, afterCity: locationItems.length,
