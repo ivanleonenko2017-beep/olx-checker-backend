@@ -74,7 +74,8 @@ test('OLX parser stores title, numeric price, and negotiable flag as separate fi
   assert.match(source, /const title = cleanOlxCardTitle\(rawTitle, sourcePriceText\)/);
   assert.match(source, /priceText: numericPrice > 0/);
   assert.match(source, /isNegotiable,/);
-  assert.match(source, /notificationPrice/);
+  const notificationSource = fs.readFileSync(path.join(__dirname, 'telegram-notification.js'), 'utf8');
+  assert.match(notificationSource, /const notificationPrice =/);
 });
 
 

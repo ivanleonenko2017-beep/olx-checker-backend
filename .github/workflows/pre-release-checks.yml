@@ -2,7 +2,7 @@ name: Pre-release checks
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "pre-release/**"]
   push:
     branches: [main, "pre-release/**", "feature/smart-search-v1"]
 
@@ -17,3 +17,4 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: node --check server.js
       - run: npm test
+      - run: npm run test:boot
