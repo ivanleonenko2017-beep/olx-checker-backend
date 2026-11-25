@@ -833,3 +833,91 @@ Render application/request logs за 09.11.2026 18:45–19:15 UTC у цьому 
 ### Вердикт после PR #68–#71
 
 **ТОЛЬКО МЯГКИЙ ЗАПУСК.** Все изменения A–D прошли CI, влиты отдельными PR и автоматически задеплоены; последний Render deploy — Live, стартовые логи чистые. Фикстуры покрывают предоставленные заголовки и ожидаемые числа. Но живой пользовательский acceptance-тест в Telegram, реальное уведомление по новому объявлению и проверка визуального поведения владельцем ещё не выполнены. Поэтому полный коммерческий запуск и фактические 10/17 в production не подтверждены.
+
+
+---
+
+## Продовження аудиту після перерваного проходу — 25.11.2026
+
+Цей розділ доповнює попередні перевірки, не замінюючи їх.
+
+### GitHub, CI та Render
+
+Production branch: `pre-release/1.0.0-hardening`.
+
+| PR | Зміна | Merge commit | Render deploy | Факт |
+|---|---|---|---|---|
+| #73 | Темна тема у звичайному браузері | `50aa9140072dadea24b84b3ad295abd05e33c69b` | `dep-dbsej195efls73enaheg` | Live до наступного релізного проходу |
+| #74 | /testnotify, production boot smoke | `b43e802e964201b0358d372df27737cda72dd697` | `dep-dc3dlm0473hc73fl5log` | Розгорнуто |
+| #75 | Обмеження позитивного/негативного кешу описів | `7a4275614ecc1177d2615e128a05a36284b27639` | `dep-dc3dnt0jo6nc73ekhkog` | Розгорнуто |
+| #76 | Зменшення пікового HTML-парсингу | `2d6c94bf87306815bfb7cef44ce0229612a4c0ef` | `dep-dc3dp5dbedkc73dkfmig` | Розгорнуто |
+| #77 | Виправлення guard для порожньої сторінки | `9662dc7b9294c9f48c3e41634e3c98386b8130e5` | `dep-dc3dro0ae00c738oja90` | Розгорнуто |
+| #78 | RSS/heap у /status, memory alert, жорсткі ліміти map та webhook concurrency | `8ad55196d3f74e4b08551ebfb2894b4548a1ce4c` | `dep-dc3e070ae00c738opml0` | Розгорнуто |
+| #81 | /testnotify надсилає лише в приватний чат адміністратора | `9f26ee5c71067a9182c888554c1ce273d8ad1c94` | `dep-dc3e1qrm8hqs73c0mdk0` | Розгорнуто |
+| #83 | Parser memory regression probe у CI | `d68fe8da55546f7215ad358d86d7cd35d60dee5a` | `dep-dc3e2o4s728c738vdahg` | Розгорнуто |
+| #84 | Історія seen/price читається лише для поточних результатів, batch до 50 | `cdb5cb44eac8a2f81ab5b3ef46e1da0cc220389d` | `dep-dc3e4sss728c738vh0dg` | Розгорнуто |
+| #85 | /terms, /privacy і Mini App використовують єдине джерело юридичних чернеток | `f8339d3495746c2732b014bb9a5e3bc8ea4bc255` | `dep-dc3e950jo6nc73elfo00` | Live |
+
+Поточний підтверджений Live commit на момент цього доповнення: `f8339d3495746c2732b014bb9a5e3bc8ea4bc255`, deploy `dep-dc3e950jo6nc73elfo00`. Перед наступною зміною повторно звірити стан Render.
+
+**Точка відкату перед цим доповненням:** deploy `dep-dc3e950jo6nc73elfo00`, commit `f8339d3495746c2732b014bb9a5e3bc8ea4bc255`. Попередня здорова точка до PR #85: deploy `dep-dc3e4sss728c738vh0dg`, commit `cdb5cb44eac8a2f81ab5b3ef46e1da0cc220389d`. Історія Git не переписувалась, захист гілки не обходився.
+
+### Пам'ять та стабільність
+
+- 19.11.2026 о 12:32:30 UTC Render зафіксував `FATAL ERROR: Ineffective mark-compacts near heap limit — JavaScript heap out of memory`; о 12:32:32 процес завершився з exit code 134, о 12:32:42 Render знову показав сервер доступним.
+- Ліміт пам'яті Render у доступних метриках: 536 870 900 байт (512 MiB).
+- Найближчий попередній семпл перед падінням: 244 781 060 байт (233,4 MiB) о 12:25 UTC. Семпли дискретні й не показують пікове значення безпосередньо перед OOM.
+- Після перезапуску семпли були близько 48 MiB RSS. Після виправлень 25.11 семпли нового інстансу доходили приблизно до 212,2 MiB RSS (близько 41,4% від 512 MiB). Це коротке спостереження після деплою, не 24–72-годинний soak test.
+- Пошук Render logs за 19–25.11 знайшов один OOM-запис 19.11; нових `heap out of memory` після нього не знайдено. За останні 24 години у Render Events не виявлено нового `server_failed`; фактичний лічильник рестартів не зберігається в БД.
+- Порогове сповіщення адміністраторам додано на RSS 410 MiB, перевірка раз на хвилину, throttle 30 хвилин. /status показує RSS, heapUsed та uptime; uptime — індикатор часу поточного процесу, а не історичний лічильник рестартів.
+- Кеш описів: максимум 500 записів; успішний TTL 10 хвилин, негативний TTL 1 хвилина.
+- Rate-limit maps: жорсткий максимум 1 000 ключів на map; прострочені записи видаляються під час нових звернень (після 10 інтервалів).
+- Telegram webhook in-flight Set: максимум 5 одночасних update; надлишкові записи лишаються в durable queue для наступного poll.
+- Durable webhook poll: до 5 рядків за цикл; цикл опитування 15 секунд. Внутрішні таймери — webhook poll та memory monitor, по одному на процес.
+- OLX result page: відповідь обмежена 5 MiB; detail page — 2 MiB. HTML-рядок і Axios response body відпускаються перед/після створення Cheerio DOM. Сторінки обробляються послідовним циклом, максимум 3 сторінки за пошук (не 3 паралельні завантаження). Parsed results обмежені 600 елементами.
+- Worker history: seen/price запити робляться лише для поточних parsed links партіями до 50; нормалізовані Set/Map обмежені поточним набором до 600 посилань. Тимчасові масиви та Sets парсера живуть лише протягом одного запиту/сторінки. Список фільтрів і map лічильників користувачів створюються на один цикл worker і не зберігаються між циклами; їхній обсяг залежить від фактичної кількості активних фільтрів.
+- Memory CI probe: HTML fixture 3 565 158 байт; 50 послідовних проходів; 10 додаткових jobs з обмеженням concurrency=2; peak heap 24,5 MiB; final heap 9,9 MiB; heap growth після GC 0,5 MiB; peak RSS 83,1 MiB; final RSS 69,1 MiB; RSS growth 4,1 MiB. Пороги: heap growth 48 MiB, RSS growth 96 MiB. Це тест очищення HTML + Cheerio, а не живий OLX HTTP stress test.
+- Висновок: після оптимізацій немає ознаки, що поточні семпли вже вичерпують 512 MiB, але історичний OOM і короткий період спостереження не дозволяють довести стабільність під реальною тривалою нагрузкою. Не змінювати Render plan автоматично; спостерігати 24–72 години.
+
+### CI та секрети
+
+- Обов'язковий Pre-release workflow виконує `npm ci --ignore-scripts`, `node --check server.js`, `npm test`, `npm run test:boot`, `npm run test:memory`.
+- Boot smoke запускає `NODE_ENV=production` з порожніми Supabase URL/key, Telegram token, вимкненими worker та webhook registration; перевіряє розв'язання всіх відносних require та `GET /health → 200`. Він не підключається до production Supabase.
+- 22 поточні test-файли перевірені на виклики Supabase client, production URL/keys та зовнішні HTTP-виклики: таких викликів у test-файлах не знайдено. Pattern scan основних source/workflow файлів не виявив вбудованих токенів/приватних ключів. `.env.example` у production branch відсутній.
+- Повний скан Git history та GitHub Secret Scanning alerts цим підключенням не доступні. Тому історію не можна оголосити чистою; якщо GitHub Secret Scanning покаже alert, власнику потрібно ротувати відповідний секрет. Історію не переписувати.
+- Старий PR #20 прямо попереджає, що тестова інфраструктура використовує ту саму production Supabase БД. Його не вливати й не запускати. PR #19 має зміни платіжної/Monobank інтеграції; не вливати без окремого аудиту. Інші старі PR описані в поточному звіті власнику.
+
+### Supabase — read-only повторна перевірка
+
+Проєкт `ovblyievvseuugpbmxjy`: `ACTIVE_HEALTHY`, PostgreSQL 17.11, регіон eu-central-1. Прочитано без міграцій і змін даних.
+
+| Таблиця | Рядків на 25.11.2026 |
+|---|---:|
+| users | 5 |
+| filters | 1 |
+| seen_ads | 5 |
+| referrals | 0 |
+| referral_logs | 0 |
+| payments | 0 |
+| telegram_webhook_updates | 0 |
+
+Попередній зафіксований стан був users=5, filters=0. Поточний users=5, filters=1; ознак втрати користувачів немає. Наявність одного фільтра замість нуля означає, що між вимірами з'явився запис; цей аудит не визначає, хто його створив.
+
+Усі 14 таблиць public мають RLS enabled. У pg_policies для цих таблиць 0 policy rows; `anon` та `authenticated` мають schema USAGE, але не мають SELECT privilege на users/filters/payments; `service_role` використовується сервером. Відсутність SELECT у клієнтських ролей перевірена безпосередньо. Backup/PITR status не доступний через підключені read-only інструменти; перевірити в Supabase Dashboard до публічного запуску. Жодної міграції цього проходу не застосовано.
+
+### Фази 2–9 попереднього релізного плану
+
+| Фаза | Результат | Що ще не доведено |
+|---|---|---|
+| 2. Пошук і фільтри | Є regression fixtures: iPhone 14 Chernihiv (10 телефонів: 2 base / 6 Pro / 2 Pro Max, 17 accessories виключені), Pro Max only, без Pro, accessory intent, phone with included accessory, iPhone 15 256 Chernihiv (5 Pro/Pro Max, 4 memory confirmed, 1 unconfirmed). | Немає підтвердження цих п'яти запитів на живій OLX у production після останніх змін. |
+| 3. Уведомлення | Є filter processing lease, unique index `seen_ads(filter_id,ad_link)`, 403 класифікується та записує `telegram_blocked_at`; заблокований користувач пропускається worker. | Немає інтеграційного тесту реальної доставки: new→1, repeat→0, two workers→1, 403→inactive. Це перевіряється власником/окремим ізольованим test DB. |
+| 4. Тарифи й Premium | Є unit tests для Trial 4 дні, Free/Trial/Premium filter limits та fail-closed Premium bypass у production/Render. | Немає повного Telegram end-to-end тесту всіх меж тарифів. |
+| 5. Реферали | SQL function перевіряє self-referral, already-attributed/duplicate invitee, блокує обидва user rows у стабільному порядку та має unique conflict guard. | Немає ізольованого DB concurrency test для referral race; production DB для тесту не використовувати. |
+| 6. Адмінка | Адмінські endpoints захищені server-side; /testnotify admin-only, 1/хв, приватний чат адміністратора, без DB write. /status має пам'ять та webhook/worker status. | Реальний /testnotify і /status має викликати власник у Telegram. Масову розсилку не запускати. |
+| 7. UI | Темна standalone тема виправлена; CSS має min-height 44px для загальних кнопок/полів, фокус-стилі та адаптацію. | Повні скриншоти 360/390/430 px не зняті; WCAG AA контраст не виміряний; skeleton loading не підтверджений; у UI ще є emoji-іконки; деякі вузькі icon-only кнопки потребують окремої перевірки фактичної hit-area. |
+| 8. Юридичне та оплата | PR #85 додав /terms і /privacy, Mini App Documents tab бере дані з одного джерела, усі документи мають статус draft. | Юрист не перевіряв; реквізити власника не заповнені; реальний Stars платіж/refund не виконано; платіжні перемикачі не змінювалися. |
+| 9. Реліз і операції | Додано memory probe, production boot smoke, rollback інструкції та окремий soft-launch план у супровідній документації. | Немає 24–72 годин навантажувального спостереження, підтвердженого backup/PITR, ручного Telegram acceptance і підтвердження production Vercel URL. |
+
+### Рішення щодо release candidate
+
+Тег `v1.0.0-rc.1` та GitHub Release не створюються: критерії повного release candidate не виконані. Технічний обмежений тест 5–20 довірених користувачів можливий лише після ручного Telegram acceptance власником; публічний комерційний запуск — ні.
