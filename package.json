@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "test:boot": "node boot-smoke.js"
+    "test:boot": "node boot-smoke.js",
+    "test:memory": "node --expose-gc memory-load-probe.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
