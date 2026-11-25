@@ -50,7 +50,9 @@ test('admin testnotify is authenticated, rate-limited, and sends only to the inv
   assert.ok(authIndex >= 0 && handlerIndex > authIndex);
   const handler = source.slice(handlerIndex, source.indexOf("if (command === 'sub' || command === 'ref')", handlerIndex));
   assert.match(handler, /consumeRateLimit\(testNotificationRateLimits, adminKey\)/);
-  assert.match(handler, /sendTelegramPhoto\(\s*chatId/);
+  assert.match(handler, /sendTelegramPhoto\(\s*senderId/);
+  assert.match(handler, /sendTelegramMessage\(senderId/);
+  assert.doesNotMatch(handler, /chatId/);
   assert.doesNotMatch(handler, /\.from\(/);
   assert.doesNotMatch(handler, /filter\.user_id/);
 });
