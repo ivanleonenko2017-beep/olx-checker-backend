@@ -21,3 +21,13 @@ test('OLX parser markup cleanup handles empty input and multiline script tags', 
   const cleaned = stripOlxNonContentMarkup('<script>\n large \n payload\n</script><div>card</div>');
   assert.equal(cleaned, '<div>card</div>');
 });
+
+test('production parser caps OLX response size and drops raw HTML before Cheerio parsing', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /maxContentLength: 5 \* 1024 \* 1024/);
+  assert.match(source, /response\.data = null/);
+  assert.match(source, /stripOlxNonContentMarkup\(html\)/);
+  assert.match(source, /html = ''/);
+});
