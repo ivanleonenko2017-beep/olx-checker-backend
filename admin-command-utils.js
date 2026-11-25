@@ -10,15 +10,16 @@ function safe(value, max = 180) {
     .replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-function consumeRateLimit(map, key, now = Date.now(), intervalMs = 60000) {
-  const previous = map.get(key) || 0;
-  if (now - previous < intervalMs) return false;
+function consumeRateLimit(map, key, now = Date.now(), intervalMs = 60000, maxEntries = 1000) {
+  const previous = map.get(key);
+  if (Number.isFinite(previous) && now - previous < intervalMs) return false;
+  map.delete(key);
   map.set(key, now);
-  if (map.size > 1000) {
-    for (const [entry, timestamp] of map) {
-      if (now - timestamp > intervalMs * 10) map.delete(entry);
-    }
+  for (const [entry, timestamp] of map) {
+    if (!Number.isFinite(timestamp) || now - timestamp > intervalMs * 10) map.delete(entry);
   }
+  const limit = Math.max(1, Math.floor(Number(maxEntries) || 1000));
+  while (map.size > limit) map.delete(map.keys().next().value);
   return true;
 }
 
@@ -151,13 +152,30 @@ function translateTelegramWebhookError(value) {
     : 'Telegram повідомив про помилку webhook.';
 }
 
+function formatMemoryAlert(data = {}) {
+  const toMb = value => Number.isFinite(Number(value)) ? (Number(value) / 1048576).toFixed(1) : '—';
+  const uptime = Number(data.uptimeSeconds || 0);
+  return [
+    '<b>⚠️ ЗНАЙДЕНО · Високе споживання пам’яті</b>',
+    '<b>RSS:</b> ' + toMb(data.rssBytes) + ' МБ',
+    '<b>Heap used:</b> ' + toMb(data.heapUsedBytes) + ' МБ',
+    '<b>Поріг RSS:</b> ' + toMb(data.thresholdBytes) + ' МБ',
+    '<b>Час роботи процесу:</b> ' + Math.floor(uptime / 3600) + ' год ' + Math.floor((uptime % 3600) / 60) + ' хв'
+  ].join('\\n');
+}
+
 function formatStatusMessage(s = {}) {
   const webhook = s.webhook || {};
   const worker = s.worker || {};
+  const memory = s.memory || {};
+  const rss = Number(memory.rssMb);
+  const heapUsed = Number(memory.heapUsedMb);
   return [
     '<b>ЗНАЙДЕНО · Статус сервісу</b>',
     '<b>Коміт:</b> ' + escapeTelegramHtml(safe(s.commit || 'недоступний', 48)),
     '<b>Час роботи:</b> ' + escapeTelegramHtml(safe(s.uptime || 'невідомо', 40)),
+    '<b>Пам’ять процесу:</b> RSS ' + (Number.isFinite(rss) ? rss.toFixed(1) : '—') +
+      ' МБ · heapUsed ' + (Number.isFinite(heapUsed) ? heapUsed.toFixed(1) : '—') + ' МБ',
     '<b>Фоновий воркер:</b> останній успішний цикл ' +
       escapeTelegramHtml(safe(worker.lastSuccessAt || 'ще не зафіксовано', 48)) +
       ', фільтрів: ' + Number(worker.processedFilters || 0),
@@ -232,6 +250,7 @@ module.exports = {
   splitTelegramMessages,
   formatDiagnosticMessages,
   formatStatusMessage,
+  formatMemoryAlert,
   translateTelegramWebhookError,
   maskTelegramId,
   formatSubscriptionMessage,

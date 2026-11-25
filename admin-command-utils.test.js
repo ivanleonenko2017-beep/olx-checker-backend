@@ -7,7 +7,7 @@ const path = require('node:path');
 const { deriveAccess } = require('./access-policy');
 const {
   consumeRateLimit, isAdminCommandAuthorized, splitTelegramMessages,
-  formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, maskTelegramId, translateTelegramWebhookError
+  formatDiagnosticMessages, formatStatusMessage, formatMemoryAlert, formatSubscriptionMessage, formatReferralMessage, maskTelegramId, translateTelegramWebhookError
 } = require('./admin-command-utils');
 
 test('admin command authorization rejects missing and ordinary users', async () => {
@@ -254,4 +254,48 @@ test('Mini App and admin status contain no known Russian UI phrases', () => {
   assert.doesNotMatch(html, russianUi);
   assert.doesNotMatch(admin, russianUi);
   assert.doesNotMatch(server, /Ошибка проверки initData|HTTP статус не определён|не удалось получить getWebhookInfo|не определён/iu);
+});
+
+test('admin rate limit map has a hard maximum even when all keys are fresh', () => {
+  const limits = new Map();
+  for (let index = 0; index < 1200; index++) {
+    assert.equal(consumeRateLimit(limits, 'admin-' + index, 100000 + index), true);
+  }
+  assert.equal(limits.size, 1000);
+  assert.equal(limits.has('admin-0'), false);
+  assert.equal(limits.has('admin-1199'), true);
+});
+
+test('admin status reports RSS and heapUsed in MB without restart-count claims', () => {
+  const result = formatStatusMessage({
+    uptime: '2ч 3м',
+    memory: { rssMb: 64.25, heapUsedMb: 22.5 },
+    webhook: { host: 'example.onrender.com', pendingUpdates: 0, lastError: 'немає' }
+  });
+  assert.match(result, /RSS 64\.3 МБ · heapUsed 22\.5 МБ/);
+  assert.match(result, /Час роботи/);
+  assert.doesNotMatch(result, /кількість перезапусків/);
+});
+
+test('memory alert formatter reports threshold and process memory without secrets', () => {
+  const result = formatMemoryAlert({
+    rssBytes: 430 * 1048576,
+    heapUsedBytes: 200 * 1048576,
+    thresholdBytes: 410 * 1048576,
+    uptimeSeconds: 7260
+  });
+  assert.match(result, /RSS:<\/b> 430\.0 МБ/);
+  assert.match(result, /Heap used:<\/b> 200\.0 МБ/);
+  assert.match(result, /Поріг RSS:<\/b> 410\.0 МБ/);
+  assert.match(result, /2 год 1 хв/);
+  assert.doesNotMatch(result, /bot\d+:/);
+});
+
+test('memory monitor uses a 410 MiB threshold and a 30-minute alert throttle', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /MEMORY_ALERT_THRESHOLD_BYTES = 410 \* 1024 \* 1024/);
+  assert.match(source, /MEMORY_ALERT_COOLDOWN_MS = 30 \* 60 \* 1000/);
+  assert.match(source, /memory\.rss < MEMORY_ALERT_THRESHOLD_BYTES/);
+  assert.match(source, /process\.memoryUsage\(\)\.heapUsed/);
+  assert.match(source, /setInterval\(\(\) => \{\s*void checkProcessMemoryPressure/);
 });

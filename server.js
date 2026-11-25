@@ -14,7 +14,7 @@ const { escapeTelegramHtml } = require('./telegram-html');
 const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./telegram-delivery-utils');
 const { encryptTelegramUpdate, decryptTelegramUpdate, isValidTelegramWebhookSecret, isDuplicateWebhookUpdate } = require('./telegram-webhook-queue');
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
-const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, translateTelegramWebhookError } = require('./admin-command-utils');
+const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatMemoryAlert, formatSubscriptionMessage, formatReferralMessage, translateTelegramWebhookError } = require('./admin-command-utils');
 const { buildListingNotification } = require('./telegram-notification');
 const { getBoundedTtlCacheValue, setBoundedTtlCacheValue } = require('./bounded-ttl-cache');
 const { stripOlxNonContentMarkup } = require('./olx-html-utils');
@@ -855,9 +855,13 @@ async function fetchListingDescription(inputUrl) {
       headers: { ...HEADERS, Referer: 'https://www.olx.ua/' },
       timeout: 8000,
       maxRedirects: 0,
+      maxContentLength: 2 * 1024 * 1024,
       validateStatus: status => status >= 200 && status < 300
     });
-    const $ = cheerio.load(String(response.data || ''));
+    let detailHtml = String(response.data || '');
+    response.data = null;
+    const $ = cheerio.load(detailHtml);
+    detailHtml = '';
     let description = $('[data-testid="ad-description"], [data-cy="ad-description"], [data-testid*="description"], [class*="description"]').first().text().trim();
     const contextParts = [];
     const pageTitle = $('h1').first().text().trim() ||
@@ -2278,6 +2282,10 @@ async function processTelegramUpdate(update) {
         commit, uptime, supabaseOk, webhook,
         testPremiumBypassConfigured: process.env.ENABLE_TEST_PREMIUM_BYPASS === 'true',
         testPremiumBypassEffective: isTestPremiumBypassEnabled(process.env),
+        memory: {
+          rssMb: process.memoryUsage().rss / 1048576,
+          heapUsedMb: process.memoryUsage().heapUsed / 1048576
+        },
         worker: { lastSuccessAt: workerLastSuccessAt ? new Intl.DateTimeFormat('uk-UA', { timeZone: 'Europe/Kyiv', dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(new Date(workerLastSuccessAt)) : null, processedFilters: workerLastProcessedFilters },
         lastOlxStatus: lastOlxRequestStatus
       });
@@ -2558,6 +2566,7 @@ async function processTelegramUpdate(update) {
 }
 
 const telegramWebhookInFlight = new Set();
+const MAX_TELEGRAM_WEBHOOK_IN_FLIGHT = 5;
 let telegramWebhookQueueDrainRunning = false;
 
 function encryptQueuedTelegramUpdate(update) {
@@ -2571,6 +2580,10 @@ function decryptQueuedTelegramUpdate(payload) {
 async function processTelegramWebhookQueueRow(row) {
   const updateId = Number(row?.update_id);
   if (!Number.isSafeInteger(updateId) || telegramWebhookInFlight.has(updateId)) return;
+  // Incoming updates are durably queued before this function is scheduled.
+  // Leave excess rows pending for the bounded poller instead of retaining an
+  // unbounded number of concurrent update objects in process memory.
+  if (telegramWebhookInFlight.size >= MAX_TELEGRAM_WEBHOOK_IN_FLIGHT) return;
   telegramWebhookInFlight.add(updateId);
   const attempts = Number(row.attempts || 0) + 1;
   try {
@@ -2983,6 +2996,32 @@ async function runBackgroundWorker() {
     isWorkerRunning = false;
   }
 }
+
+const MEMORY_ALERT_THRESHOLD_BYTES = 410 * 1024 * 1024;
+const MEMORY_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
+let lastMemoryAlertAt = 0;
+
+async function checkProcessMemoryPressure(now = Date.now()) {
+  const memory = process.memoryUsage();
+  if (memory.rss < MEMORY_ALERT_THRESHOLD_BYTES || now - lastMemoryAlertAt < MEMORY_ALERT_COOLDOWN_MS) return false;
+  lastMemoryAlertAt = now;
+  const message = formatMemoryAlert({
+    rssBytes: memory.rss,
+    heapUsedBytes: memory.heapUsed,
+    thresholdBytes: MEMORY_ALERT_THRESHOLD_BYTES,
+    uptimeSeconds: Math.floor(process.uptime())
+  });
+  const adminIds = [...new Set(ADMIN_IDS)].filter(id => Number.isSafeInteger(id) && id > 0);
+  for (const adminId of adminIds) await sendTelegramMessage(adminId, message);
+  return true;
+}
+
+const memoryMonitorTimer = setInterval(() => {
+  void checkProcessMemoryPressure().catch(error => {
+    console.warn('[Memory monitor] Admin alert failed:', safeText(error.code || error.response?.status || 'delivery_failed', 48));
+  });
+}, 60000);
+if (typeof memoryMonitorTimer.unref === 'function') memoryMonitorTimer.unref();
 
 const ENABLE_BACKGROUND_WORKER = (process.env.ENABLE_BACKGROUND_WORKER || 'true').toLowerCase() !== 'false';
 if (ENABLE_BACKGROUND_WORKER) {
