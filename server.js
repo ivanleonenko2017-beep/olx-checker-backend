@@ -15,6 +15,7 @@ const { getTelegramRetryDelaySeconds, isTelegramBlockedError } = require('./tele
 const { encryptTelegramUpdate, decryptTelegramUpdate, isValidTelegramWebhookSecret, isDuplicateWebhookUpdate } = require('./telegram-webhook-queue');
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
 const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, translateTelegramWebhookError } = require('./admin-command-utils');
+const { buildListingNotification } = require('./telegram-notification');
 
 const app = express();
 app.disable('x-powered-by');
@@ -1657,6 +1658,7 @@ app.get('/api/legal/privacy', (_req, res) => {
 const searchDiagnosticRateLimits = new Map();
 const botStatusRateLimits = new Map();
 const accountAuditRateLimits = new Map();
+const testNotificationRateLimits = new Map();
 
 async function runSearchDiagnostic(rawQuery, adminUserId) {
   const requestId = crypto.randomBytes(6).toString('hex');
@@ -2035,7 +2037,7 @@ async function processTelegramUpdate(update) {
     const chatId = msg.chat.id;
     const text = msg.text || '';
   
-    const adminCommandMatch = text.match(/^\/(diag|status|sub|ref)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+    const adminCommandMatch = text.match(/^\/(diag|status|sub|ref|testnotify)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
     if (adminCommandMatch) {
       const command = adminCommandMatch[1].toLowerCase();
       const senderId = msg.from?.id;
@@ -2045,6 +2047,37 @@ async function processTelegramUpdate(update) {
       }
       const adminKey = hashUserId(senderId, TELEGRAM_WEBHOOK_SECRET) || 'admin';
   
+      if (command === 'testnotify') {
+        if (!consumeRateLimit(testNotificationRateLimits, adminKey)) {
+          await sendTelegramMessage(chatId, 'Команда /testnotify доступна не частіше одного разу на хвилину.');
+          return;
+        }
+        const sampleItem = {
+          title: 'iPhone 15 Pro Max 256 GB — тестове оголошення',
+          price: 28999,
+          priceText: '28 999 грн',
+          isNegotiable: false,
+          link: 'https://www.olx.ua/uk/list/q-iphone-15-pro-max-256/',
+          rawImgUrl: '',
+          locationDate: 'Чернігів · сьогодні',
+          modelVersion: 'iPhone 15 Pro Max',
+          capacityUnverified: false
+        };
+        const notification = buildListingNotification({
+          item: sampleItem,
+          filter: { query: 'iPhone 15 Pro Max 256 GB · Чернігів' },
+          serverUrl: SERVER_URL,
+          testMode: true
+        });
+        const delivered = await sendTelegramPhoto(
+          chatId, notification.photoToSend, notification.text, notification.keyboard
+        );
+        if (!delivered) {
+          await sendTelegramMessage(chatId, 'Не вдалося надіслати тестове сповіщення. Перевірте доступність Telegram та спробуйте пізніше.');
+        }
+        return;
+      }
+
       if (command === 'sub' || command === 'ref') {
         const targetRaw = String(adminCommandMatch[2] || '').trim();
         if (!/^\d{1,20}$/.test(targetRaw) || !Number.isSafeInteger(Number(targetRaw)) || Number(targetRaw) <= 0) {
@@ -2876,49 +2909,18 @@ async function runBackgroundWorker() {
           const isCheap = bargain.isBargain;
           const discount = isCheap ? (bargain.discountPercent ?? 0) : 0;
 
-          const safeFilterQuery = escapeTelegramHtml(filter.query);
-          const safeTitle = escapeTelegramHtml(item.title);
-          const modelVersionLine = item.modelVersion
-            ? `📱 <b>Версія:</b> ${escapeTelegramHtml(item.modelVersion)}\n`
-            : '';
-          const similarModelLine = item.similarModelMatch
-            ? '🔎 <b>Схожий варіант за моделлю (за вашим дозволом)</b>\n'
-            : '';
-          const safeLocation = escapeTelegramHtml(item.locationDate);
-          const safeItemLink = escapeTelegramHtml(item.link);
-          const notificationPrice = item.isNegotiable
-            ? (item.priceText || 'Договірна') + (item.priceText ? ' · договірна' : '')
-            : (item.priceText || 'Ціну не вказано');
-          const capacityWarning = item.capacityUnverified
-            ? '\n⚠️ <b>' + escapeTelegramHtml(item.capacityVerificationNote || 'Обсяг пам’яті не підтверджено — перевірте характеристики в оголошенні.') + '</b>\n'
-            : '';
-          const notificationText =
-            (hasPriceDrop
-              ? `📉 <b>Ціна знизилася для оголошення у фільтрі “${safeFilterQuery}”</b>\n\n<b>Було:</b> ${previousPrice.toLocaleString('uk-UA')} грн → <b>Стало:</b> ${Number(item.price).toLocaleString('uk-UA')} грн\n\n`
-              : `🔎 <b>Знайдено нове оголошення для фільтра “${safeFilterQuery}”</b>\n\n`) +
-            `📌 <b>${safeTitle}</b>\n` +
-            modelVersionLine +
-            similarModelLine +
-            `💰 <b>Ціна:</b> ${escapeTelegramHtml(notificationPrice)} ${isCheap ? `🔥 (Нижче медіани на ${discount}%)` : ''}\n` +
-            (isCheap && bargain.reliable
-              ? `📊 <b>Медіана аналогів:</b> ${Number(bargain.referencePrice).toLocaleString('uk-UA')} грн • ${bargain.comparableCount} оголошень\n`
-              : '') +
-            `📍 <b>Місто:</b> ${safeLocation}\n\n` +
-            capacityWarning +
-            `<a href="${safeItemLink}">👉 Відкрити оголошення на OLX</a>`;
-
-          const keyboard = {
-            inline_keyboard: [
-              [{ text: '👉 Переглянути оголошення', url: item.link }],
-              [{ text: '🚀 Відкрити ЗНАЙДЕНО', web_app: { url: SERVER_URL } }]
-            ]
-          };
-
-          const photoToSend = item.rawImgUrl
-            ? `${SERVER_URL}/api/proxy-image?url=${encodeURIComponent(item.rawImgUrl)}`
-            : `${SERVER_URL}/assets/no-photo.png`;
+          const notification = buildListingNotification({
+            item,
+            filter,
+            hasPriceDrop,
+            previousPrice,
+            isCheap,
+            discount,
+            bargain,
+            serverUrl: SERVER_URL
+          });
           
-          const delivered = await sendTelegramPhoto(filter.user_id, photoToSend, notificationText, keyboard);
+          const delivered = await sendTelegramPhoto(filter.user_id, notification.photoToSend, notification.text, notification.keyboard);
           if (delivered) {
             // Mark as seen only after Telegram confirms delivery; otherwise the
             // next scan can retry instead of silently losing the notification.
