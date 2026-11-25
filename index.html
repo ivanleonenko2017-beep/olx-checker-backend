@@ -2072,12 +2072,11 @@
           throw new Error('legal_document_invalid');
         }
         title.innerText = documentData.title + ' · ЧЕРНЕТКА';
-        content.innerText = 'ЧЕРНЕТКА — документ не затверджено. Перед комерційним запуском потрібні реквізити власника та юридична перевірка.\\n\\n' +
-          documentData.content.join('\\n');
+        content.innerText = 'ЧЕРНЕТКА — документ не затверджено. Перед комерційним запуском потрібні реквізити власника та юридична перевірка.\n\n' +
+          documentData.content.join('\n');
       } catch (_) {
         content.innerText = 'Не вдалося завантажити документ. Спробуйте пізніше.';
       }
-    }
     }
     function closeLegalModal() {
       document.getElementById('legalModal').classList.add('hidden');
