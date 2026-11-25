@@ -1645,7 +1645,7 @@ function renderLegalDocumentPage(type) {
   return [
     '<!doctype html>',
     '<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
-    '<meta name="color-scheme" content="dark"><title>' + escapeLegalHtml(document.title) + '</title>',
+    '<meta name="color-scheme" content="dark"><meta name="robots" content="noindex,nofollow"><title>' + escapeLegalHtml(document.title) + '</title>',
     '<style>body{margin:0;background:#0b0d0c;color:#eef2ef;font:16px/1.65 system-ui,sans-serif}main{max-width:760px;margin:0 auto;padding:32px 20px}h1{font-size:24px} .draft{display:inline-block;padding:5px 10px;border:1px solid #b7791f;border-radius:8px;color:#f6c66b;font-weight:700;font-size:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}</style>',
     '</head><body><main><span class="draft">ЧЕРНЕТКА · НЕ ЗАТВЕРДЖЕНО</span><h1>' + escapeLegalHtml(document.title) + '</h1><pre>' + content + '</pre></main></body></html>'
   ].join('');
