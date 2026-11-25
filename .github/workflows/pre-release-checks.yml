@@ -2,7 +2,7 @@ name: Pre-release checks
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "pre-release/**"]
   push:
     branches: [main, "pre-release/**", "feature/smart-search-v1"]
 
