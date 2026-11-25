@@ -2759,9 +2759,10 @@ async function runBackgroundWorker() {
         // history in small chunks instead of loading every historical row for a
         // filter into memory; this preserves seen/price-drop behavior for every
         // currently parsed listing while keeping each response bounded.
-        const parsedItemLinks = [...new Set(parsedItems
-          .map(item => String(item.link || '').trim().replace(/\/$/, ''))
-          .filter(Boolean))];
+        const parsedItemLinks = [...new Set(parsedItems.flatMap(item => {
+          const link = String(item.link || '').trim().replace(/\/$/, '');
+          return link ? [link, link + '/'] : [];
+        }))];
         const knownLinks = new Set();
         let knownError = null;
         for (let offset = 0; offset < parsedItemLinks.length; offset += 50) {
@@ -2888,9 +2889,10 @@ async function runBackgroundWorker() {
         // knownLinks was loaded above so older seen listings can be checked for price drops.
         // Price history is only needed for the current bounded notification set.
         // Fetch at most 50 candidate links per response instead of the full history.
-        const priceItemLinks = [...new Set(items
-          .map(item => String(item.link || '').trim().replace(/\/$/, ''))
-          .filter(Boolean))];
+        const priceItemLinks = [...new Set(items.flatMap(item => {
+          const link = String(item.link || '').trim().replace(/\/$/, '');
+          return link ? [link, link + '/'] : [];
+        }))];
         const previousPrices = new Map();
         let priceRowsError = null;
         for (let offset = 0; offset < priceItemLinks.length; offset += 50) {
