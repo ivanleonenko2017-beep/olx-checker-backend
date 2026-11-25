@@ -64,6 +64,25 @@ async function main() {
     assert.equal(body.ok, true);
     assert.equal(body.backgroundWorkerEnabled, false);
     assert.equal(body.webhookRegistrationEnabled, false);
+
+    for (const [route, expectedText] of [
+      ['/terms', 'Публічна оферта'],
+      ['/privacy', 'Політика конфіденційності']
+    ]) {
+      const pageResponse = await fetch(`http://127.0.0.1:${port}${route}`, { signal: AbortSignal.timeout(1500) });
+      assert.equal(pageResponse.status, 200, `${route} did not return 200`);
+      const pageText = await pageResponse.text();
+      assert.ok(pageText.includes('ЧЕРНЕТКА'), `${route} must visibly identify the document as draft`);
+      assert.ok(pageText.includes(expectedText), `${route} returned the wrong document`);
+    }
+
+    for (const route of ['/api/legal/terms', '/api/legal/privacy']) {
+      const legalResponse = await fetch(`http://127.0.0.1:${port}${route}`, { signal: AbortSignal.timeout(1500) });
+      assert.equal(legalResponse.status, 200, `${route} did not return 200`);
+      const legalBody = await legalResponse.json();
+      assert.equal(legalBody.status, 'draft');
+      assert.ok(Array.isArray(legalBody.content) && legalBody.content.length > 0);
+    }
     process.stdout.write('Production boot smoke passed: relative modules resolve and /health returns 200.\n');
   } finally {
     child.kill('SIGTERM');
