@@ -46,3 +46,13 @@ test('all inline JavaScript blocks parse and listing images are lazy-loaded', ()
   assert.ok(images.length > 0);
   assert.ok(images.every(image => /loading="lazy"/.test(image) && /decoding="async"/.test(image)));
 });
+
+
+test('Mini App uses accessible SVG icons and 44px icon-only targets instead of emoji glyphs', () => {
+  assert.match(html, /function iconSvg\\(name, size = 16\\)/);
+  assert.doesNotMatch(html, /[\\u{1F300}-\\u{1FAFF}\\u2600-\\u27BF\\u23F8]/u);
+  assert.match(html, /aria-label="Закрити"/);
+  assert.match(html, /aria-label="Видалити фільтр"/);
+  assert.match(html, /\\.icon-button \\{ width:44px!important; height:44px!important; min-width:44px!important; min-height:44px!important;/);
+  assert.match(html, /aria-hidden="true" focusable="false"/);
+});
