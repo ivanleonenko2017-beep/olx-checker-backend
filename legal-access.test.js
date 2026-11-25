@@ -39,5 +39,5 @@ test('legal pages do not assert an unverified owner identity or invented registr
   const legalText = legalDocuments.privacy.content.join(' ');
   assert.match(legalText, /Володілець персональних даних і відповідальна особа: не підтверджені/);
   assert.match(legalText, /власник має внести перевірене повне ім’я або найменування/i);
-  assert.match(html, /@esqide/);
+  assert.match(legalText, /@esqide/);
 });
