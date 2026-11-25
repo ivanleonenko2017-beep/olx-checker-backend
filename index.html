@@ -2206,12 +2206,12 @@
         });
         const data = await res.json();
         if (data.success) {
-          statusDiv.innerText = `✅ Розсилку завершено! Доставлено: ${data.sentCount} з ${data.total}. Не доставлено: ${data.failedCount}${data.failureSamples?.length ? ' • Перевірте журнал сервера для деталей' : ''}`;
+          statusDiv.innerHTML = iconSvg('check', 16) + ` Розсилку завершено! Доставлено: ${Number(data.sentCount || 0)} з ${Number(data.total || 0)}. Не доставлено: ${Number(data.failedCount || 0)}${data.failureSamples?.length ? ' • Перевірте журнал сервера для деталей' : ''}`;
         } else {
-          statusDiv.innerText = `❌ Помилка розсилки: ${data.error}`;
+          statusDiv.innerHTML = iconSvg('alert', 16) + ` Помилка розсилки: ${escapeHtml(data.error || 'невідома помилка')}`;
         }
       } catch (e) {
-        statusDiv.innerText = '❌ Помилка з\'єднання з сервером';
+        statusDiv.innerHTML = iconSvg('alert', 16) + ' Помилка з\'єднання з сервером';
       } finally {
         btn.disabled = false;
       }
@@ -2227,12 +2227,12 @@
         });
         const data = await res.json();
         if (data.success) {
-          document.getElementById('diagSupabase').innerText = data.supabaseOk ? '✅ OK' : '❌ Помилка';
-          document.getElementById('diagBot').innerText = data.botOk ? '✅ OK' : '❌ Помилка';
+          document.getElementById('diagSupabase').innerHTML = iconSvg(data.supabaseOk ? 'check' : 'alert', 14) + (data.supabaseOk ? ' OK' : ' Помилка');
+          document.getElementById('diagBot').innerHTML = iconSvg(data.botOk ? 'check' : 'alert', 14) + (data.botOk ? ' OK' : ' Помилка');
         }
       } catch (e) {
-        document.getElementById('diagSupabase').innerText = '❌ Помилка API';
-        document.getElementById('diagBot').innerText = '❌ Помилка API';
+        document.getElementById('diagSupabase').innerHTML = iconSvg('alert', 14) + ' Помилка API';
+        document.getElementById('diagBot').innerHTML = iconSvg('alert', 14) + ' Помилка API';
       }
     }
 
