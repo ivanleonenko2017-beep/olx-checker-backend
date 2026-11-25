@@ -16,6 +16,7 @@ const { encryptTelegramUpdate, decryptTelegramUpdate, isValidTelegramWebhookSecr
 const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateCriteriaFunnel, summarizeCriteria, isAuthorizedAdmin } = require('./search-telemetry');
 const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, translateTelegramWebhookError } = require('./admin-command-utils');
 const { buildListingNotification } = require('./telegram-notification');
+const { getBoundedTtlCacheValue, setBoundedTtlCacheValue } = require('./bounded-ttl-cache');
 
 const app = express();
 app.disable('x-powered-by');
@@ -836,9 +837,8 @@ async function fetchListingDescription(inputUrl) {
       !(/\/d\//.test(parsedUrl.pathname) || /\/obyavlenie\//.test(parsedUrl.pathname))) return '';
 
   const key = parsedUrl.toString().replace(/\/$/, '');
-  const cached = listingDescriptionCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.description;
-  if (cached) listingDescriptionCache.delete(key);
+  const cachedDescription = getBoundedTtlCacheValue(listingDescriptionCache, key);
+  if (cachedDescription !== undefined) return cachedDescription;
 
   try {
     // Detail pages are fetched only when the search card lacks a required spec.
@@ -922,17 +922,13 @@ async function fetchListingDescription(inputUrl) {
     const result = [description, searchContext].filter(Boolean).join('. ').replace(/\s+/g, ' ').slice(0, 5000);
 
     if (result && !/verify you are human|access denied|robot check|підтверд.{0,20}що ви людина/i.test(result)) {
-      listingDescriptionCache.set(key, { description: result, expiresAt: Date.now() + 10 * 60 * 1000 });
-      if (listingDescriptionCache.size > 500) {
-        const oldestKey = listingDescriptionCache.keys().next().value;
-        listingDescriptionCache.delete(oldestKey);
-      }
+      setBoundedTtlCacheValue(listingDescriptionCache, key, result, 10 * 60 * 1000, 500);
       return result;
     }
   } catch (error) {
     console.warn('[Smart Search details] Не вдалося отримати контекст оголошення:', error.response?.status || error.code || 'request-failed');
   }
-  listingDescriptionCache.set(key, { description: '', expiresAt: Date.now() + 60 * 1000 });
+  setBoundedTtlCacheValue(listingDescriptionCache, key, '', 60 * 1000, 500);
   return '';
 }
 
