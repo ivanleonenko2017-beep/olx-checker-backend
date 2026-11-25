@@ -31,3 +31,12 @@ test('production parser caps OLX response size and drops raw HTML before Cheerio
   assert.match(source, /stripOlxNonContentMarkup\(html\)/);
   assert.match(source, /html = ''/);
 });
+
+test('empty-page parser guard uses a marker captured before the raw HTML is released', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /const pageHasSearchMarkers = \/search\|listing\|og:\/i\.test\(html\)/);
+  assert.match(source, /!pageHasSearchMarkers/);
+  assert.doesNotMatch(source, /test\(pageText\)/);
+});
