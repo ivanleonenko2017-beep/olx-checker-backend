@@ -2755,17 +2755,33 @@ async function runBackgroundWorker() {
         // search card. Fetch full descriptions only after date and city filtering below,
         // avoiding up to 30 unnecessary sequential network requests for unrelated ads.
         const needsFullDescription = criteria.includeTerms.length > 0 || criteria.anyTerms.length > 0 || criteria.excludeTerms.length > 0;
-        // Load seen links before date filtering. New notifications should be limited
-        // to today's listings, but previously seen listings must remain eligible for
-        // price-drop checks even after OLX stops labeling them as "today".
-        const { data: knownRows, error: knownError } = await supabase
-          .from('seen_ads').select('ad_link').eq('filter_id', filter.id);
+        // Only links in this bounded search result can affect this cycle. Query
+        // history in small chunks instead of loading every historical row for a
+        // filter into memory; this preserves seen/price-drop behavior for every
+        // currently parsed listing while keeping each response bounded.
+        const parsedItemLinks = [...new Set(parsedItems.flatMap(item => {
+          const link = String(item.link || '').trim().replace(/\/$/, '');
+          return link ? [link, link + '/'] : [];
+        }))];
+        const knownLinks = new Set();
+        let knownError = null;
+        for (let offset = 0; offset < parsedItemLinks.length; offset += 50) {
+          const linkBatch = parsedItemLinks.slice(offset, offset + 50);
+          const { data: knownRows, error } = await supabase
+            .from('seen_ads').select('ad_link')
+            .eq('filter_id', filter.id)
+            .in('ad_link', linkBatch);
+          if (error) { knownError = error; break; }
+          for (const row of (knownRows || [])) {
+            const link = String(row.ad_link || '').trim().replace(/\/$/, '');
+            if (link) knownLinks.add(link);
+          }
+        }
         if (knownError) {
           workerCycleHadError = true;
           console.error(`Не вдалося перевірити seen_ads для фільтра ${filter.id}:`, knownError.message);
           continue;
         }
-        const knownLinks = new Set((knownRows || []).map(row => String(row.ad_link || '').trim().replace(/\/$/, '')));
         const dateEligibleItems = parsedItems.filter(item => {
           const link = String(item.link || '').trim().replace(/\/$/, '');
           return isPublishedToday(item.locationDate) || knownLinks.has(link);
@@ -2871,17 +2887,30 @@ async function runBackgroundWorker() {
         if (!items || items.length === 0) continue;
 
         // knownLinks was loaded above so older seen listings can be checked for price drops.
-        const { data: priceRows, error: priceRowsError } = await supabase
-          .from('ad_price_history').select('ad_link,last_price').eq('filter_id', String(filter.id));
-        // Price history is an optional feature until its Supabase migration is applied.
-        // Never disable new-listing notifications just because that table is not ready.
-        if (priceRowsError) {
-          console.warn(`[Price History] Історія цін недоступна для фільтра ${filter.id}; звичайні сповіщення продовжуються:`, priceRowsError.message);
+        // Price history is only needed for the current bounded notification set.
+        // Fetch at most 50 candidate links per response instead of the full history.
+        const priceItemLinks = [...new Set(items.flatMap(item => {
+          const link = String(item.link || '').trim().replace(/\/$/, '');
+          return link ? [link, link + '/'] : [];
+        }))];
+        const previousPrices = new Map();
+        let priceRowsError = null;
+        for (let offset = 0; offset < priceItemLinks.length; offset += 50) {
+          const linkBatch = priceItemLinks.slice(offset, offset + 50);
+          const { data: priceRows, error } = await supabase
+            .from('ad_price_history').select('ad_link,last_price')
+            .eq('filter_id', String(filter.id))
+            .in('ad_link', linkBatch);
+          if (error) { priceRowsError = error; break; }
+          for (const row of (priceRows || [])) {
+            previousPrices.set(
+              String(row.ad_link || '').trim().replace(/\/$/, ''),
+              Number(row.last_price)
+            );
+          }
         }
-        const previousPrices = new Map((priceRows || []).map(row => [
-          String(row.ad_link || '').trim().replace(/\/$/, ''),
-          Number(row.last_price)
-        ]));
+        // Price history is optional. Never disable new-listing notifications
+        // just because that table is not ready.
         for (const item of items) {
           const canonicalLink = String(item.link || '').trim().replace(/\/$/, '');
           if (!canonicalLink) continue;
