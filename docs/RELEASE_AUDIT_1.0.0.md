@@ -921,3 +921,79 @@ Production branch: `pre-release/1.0.0-hardening`.
 ### Рішення щодо release candidate
 
 Тег `v1.0.0-rc.1` та GitHub Release не створюються: критерії повного release candidate не виконані. Технічний обмежений тест 5–20 довірених користувачів можливий лише після ручного Telegram acceptance власником; публічний комерційний запуск — ні.
+
+
+---
+
+## Продовження аудиту — 25.11.2026
+
+### GitHub / Render
+
+| PR | Merge commit | Render deploy |
+|---|---|---|
+| #73 browser dark theme | `50aa9140072dadea24b84b3ad295abd05e33c69b` | `dep-dbsej195efls73enaheg` |
+| #74 testnotify + boot smoke | `b43e802e964201b0358d372df27737cda72dd697` | `dep-dc3dlm0473hc73fl5log` |
+| #75 bounded description cache | `7a4275614ecc1177d2615e128a05a36284b27639` | `dep-dc3dnt0jo6nc73ekhkog` |
+| #76 parser memory reduction | `2d6c94bf87306815bfb7cef44ce0229612a4c0ef` | `dep-dc3dp5dbedkc73dkfmig` |
+| #77 empty-page guard | `9662dc7b9294c9f48c3e41634e3c98386b8130e5` | `dep-dc3dro0ae00c738oja90` |
+| #78 memory status/alert + caps | `8ad55196d3f74e4b08551ebfb2894b4548a1ce4c` | `dep-dc3e070ae00c738opml0` |
+| #81 private /testnotify | `9f26ee5c71067a9182c888554c1ce273d8ad1c94` | `dep-dc3e1qrm8hqs73c0mdk0` |
+| #83 memory CI probe | `d68fe8da55546f7215ad358d86d7cd35d60dee5a` | `dep-dc3e2o4s728c738vdahg` |
+| #84 bounded worker history | `cdb5cb44eac8a2f81ab5b3ef46e1da0cc220389d` | `dep-dc3e4sss728c738vh0dg` |
+| #85 shared legal draft pages | `f8339d3495746c2732b014bb9a5e3bc8ea4bc255` | `dep-dc3e950jo6nc73elfo00` |
+
+Current Live: deploy `dep-dc3e950jo6nc73elfo00`, commit `f8339d3495746c2732b014bb9a5e3bc8ea4bc255`. Rollback point before next change: same deploy. Previous healthy point: `dep-dc3e4sss728c738vh0dg`, commit `cdb5cb44eac8a2f81ab5b3ef46e1da0cc220389d`. No force-push or branch protection bypass.
+
+### Пам'ять
+
+- 19.11.2026 12:32:30 UTC: `FATAL ERROR: Ineffective mark-compacts near heap limit — JavaScript heap out of memory`; exit code 134 о 12:32:32; server_available о 12:32:42.
+- Render memory limit: 536 870 900 bytes (512 MiB). Найближчий попередній семпл 12:25 — 244 781 060 bytes (233,4 MiB); дискретні семпли не показують точний пік перед OOM.
+- Після оптимізацій семпли 25.11 доходили до 222 531 580 bytes (212,2 MiB, 41,4% від ліміту). Це короткий період після deploy, не 24–72h soak test. Нових heap OOM у доступних логах після 19.11 не знайдено; за останні 24h немає server_failed event.
+- /status: RSS, heapUsed, uptime поточного процесу. Історичний restart counter не зберігається.
+- Alert: RSS ≥410 MiB, перевірка щохвилини, throttle 30 хвилин.
+- Описовий кеш: максимум 500, TTL 10 хвилин (positive) / 1 хвилина (negative).
+- Rate-limit maps: максимум 1 000 ключів; stale entries очищуються під час наступних звернень.
+- Telegram in-flight Set: максимум 5; durable queue poll — до 5 записів кожні 15 секунд.
+- OLX result response ≤5 MiB; detail response ≤2 MiB; сторінки обробляються послідовно, максимум 3 сторінки на пошук. HTML/axios body не утримуються після створення Cheerio DOM; parsed results ≤600.
+- seen_ads та ad_price_history читаються тільки для поточних посилань партіями до 50; нормалізовані worker Set/Map ≤600. Тимчасові parser Sets/arrays живуть лише в межах одного запиту; filter list/per-user map — один worker cycle.
+- Memory CI: fixture 3 565 158 bytes; 50 послідовних parse-path проходів; 10 jobs, concurrency 2; peak/final heap 24,5/9,9 MiB; heap growth після GC 0,5 MiB; peak/final RSS 83,1/69,1 MiB; RSS growth 4,1 MiB. Пороги 48 MiB heap / 96 MiB RSS. Це HTML cleanup + Cheerio harness, не live OLX HTTP stress.
+- Висновок: зараз метрики нижче 512 MiB, але довготривала стабільність під production-навантаженням ще не доведена. Render plan не змінювався.
+
+### CI / secrets
+
+- Обов'язковий workflow: `npm ci --ignore-scripts`, `node --check server.js`, `npm test`, `npm run test:boot`, `npm run test:memory`.
+- Boot smoke: production mode, порожні Supabase URL/key та Telegram token, worker/webhook registration вимкнені; перевіряє require resolution і /health=200.
+- 22 pre-existing test files перевірені на Supabase client, production URLs/keys і зовнішні HTTP calls — збігів не знайдено; PR #85 додав окремий legal-documents test без БД/мережі. Основні source/workflow files пройшли pattern scan на типові секрети без збігів. `.env.example` відсутній.
+- Повний Git-history scan і GitHub Secret Scanning alerts недоступні через підключення; історію не можна назвати перевіреною. Якщо GitHub знайде secret alert — власнику ротувати секрет, історію не переписувати.
+- PR #20 попереджає, що тестова інфраструктура використовує ту саму production Supabase БД: не вливати й не запускати. PR #19 — платіжні/Monobank зміни: не вливати без окремого аудиту.
+
+### Supabase — read-only
+
+Проєкт `ovblyievvseuugpbmxjy`: ACTIVE_HEALTHY, PostgreSQL 17.11, eu-central-1; 10 migration rows. Цього проходу міграцій не застосовано.
+
+| Таблиця | Рядків |
+|---|---:|
+| users | 5 |
+| filters | 1 |
+| seen_ads | 5 |
+| referrals | 0 |
+| referral_logs | 0 |
+| payments | 0 |
+| telegram_webhook_updates | 0 |
+
+Попередній snapshot: users=5, filters=0; зараз users=5, filters=1 — ознак втрати користувачів не виявлено. 14 public tables мають RLS enabled; policies=0. anon/authenticated мають schema USAGE, але не мають SELECT на users/filters/payments. Backup/PITR metadata недоступна через read-only tools; власнику перевірити в Supabase Dashboard.
+
+### Фази 2–9
+
+| Фаза | Підтверджено | Не підтверджено |
+|---|---|---|
+| 2. Пошук | Fixtures: iPhone 14 Chernihiv 10 phones (2 base/6 Pro/2 Pro Max), 17 accessories excluded; Pro Max only; без Pro; чохол; phone with included accessory; iPhone 15 256 Chernihiv 5 Pro/Pro Max, 4 memory confirmed, 1 unconfirmed. | Live OLX manual acceptance після останніх змін. |
+| 3. Доставка | Filter lease, unique seen_ads index, 403 marks telegram_blocked_at and worker skips blocked user. | Integration tests new→1/repeat→0/two workers→1/403→inactive. |
+| 4. Тарифи | Unit tests Trial 4 days, Free/Trial/Premium limits, production Premium bypass fail-closed. | Повний Telegram end-to-end тарифний тест. |
+| 5. Реферали | SQL guards self-referral, repeat attribution, unique invitee, deterministic row locks. | Ізольований DB concurrency test referral race. |
+| 6. Адмінка | Server-side admin checks; /testnotify admin-only, 1/min, private chat, no DB write; /status memory fields. | Власник має вручну виконати /status та /testnotify. |
+| 7. UI | Dark standalone theme, focus styles, загальні 44px CSS targets. | Скриншоти 360/390/430; WCAG AA не виміряний; skeleton loading не підтверджений; emoji icons лишилися; деякі вузькі icon buttons треба перевірити. |
+| 8. Legal/payments | /terms, /privacy та Documents tab використовують спільне draft source. | Реквізити, юрист, реальний Stars payment/refund. |
+| 9. Release/ops | Boot smoke, memory probe, rollback та soft-launch docs. | 24–72h моніторинг, backup/PITR, ручний Telegram acceptance, production Vercel check. |
+
+Тег `v1.0.0-rc.1` та GitHub Release не створюються: критерії RC не виконані. Обмежений тест 5–20 користувачів — лише після ручного Telegram acceptance; публічний комерційний запуск — ні.
