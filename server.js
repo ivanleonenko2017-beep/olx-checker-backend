@@ -17,6 +17,7 @@ const { sanitizeSearchUrl, hashUserId, safeText, compactRejectedCards, evaluateC
 const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, translateTelegramWebhookError } = require('./admin-command-utils');
 const { buildListingNotification } = require('./telegram-notification');
 const { getBoundedTtlCacheValue, setBoundedTtlCacheValue } = require('./bounded-ttl-cache');
+const { stripOlxNonContentMarkup } = require('./olx-html-utils');
 
 const app = express();
 app.disable('x-powered-by');
@@ -489,6 +490,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
       headers: HEADERS,
       timeout: 15000,
       maxRedirects: 5,
+      maxContentLength: 5 * 1024 * 1024,
       validateStatus: status => status >= 200 && status < 400
     });
     console.log(`[OLX search] Upstream response: status=${response.status}, htmlBytes=${Buffer.byteLength(String(response.data || ''), 'utf8')}`);
@@ -498,7 +500,9 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
   }
   const loadDurationMs = Date.now() - pageStartedAt;
   const parseStartedAt = Date.now();
-  const html = String(response.data || '');
+  let html = String(response.data || '');
+  response.data = null;
+  const responseBytes = Buffer.byteLength(html, 'utf8');
   const pageMeta = {
     requestedUrl: sanitizeSearchUrl(targetUrl),
     finalUrl: sanitizeSearchUrl(response.request?.res?.responseUrl || response.request?._redirectable?._currentUrl || targetUrl),
@@ -507,11 +511,10 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     loadDurationMs,
     parseDurationMs: null,
     memoryRssBytes: process.memoryUsage().rss,
-    responseBytes: Buffer.byteLength(html, 'utf8'),
+    responseBytes,
     declaredTotal: null,
     antiBotDetected: false
   };
-  const pageText = html.toLowerCase();
   // OLX may mention captcha libraries in scripts even on normal result pages.
   // Only classify explicit HTTP blocks or clear human-verification interstitial text.
   const blockPatterns = [
@@ -524,7 +527,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     /ваш доступ тимчасово обмежено/i,
     /доступ до сайту обмежено/i
   ];
-  const matchedBlockPattern = blockPatterns.find(pattern => pattern.test(pageText));
+  const matchedBlockPattern = blockPatterns.find(pattern => pattern.test(html));
   if (response.status === 403 || response.status === 429 || matchedBlockPattern) {
     pageMeta.antiBotDetected = true;
     console.warn(`[OLX search] Block detected: status=${response.status}, reason=${response.status === 403 || response.status === 429 ? 'http-status' : matchedBlockPattern?.source || 'unknown'}`);
@@ -533,7 +536,10 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
     throw error;
   }
 
-  const $ = cheerio.load(html);
+  let parseHtml = stripOlxNonContentMarkup(html);
+  html = '';
+  const $ = cheerio.load(parseHtml);
+  parseHtml = '';
   const rawItems = [];
   const adLinksFound = $('a[href*="/d/"], a[href*="/obyavlenie/"]').length;
 
