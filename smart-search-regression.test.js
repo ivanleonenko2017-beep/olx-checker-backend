@@ -204,7 +204,8 @@ test('similar model classification is explicitly opt-in for background notificat
   assert.match(source, /const alertExactItems = exactItems\.filter\(item => !isRepairPartsListing/);
   assert.match(source, /const alertSimilarItems = similarItems\.filter\(item => !isRepairPartsListing/);
   assert.match(source, /similarModelMatched: similarItems\.length/);
-  assert.match(source, /Схожий варіант за моделлю \(за вашим дозволом\)/);
+  const notificationSource = fs.readFileSync(path.join(__dirname, 'telegram-notification.js'), 'utf8');
+  assert.match(notificationSource, /Схожий варіант за моделлю \(за вашим дозволом\)/);
   assert.match(source, /criteria\.notifySimilarModels = submittedCriteria\.notifySimilarModels === true/);
 });
 
