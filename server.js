@@ -501,6 +501,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
   const loadDurationMs = Date.now() - pageStartedAt;
   const parseStartedAt = Date.now();
   let html = String(response.data || '');
+  const pageHasSearchMarkers = /search|listing|og:/i.test(html);
   response.data = null;
   const responseBytes = Buffer.byteLength(html, 'utf8');
   const pageMeta = {
@@ -719,7 +720,7 @@ async function parseOlxPage(targetUrl, minPrice, maxPrice, query = '') {
   // No market-price estimate is returned with fewer than five listings.
   const averagePrice = prices.length >= 5 ? median(prices) : 0;
 
-  if (!rawItems.length && /olx/i.test(targetUrl) && !/search|listing|og:/.test(pageText)) {
+  if (!rawItems.length && /olx/i.test(targetUrl) && !pageHasSearchMarkers) {
     const error = new Error('Не вдалося розпізнати сторінку OLX. Сайт міг змінити розмітку або тимчасово обмежити доступ.');
     error.code = 'OLX_PARSE_EMPTY';
     throw error;
