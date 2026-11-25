@@ -56,3 +56,13 @@ test('webhook queue migration is additive and inaccessible to anon/authenticated
   assert.match(migration, /grant all on table public\.telegram_webhook_updates to service_role/i);
   assert.doesNotMatch(migration, /drop table|truncate|delete from|alter table .* drop/i);
 });
+
+test('Telegram webhook in-flight update set has a hard concurrency cap', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /MAX_TELEGRAM_WEBHOOK_IN_FLIGHT = 5/);
+  const start = source.indexOf('async function processTelegramWebhookQueueRow');
+  const end = source.indexOf('async function drainTelegramWebhookQueue', start);
+  const processor = source.slice(start, end);
+  assert.ok(processor.indexOf('telegramWebhookInFlight.size >= MAX_TELEGRAM_WEBHOOK_IN_FLIGHT') <
+    processor.indexOf('telegramWebhookInFlight.add(updateId)'));
+});
