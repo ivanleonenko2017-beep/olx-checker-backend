@@ -2052,7 +2052,7 @@ async function processTelegramUpdate(update) {
   
       if (command === 'testnotify') {
         if (!consumeRateLimit(testNotificationRateLimits, adminKey)) {
-          await sendTelegramMessage(chatId, 'Команда /testnotify доступна не частіше одного разу на хвилину.');
+          await sendTelegramMessage(senderId, 'Команда /testnotify доступна не частіше одного разу на хвилину.');
           return;
         }
         const sampleItem = {
@@ -2073,10 +2073,10 @@ async function processTelegramUpdate(update) {
           testMode: true
         });
         const delivered = await sendTelegramPhoto(
-          chatId, notification.photoToSend, notification.text, notification.keyboard
+          senderId, notification.photoToSend, notification.text, notification.keyboard
         );
         if (!delivered) {
-          await sendTelegramMessage(chatId, 'Не вдалося надіслати тестове сповіщення. Перевірте доступність Telegram та спробуйте пізніше.');
+          await sendTelegramMessage(senderId, 'Не вдалося надіслати тестове сповіщення. Перевірте доступність Telegram та спробуйте пізніше.');
         }
         return;
       }
