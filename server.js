@@ -18,6 +18,7 @@ const { consumeRateLimit, isAdminCommandAuthorized, formatDiagnosticMessages, fo
 const { buildListingNotification } = require('./telegram-notification');
 const { getBoundedTtlCacheValue, setBoundedTtlCacheValue } = require('./bounded-ttl-cache');
 const { stripOlxNonContentMarkup } = require('./olx-html-utils');
+const { LEGAL_DOCUMENTS } = require('./legal-documents');
 
 const app = express();
 app.disable('x-powered-by');
@@ -1632,34 +1633,38 @@ app.delete('/api/filters/:id', userAuthMiddleware, async (req, res) => {
   }
 });
 
+function escapeLegalHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[character]);
+}
+
+function renderLegalDocumentPage(type) {
+  const document = LEGAL_DOCUMENTS[type];
+  const content = escapeLegalHtml(document.content.join('\n'));
+  return [
+    '<!doctype html>',
+    '<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
+    '<meta name="color-scheme" content="dark"><title>' + escapeLegalHtml(document.title) + '</title>',
+    '<style>body{margin:0;background:#0b0d0c;color:#eef2ef;font:16px/1.65 system-ui,sans-serif}main{max-width:760px;margin:0 auto;padding:32px 20px}h1{font-size:24px} .draft{display:inline-block;padding:5px 10px;border:1px solid #b7791f;border-radius:8px;color:#f6c66b;font-weight:700;font-size:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}</style>',
+    '</head><body><main><span class="draft">ЧЕРНЕТКА · НЕ ЗАТВЕРДЖЕНО</span><h1>' + escapeLegalHtml(document.title) + '</h1><pre>' + content + '</pre></main></body></html>'
+  ].join('');
+}
+
 app.get('/api/legal/terms', (_req, res) => {
-  res.json({
-    title: 'Умови використання ЗНАЙДЕНО — передрелізна редакція',
-    status: 'draft',
-    paymentsEnabled: process.env.PAYMENTS_ENABLED === 'true',
-    content: [
-      'ЗНАЙДЕНО надає програмні функції пошуку й моніторингу оголошень, збереження фільтрів та сповіщень.',
-      'Пробний період триває 4 дні; після нього доступний безкоштовний тариф з обмеженнями. Цифровий Premium у Mini App має ціну 180 ⭐ за 30 днів, одноразово, без автоматичного поновлення; придбання можливе лише коли платежі ввімкнені та Telegram успішно створює рахунок.',
-      'Реальні платежі вважаються доступними лише якщо платіжний сценарій увімкнений сервером і рахунок успішно створюється. Premium активується лише після підтвердження успішного платежу.',
-      'Сервіс не гарантує виявлення кожного оголошення, точність даних сторонніх джерел або безперервну доступність.',
-      'Ця передрелізна редакція не замінює остаточну публічну оферту. До комерційного запуску потрібно опублікувати перевірені реквізити постачальника, умови поновлення/скасування, повернення та права споживача.',
-      'Питання: @esqide.'
-    ].join('\n')
-  });
+  res.json({ ...LEGAL_DOCUMENTS.terms, paymentsEnabled: process.env.PAYMENTS_ENABLED === 'true' });
 });
 
 app.get('/api/legal/privacy', (_req, res) => {
-  res.json({
-    title: 'Політика конфіденційності ЗНАЙДЕНО — передрелізна редакція',
-    status: 'draft',
-    content: [
-      'Залежно від використаних функцій сервіс обробляє Telegram ID та доступні поля профілю, пошукові запити й фільтри, тариф і строк доступу, ідентифікатори платіжних транзакцій Telegram Stars, ідентифікатори оголошень для запобігання дублюванню, звернення до підтримки та технічні журнали.',
-      'Дані використовуються для входу, збереження фільтрів, пошуку, сповіщень, обліку підписки/платежів, підтримки, діагностики та захисту від зловживань.',
-      'Інфраструктура поточної версії включає Telegram, Render і Supabase. Доступність сторонніх платіжних методів залежить від фактично підключеної інтеграції. Сервіс не призначений для збору даних платіжної картки.',
-      'Строки зберігання, порядок видалення, правові підстави, реквізити володільця даних і міжнародні передавання мають бути підтверджені до публічного запуску. Не вважайте цей передрелізний текст остаточною політикою.',
-      'Запити щодо даних: @esqide.'
-    ].join('\n')
-  });
+  res.json(LEGAL_DOCUMENTS.privacy);
+});
+
+app.get('/terms', (_req, res) => {
+  res.set('Cache-Control', 'no-store').type('html').send(renderLegalDocumentPage('terms'));
+});
+
+app.get('/privacy', (_req, res) => {
+  res.set('Cache-Control', 'no-store').type('html').send(renderLegalDocumentPage('privacy'));
 });
 
 const searchDiagnosticRateLimits = new Map();
