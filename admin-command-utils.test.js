@@ -7,7 +7,7 @@ const path = require('node:path');
 const { deriveAccess } = require('./access-policy');
 const {
   consumeRateLimit, isAdminCommandAuthorized, splitTelegramMessages,
-  formatDiagnosticMessages, formatStatusMessage, formatSubscriptionMessage, formatReferralMessage, maskTelegramId, translateTelegramWebhookError
+  formatDiagnosticMessages, formatStatusMessage, formatMemoryAlert, formatSubscriptionMessage, formatReferralMessage, maskTelegramId, translateTelegramWebhookError
 } = require('./admin-command-utils');
 
 test('admin command authorization rejects missing and ordinary users', async () => {
